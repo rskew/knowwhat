@@ -1,0 +1,49 @@
+svg {
+    display: block 1px #ccc;
+    top: 0%;
+    left: 0%;
+    width: 100%;
+    height: 100%;
+}
+
+circle {
+    fill: #000;
+}
+
+circle.node.focused {
+    fill: #fc0;
+}
+
+circle.node.focused.insert {
+    fill: #909;
+}
+
+.nodeBorder {
+    fill: #0001;
+    opacity: 0.0;
+}
+
+.nodeBorder.grouped {
+    fill: #9cf5;
+    opacity: 1.0;
+}
+
+.halo {
+    fill: #fff;
+    stroke: #0001;
+    stroke-width: 25;
+    opacity: 0.0;
+}
+
+.halo.ready {
+    stroke: #fb07;
+}
+
+line {
+    stroke: #666;
+    stroke-width: 1.5px;
+}
+
+line.drawing {
+    pointer-events: none;
+}
