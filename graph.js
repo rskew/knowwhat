@@ -1,6 +1,5 @@
-//// Requires kd-tree-javascript
-// https://github.com/ubilabs/kd-tree-javascript
-//// Requires utils.js
+const Utils = require('./utils.js');
+const { kdTree, BinaryHeap } = require('./kdTree.js');
 
 function GraphNodeBody(text, x, y, parents, children) {
     this.text = text;
@@ -11,14 +10,13 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.subgraph = {};
 }
 
-function Graph(graphNodes, focusedNodeId, highlightedNodes) {
+module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph = this;
     graph.nodes = graphNodes;
     graph.focusedNodeId = focusedNodeId;
     graph.highlightedNodes = highlightedNodes;
     // https://github.com/ubilabs/kd-tree-javascript
-    // euclideanDistance2D from utils.js
-    graph.kdTree = new kdTree(Object.values(graphNodes), euclideanDistance2D, ["x", "y"]);
+    graph.kdTree = new kdTree(Object.values(graphNodes), Utils.euclideanDistance2D, ["x", "y"]);
 
     ///////////////////////////////////
     //////// Constants
@@ -52,10 +50,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.createNode = function (x, y, parentIds, childIds) {
-        // uuidv4 from utils.js
-        newNodeId = uuidv4();
+        newNodeId = Utils.uuidv4();
         graph.nodes[newNodeId] = new GraphNodeBody(
-            "", x, y, parentIds, childIds);
+            " ", x, y, parentIds, childIds);
         parentIds.map(parentId => graph.nodes[parentId].children.push(newNodeId));
         childIds.map(childId => graph.nodes[childId].parents.push(newNodeId));
         graph.focusedNodeId = newNodeId;
@@ -72,7 +69,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         } else {
             // Give the focus to the first node in the list, because what else are
             // you going to do
-            nextFocusId = arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
+            nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
         }
         graph.kdTree.remove(focusedNode);
         graph.deleteNode(graph.focusedNodeId);
@@ -85,13 +82,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         // node objects
         for (i=0; i<graph.nodes[nodeToRemoveId].parents.length; i++) {
             parentId = graph.nodes[nodeToRemoveId].parents[i];
-            arrayRemoveElementInPlace(
+            Utils.arrayRemoveElementInPlace(
                 nodeToRemoveId,
                 graph.nodes[parentId].children);
         }
         for (i=0; i<graph.nodes[nodeToRemoveId].children.length; i++) {
             childId = graph.nodes[nodeToRemoveId].children[i];
-            arrayRemoveElementInPlace(
+            Utils.arrayRemoveElementInPlace(
                 nodeToRemoveId,
                 graph.nodes[childId].parents);
         }
@@ -105,16 +102,16 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         for (i=0; i<nodeIdSet.length; i++) {
             for (j=0; j<graph.nodes[nodeIdSet[i]].parents.length; j++) {
                 parentId = graph.nodes[nodeIdSet[i]].parents[j];
-                if (!isIn(parentId, nodeIdSet)) {
-                    arrayRemoveElementInPlace(
+                if (!Utils.isIn(parentId, nodeIdSet)) {
+                    Utils.arrayRemoveElementInPlace(
                         nodeIdSet[i],
                         graph.nodes[parentId].children);
                 }
             }
             for (j=0; j<graph.nodes[nodeIdSet[i]].children.length; j++) {
                 childId = graph.nodes[nodeIdSet[i]].children[j];
-                if (!isIn(childId, nodeIdSet)) {
-                    arrayRemoveElementInPlace(
+                if (!Utils.isIn(childId, nodeIdSet)) {
+                    Utils.arrayRemoveElementInPlace(
                         nodeIdSet[i],
                         graph.nodes[childId].parents);
                 }
@@ -128,13 +125,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             subgraphNodeId = Object.keys(subgraph)[i];
             for (j=0; j<subgraph[subgraphNodeId].parents.length; j++) {
                 parentId = subgraph[subgraphNodeId].parents[j];
-                if (!isIn(parentId, Object.keys(subgraph))) {
+                if (!Utils.isIn(parentId, Object.keys(subgraph))) {
                     graph.nodes[parentId].children.push(subgraphNodeId);
                 }
             }
             for (j=0; j<subgraph[subgraphNodeId].children.length; j++) {
                 childId = subgraph[subgraphNodeId].children[j];
-                if (!isIn(childId, Object.keys(subgraph))) {
+                if (!Utils.isIn(childId, Object.keys(subgraph))) {
                     graph.nodes[childId].parents.push(subgraphNodeId);
                 }
             }
@@ -143,17 +140,17 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.getParentsOfSet = function (nodeIdSet) {
-        return concatenate(
+        return Utils.concatenate(
             graph.highlightedNodes.map(
                 nodeId => graph.nodes[nodeId].parents.filter(
-                    parentId => !isIn(parentId, graph.highlightedNodes))));
+                    parentId => !Utils.isIn(parentId, graph.highlightedNodes))));
     };
 
     graph.getChildrenOfSet = function (nodeIdSet) {
-        return concatenate(
+        return Utils.concatenate(
             graph.highlightedNodes.map(
                 nodeId => graph.nodes[nodeId].children.filter(
-                    childId => !isIn(childId, graph.highlightedNodes))));
+                    childId => !Utils.isIn(childId, graph.highlightedNodes))));
     };
 
     graph.extractNodeSet = function (nodeIdSet) {
@@ -171,8 +168,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         // position of the group node to all subgraph nodes.
         // The initial position of the group node is known to be the
         // centroid of the subgraph nodes.
-        // centroidOfPoints defined in utils.js
-        centroid = centroidOfPoints(Object.values(subgraph));
+        centroid = Utils.centroidOfPoints(Object.values(subgraph));
         groupMovementVector = {
             "x": newCenterPoint.x - centroid.x,
             "y": newCenterPoint.y - centroid.y,
@@ -199,8 +195,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.groupHighlighted = function () {
         parents = graph.getParentsOfSet(graph.highlightedNodes);
         children = graph.getChildrenOfSet(graph.highlightedNodes);
-        // centroidOfPoints defined in utils.js
-        centroid = centroidOfPoints(
+        centroid = Utils.centroidOfPoints(
             graph.highlightedNodes.map(nodeId => graph.nodes[nodeId]));
 
         graph.createNode(centroid.x, centroid.y, parents, children);
@@ -238,7 +233,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.expandGroupInFocus = function () {
-        if (!isEmptyObject(graph.nodes[graph.focusedNodeId].subgraph)) {
+        if (!Utils.isEmptyObject(graph.nodes[graph.focusedNodeId].subgraph)) {
             graph.expandGroup(graph.focusedNodeId);
         }
     };
@@ -339,20 +334,20 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.highlightFocusNode = function () {
-        if (!isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!Utils.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
             graph.highlightedNodes.push(graph.focusedNodeId);
         }
         return graph;
     };
 
     graph.unHighlightFocusNode = function () {
-        graph.highlightedNodes = arrayWithoutElement(
+        graph.highlightedNodes = Utils.arrayWithoutElement(
             graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.toggleHighlightFocusNode = function () {
-        if (!isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!Utils.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
             graph.highlightFocusNode();
         } else {
             graph.unHighlightFocusNode();
@@ -376,7 +371,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         children = graph.nodes[parentId].children;
         if (children.length > 0) {
             rightmostChildId = children[
-                argMax(children.map(childId => graph.nodes[childId].x))];
+                Utils.argMax(children.map(childId => graph.nodes[childId].x))];
             return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
         } else {
             return graph.getNewPositionBelowOf(graph.nodes[parentId]);

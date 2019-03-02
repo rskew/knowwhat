@@ -1,4 +1,7 @@
-function GraphUI(graph) {
+var d3 = require("./d3.js");
+var Utils = require("./utils");
+
+module.exports = function GraphUI(graph) {
     ///////////////////////////////////
     //////// Explicit state
 
@@ -91,7 +94,7 @@ function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -102,7 +105,7 @@ function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -134,8 +137,8 @@ function GraphUI(graph) {
                 enter => enter.append("foreignObject")
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 20)
-                    .attr("height", d => d[1].text.split("\n").length * 20)
+                    .attr("width", d => d[1].text.length * 12 + 12)
+                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .append('xhtml:div')
                     .append('div')
                     .attr("contentEditable", true)
@@ -147,8 +150,8 @@ function GraphUI(graph) {
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 12)
-                    .attr("height", d => d[1].text.split("\n").length * 20)
+                    .attr("width", d => d[1].text.length * 20 + 20)
+                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
                             d[0] == graphUI.graph.focusedNodeId) {
@@ -196,37 +199,37 @@ function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => Utils.isIn(d[0], graphUI.graph.highlightedNodes))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
                           .on("end", dragended_node))
                     .on("mouseover", function (d) {
                         mouseState.mouseoverNode = d[0];
-                        fadeIn(this, fadeSpeed);
+                        Utils.fadeIn(this, fadeSpeed);
                     })
                     .on("mouseout", function (d) {
                         mouseState.mouseoverNode = undefined;
                         if (!d3.select(this).classed("grouped")) {
-                            fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, fadeSpeed);
                         }
                     })
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
-                            fadeIn(this, fadeSpeed);
+                            Utils.fadeIn(this, fadeSpeed);
                         } else {
-                            fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, fadeSpeed);
                         }
                     }),
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => Utils.isIn(d[0], graphUI.graph.highlightedNodes))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
-                            fadeIn(this, fadeSpeed);
+                            Utils.fadeIn(this, fadeSpeed);
                         } else {
-                            fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, fadeSpeed);
                         }
                     })
             );
@@ -249,15 +252,15 @@ function GraphUI(graph) {
                         d3.select(this).classed("ready", false);
                         if (mouseState.clickedNode != undefined &&
                             mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
+                            !Utils.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
                             d3.select(this).classed("ready", true);
                         }
-                        fadeIn(this, fadeSpeed);
+                        Utils.fadeIn(this, fadeSpeed);
                         graphUI.update();
                     })
                     .on("mouseout", function () {
                         mouseState.mouseoverNode = undefined;
-                        fadeOut(this, fadeSpeed);
+                        Utils.fadeOut(this, fadeSpeed);
                     })
                     .call(d3.drag()
                           .on("start", dragstarted_halo)
@@ -288,7 +291,6 @@ function GraphUI(graph) {
             mouseState.clickedNode = undefined;
             graphUI.update();
         });
-        //console.log(graphUI.graph.kdTree.nearest(graphUI.graph.nodes[graphUI.graph.focusedNode], 3, 200));
     };
 
     // Ctrl+click to create new unconnected node
@@ -349,8 +351,7 @@ function GraphUI(graph) {
         if (mouseState.clickedNode != undefined &&
             mouseState.clickedNode != mouseState.mouseoverNode &&
             mouseState.mouseoverNode != undefined &&
-            // isIn defined in utils.js
-            !isIn(mouseState.mouseoverNode, graphUI.graph.nodes[mouseState.clickedNode].children)) {
+            !Utils.isIn(mouseState.mouseoverNode, graphUI.graph.nodes[mouseState.clickedNode].children)) {
             // Create edge from 'mouseState.clickedNode' to 'graphUI'
             graphUI.graph.nodes[mouseState.clickedNode].children.push(mouseState.mouseoverNode);
             graphUI.graph.nodes[mouseState.mouseoverNode].parents.push(mouseState.clickedNode);
@@ -368,7 +369,7 @@ function GraphUI(graph) {
         //console.log(d3.event);
         //console.log(d3.event.key);
         if (d3.event.key in keybindings[graphUI.keyboardMode]) {
-            if (isIn(d3.event.key, preventDefaultKeys)) {
+            if (Utils.isIn(d3.event.key, preventDefaultKeys)) {
                 d3.event.preventDefault();
                 d3.event.stopPropagation();
             }
@@ -424,4 +425,4 @@ function GraphUI(graph) {
             " ": graph => graph.toggleGroupExpand,
         }
     };
-}
+};

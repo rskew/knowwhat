@@ -1,6 +1,5 @@
-//// Requires graph.js
-//// Requires graphUI.js
-//// Requires utils.js
+const Graph = require('./graph.js');
+const GraphUI = require('./graphUI.js');
 
 ///////////////////////////////////
 //////// Data
@@ -42,8 +41,8 @@ var graphNodes = {
     },
 };
 
-var graph = new Graph(graphNodes, "a", ["b"]),
-    graphUI = new GraphUI(graph);
+var graph = new Graph(graphNodes, "a", ["b"]);
+var graphUI = new GraphUI(graph);
 
 
 ///////////////////////////////////

@@ -1,75 +1,86 @@
-//// Requires d3.js
-// https://github.com/d3/d3
+var d3 = require("./d3.js");
 
-function isIn(element, array) {
+var isIn = function(element, array) {
     return array.indexOf(element) > -1;
 }
+exports.isIn = isIn;
 
-function fadeIn(element, speed) {
+var fadeIn = function(element, speed) {
     d3.select(element)
         .transition()
         .duration(speed)
         .style("opacity", 1.0);
 }
+exports.fadeIn = fadeIn;
 
-function fadeOut(element, speed) {
+var fadeOut = function(element, speed) {
     d3.select(element)
         .transition()
         .duration(speed)
         .style("opacity", 0.0);
 }
+exports.fadeOut = fadeOut;
 
 // https://gist.github.com/engelen/fbce4476c9e68c52ff7e5c2da5c24a28
-function argMax(array) {
+var argMax = function(array) {
     return array.map((x, i) => [x, i]).reduce((r, a) => (a[0] > r[0] ? a : r))[1];
 }
+exports.argMax = argMax;
 
 // https://gist.github.com/jed/982883
-function uuidv4() {
+var uuidv4 = function() {
     asdf = function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)};
     return asdf();
 }
+exports.uuidv4 = uuidv4;
 
-// https://stackoverflow.com/questions/4467539/javascript-modulo-gives-a-negative-result-for-negative-numbers
-function mod(n, m) {
-    return ((n % m) + m) % m;
-}
+//// https://stackoverflow.com/questions/4467539/javascript-modulo-gives-a-negative-result-for-negative-numbers
+//var mod = function(n, m) {
+//    return ((n % m) + m) % m;
+//}
+//exports.mod = mod;
 
-function arrayWithoutElement(element, array) {
+var arrayWithoutElement = function(element, array) {
     arrayCopy = array.slice();
     if (isIn(element, array)) {
         arrayCopy.splice(array.indexOf(element), 1);
     }
     return arrayCopy;
 }
+exports.arrayWithoutElement = arrayWithoutElement;
 
-function arrayRemoveElementInPlace(element, array) {
+var arrayRemoveElementInPlace = function(element, array) {
     if (isIn(element, array)) {
         array.splice(array.indexOf(element), 1);
     }
 }
+exports.arrayRemoveElementInPlace = arrayRemoveElementInPlace;
 
-function euclideanDistance2D(a, b) {
+var euclideanDistance2D = function(a, b) {
     return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
 }
+exports.euclideanDistance2D = euclideanDistance2D;
 
-function concatenate(listOfLists) {
+var concatenate = function(listOfLists) {
     return [].concat.apply([], listOfLists);
 }
+exports.concatenate = concatenate;
 
-function foldl(foldFunc, initialVal, list) {
+var foldl = function(foldFunc, initialVal, arr) {
     accumulator = initialVal;
-    for(i=0; i<list.length; i++) {
-        accumulator = foldFunc(accumulator, list[i]);
+    for(i=0; i<arr.length; i++) {
+        accumulator = foldFunc(accumulator, arr[i]);
     }
     return accumulator;
 }
+exports.foldl = foldl;
 
-function isEmptyObject(someObject) {
+var isEmptyObject = function(someObject) {
     return Object.keys(someObject).length == 0;
 }
+exports.isEmptyObject = isEmptyObject;
 
-function centroidOfPoints(points) {
+var centroidOfPoints = function(points) {
     return {
         "x": (1 / points.length) *
             foldl((a,b)=>a+b, 0, points.map(point => point.x)),
@@ -77,3 +88,4 @@ function centroidOfPoints(points) {
             foldl((a,b)=>a+b, 0, points.map(point => point.y)),
     };
 };
+exports.centroidOfPoints = centroidOfPoints;
