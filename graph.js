@@ -72,6 +72,9 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
         }
         graph.kdTree.remove(focusedNode);
+        for(i=0; i<Object.values(focusedNode.subgraph).length; i++) {
+            graph.kdTree.remove(Object.values(focusedNode.subgraph)[i]);
+        }
         graph.deleteNode(graph.focusedNodeId);
         graph.focusedNodeId = nextFocusId;
         return graph;
