@@ -89,3 +89,15 @@ var centroidOfPoints = function(points) {
     };
 };
 exports.centroidOfPoints = centroidOfPoints;
+
+var distanceToClosestPoint2D = function(point, neighbors) {
+    minDist = 99999999;
+    for (i=0; i<neighbors.length; i++) {
+        thisDist = euclideanDistance2D(point, neighbors[i]);
+        if (thisDist < minDist) {
+            minDist = thisDist;
+        }
+    }
+    return thisDist;
+}
+exports.distanceToClosestPoint2D = distanceToClosestPoint2D;

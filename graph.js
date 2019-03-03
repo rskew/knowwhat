@@ -1,5 +1,4 @@
 const Utils = require('./utils.js');
-const { kdTree, BinaryHeap } = require('./kdTree.js');
 
 function GraphNodeBody(text, x, y, parents, children) {
     this.text = text;
@@ -15,8 +14,6 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.nodes = graphNodes;
     graph.focusedNodeId = focusedNodeId;
     graph.highlightedNodes = highlightedNodes;
-    // https://github.com/ubilabs/kd-tree-javascript
-    graph.kdTree = new kdTree(Object.values(graphNodes), Utils.euclideanDistance2D, ["x", "y"]);
 
     ///////////////////////////////////
     //////// Constants
@@ -56,7 +53,6 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         parentIds.map(parentId => graph.nodes[parentId].children.push(newNodeId));
         childIds.map(childId => graph.nodes[childId].parents.push(newNodeId));
         graph.focusedNodeId = newNodeId;
-        graph.kdTree.insert(graph.nodes[newNodeId]);
         return graph;
     };
 
@@ -71,9 +67,7 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             // you going to do
             nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
         }
-        graph.kdTree.remove(focusedNode);
         for(i=0; i<Object.values(focusedNode.subgraph).length; i++) {
-            graph.kdTree.remove(Object.values(focusedNode.subgraph)[i]);
         }
         graph.deleteNode(graph.focusedNodeId);
         graph.focusedNodeId = nextFocusId;
@@ -362,10 +356,8 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     //////// Node Spatial Arrangement
 
     graph.moveNode = function (nodeId, newPos) {
-        graph.kdTree.remove(graph.nodes[nodeId]);
         graph.nodes[nodeId].x = newPos.x;
         graph.nodes[nodeId].y = newPos.y;
-        graph.kdTree.insert(graph.nodes[nodeId]);
         return graph;
     };
 
@@ -385,7 +377,7 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.getNewPositionRightOf = function (nodeObject) {
         attempt = {"x": nodeObject.x + newNodeOffset.x,
                    "y": nodeObject.y};
-        if (graph.kdTree.nearest(attempt, 1)[0][1] < newNodeClearenceThreshold) {
+        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
             return graph.getNewPositionRightOf(attempt);
         } else {
             return attempt;
@@ -395,7 +387,7 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.getNewPositionBelowOf = function (nodeObject) {
         attempt = {"x": nodeObject.x,
                    "y": nodeObject.y + newNodeOffset.y};
-        if (graph.kdTree.nearest(attempt, 1)[0][1] < newNodeClearenceThreshold) {
+        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
             return graph.getNewPositionRightOf(attempt);
         } else {
             return attempt;
