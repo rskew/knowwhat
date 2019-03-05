@@ -1,5 +1,6 @@
 var d3 = require("./d3.js");
 var Utils = require("./utils");
+var Set = require("./set.js");
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -84,7 +85,7 @@ module.exports = function GraphUI(graph) {
             .join("g")
             .classed("nodeLinks", true)
             .selectAll("line")
-            .data(d => d[1].parents.map(
+            .data(d => Set.toArray(d[1].parents).map(
                 parentId => ({"source": parentId, "target": d[0]})),
                   edge => edge)
             .join(
@@ -94,7 +95,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -105,7 +106,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -146,7 +147,8 @@ module.exports = function GraphUI(graph) {
                     .on("keydown", function (d) {
                         d[1].text = this.innerText;
                         graphUI.update();
-                    }),
+                    })
+                    .lower(),
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
@@ -160,6 +162,7 @@ module.exports = function GraphUI(graph) {
                             d3.select(this).select("div").select("div").node().blur();
                         }
                     })
+                    .lower()
             );
 
     };
@@ -172,7 +175,7 @@ module.exports = function GraphUI(graph) {
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("r", d => {
-                        if (Object.keys(d[1].subgraph).length > 0) {
+                        if (Object.keys(d[1].subgraph.nodes).length > 0) {
                             return 12;
                         } else {
                             return 7;
@@ -199,7 +202,7 @@ module.exports = function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Utils.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
@@ -224,7 +227,7 @@ module.exports = function GraphUI(graph) {
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Utils.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
                             Utils.fadeIn(this, fadeSpeed);
@@ -252,7 +255,7 @@ module.exports = function GraphUI(graph) {
                         d3.select(this).classed("ready", false);
                         if (mouseState.clickedNode != undefined &&
                             mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !Utils.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
+                            !Set.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
                             d3.select(this).classed("ready", true);
                         }
                         Utils.fadeIn(this, fadeSpeed);
@@ -296,7 +299,7 @@ module.exports = function GraphUI(graph) {
     // Ctrl+click to create new unconnected node
     graphUI.svg.on("mousedown", function () {
         if (d3.event.ctrlKey) {
-            graphUI.graph.createNode(d3.event.x, d3.event.y, [], []);
+            graphUI.graph.createNode(d3.event.x, d3.event.y, Set.empty(), Set.empty());
             graphUI.update();
         }
     });
@@ -350,11 +353,8 @@ module.exports = function GraphUI(graph) {
     function create_edge_if_possible() {
         if (mouseState.clickedNode != undefined &&
             mouseState.clickedNode != mouseState.mouseoverNode &&
-            mouseState.mouseoverNode != undefined &&
-            !Utils.isIn(mouseState.mouseoverNode, graphUI.graph.nodes[mouseState.clickedNode].children)) {
-            // Create edge from 'mouseState.clickedNode' to 'graphUI'
-            graphUI.graph.nodes[mouseState.clickedNode].children.push(mouseState.mouseoverNode);
-            graphUI.graph.nodes[mouseState.mouseoverNode].parents.push(mouseState.clickedNode);
+            mouseState.mouseoverNode != undefined) {
+            graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
             graphUI.graph.focusedNode = mouseState.mouseoverNode;
             mouseState.clickedNode = undefined;
             mouseState.mouseoverNode = undefined;

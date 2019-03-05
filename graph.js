@@ -1,4 +1,5 @@
 const Utils = require('./utils.js');
+const Set = require('./set.js');
 
 function GraphNodeBody(text, x, y, parents, children) {
     this.text = text;
@@ -6,11 +7,11 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.y = y;
     this.parents = parents;
     this.children = children;
-    this.subgraph = {};
+    this.subgraph = new Graph({}, "", Set.empty());
 }
 
-module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
-    graph = this;
+function Graph(graphNodes, focusedNodeId, highlightedNodes) {
+    var graph = this;
     graph.nodes = graphNodes;
     graph.focusedNodeId = focusedNodeId;
     graph.highlightedNodes = highlightedNodes;
@@ -31,7 +32,7 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return [].concat.apply(
             [], [].concat.apply(
                 [], Object.entries(graph.nodes).map(
-                    node => node[1].children.map(
+                    node => Set.toArray(node[1].children).map(
                         target => ({"source": graph.nodes[node[0]],
                                     "target": graph.nodes[target]})))));
     };
@@ -39,9 +40,9 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.newNodeBelowFocus = function () {
         if (graph.focusedNodeId != null) {
             newNodePos = graph.getNewNodePosition(graph.focusedNodeId);
-            graph.createNode(newNodePos.x, newNodePos.y, [graph.focusedNodeId], []);
+            graph.createNode(newNodePos.x, newNodePos.y, Set.singleton(graph.focusedNodeId), Set.empty());
         } else {
-            graph.createNode(initNodePos.x, initNodePos.y, [], []);
+            graph.createNode(initNodePos.x, initNodePos.y, Set.empty(), Set.empty());
         }
         return graph;
     };
@@ -50,24 +51,24 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         newNodeId = Utils.uuidv4();
         graph.nodes[newNodeId] = new GraphNodeBody(
             " ", x, y, parentIds, childIds);
-        parentIds.map(parentId => graph.nodes[parentId].children.push(newNodeId));
-        childIds.map(childId => graph.nodes[childId].parents.push(newNodeId));
+        Set.map(parentIds, parentId => Set.insertInPlace(newNodeId, graph.nodes[parentId].children));
+        Set.map(childIds, childId => Set.insertInPlace(newNodeId, graph.nodes[childId].parents));
         graph.focusedNodeId = newNodeId;
-        return graph;
+        return newNodeId;
     };
 
     graph.removeFocusedNode = function () {
         focusedNode = graph.nodes[graph.focusedNodeId];
-        if (focusedNode.parents.length > 0) {
-            nextFocusId = focusedNode.parents[0];
-        } else if (focusedNode.children.length > 0) {
-            nextFocusId = focusedNode.children[0];
+        if (Set.cardinality(focusedNode.parents) > 0) {
+            nextFocusId = Set.lookupIndex(0, focusedNode.parents);
+        } else if (Set.cardinality(focusedNode.children) > 0) {
+            nextFocusId = Set.lookupIndex(0, focusedNode.children);
         } else {
             // Give the focus to the first node in the list, because what else are
             // you going to do
             nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
         }
-        for(i=0; i<Object.values(focusedNode.subgraph).length; i++) {
+        for(i=0; i<Object.values(focusedNode.subgraph.nodes).length; i++) {
         }
         graph.deleteNode(graph.focusedNodeId);
         graph.focusedNodeId = nextFocusId;
@@ -77,16 +78,15 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.deleteNode = function (nodeToRemoveId) {
         // Remove edges to/from the node in other
         // node objects
-        for (i=0; i<graph.nodes[nodeToRemoveId].parents.length; i++) {
-            parentId = graph.nodes[nodeToRemoveId].parents[i];
-            Utils.arrayRemoveElementInPlace(
+        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
+            parentId = setLookupIndex(i, graph.nodes[nodeToRemoveId].parents);
+            Set.deleteInPlace(
                 nodeToRemoveId,
                 graph.nodes[parentId].children);
         }
-        for (i=0; i<graph.nodes[nodeToRemoveId].children.length; i++) {
-            childId = graph.nodes[nodeToRemoveId].children[i];
-            Utils.arrayRemoveElementInPlace(
-                nodeToRemoveId,
+        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
+            childId = Set.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
+            Set.deleteInPlace(nodeToRemoveId,
                 graph.nodes[childId].parents);
         }
         // Remove the node
@@ -94,22 +94,29 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return graph;
     };
 
+    graph.addEdge = function(sourceId, targetId) {
+        Set.insertInPlace(targetId, graph.nodes[sourceId].children);
+        Set.insertInPlace(sourceId, graph.nodes[targetId].parents);
+        return graph;
+    };
+
 
     graph.removeEdgesToFromSet = function (nodeIdSet) {
-        for (i=0; i<nodeIdSet.length; i++) {
-            for (j=0; j<graph.nodes[nodeIdSet[i]].parents.length; j++) {
-                parentId = graph.nodes[nodeIdSet[i]].parents[j];
-                if (!Utils.isIn(parentId, nodeIdSet)) {
-                    Utils.arrayRemoveElementInPlace(
-                        nodeIdSet[i],
+        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
+            currentNodeId = Set.lookupIndex(i, nodeIdSet);
+            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].parents); j++) {
+                parentId = Set.lookupIndex(j, graph.nodes[currentNodeId].parents);
+                if (!Set.isIn(parentId, nodeIdSet)) {
+                    Set.deleteInPlace(
+                        currentNodeId,
                         graph.nodes[parentId].children);
                 }
             }
-            for (j=0; j<graph.nodes[nodeIdSet[i]].children.length; j++) {
-                childId = graph.nodes[nodeIdSet[i]].children[j];
-                if (!Utils.isIn(childId, nodeIdSet)) {
-                    Utils.arrayRemoveElementInPlace(
-                        nodeIdSet[i],
+            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].children); j++) {
+                childId = Set.lookupIndex(j, graph.nodes[currentNodeId].children);
+                if (!Set.isIn(childId, nodeIdSet)) {
+                    Set.deleteInPlace(
+                        currentNodeId,
                         graph.nodes[childId].parents);
                 }
             }
@@ -118,44 +125,47 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.restoreEdgesToFromSubgraph = function (subgraph) {
-        for (i=0; i<Object.keys(subgraph).length; i++) {
-            subgraphNodeId = Object.keys(subgraph)[i];
-            for (j=0; j<subgraph[subgraphNodeId].parents.length; j++) {
-                parentId = subgraph[subgraphNodeId].parents[j];
-                if (!Utils.isIn(parentId, Object.keys(subgraph))) {
-                    graph.nodes[parentId].children.push(subgraphNodeId);
-                }
+        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraph.nodes)[i];
+            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
+                parentId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
+                graph.addEdge(parentId, subgraphNodeId);
             }
-            for (j=0; j<subgraph[subgraphNodeId].children.length; j++) {
-                childId = subgraph[subgraphNodeId].children[j];
-                if (!Utils.isIn(childId, Object.keys(subgraph))) {
-                    graph.nodes[childId].parents.push(subgraphNodeId);
-                }
+            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
+                childId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
+                graph.addEdge(subgraphNodeId, childId);
             }
         }
         return graph;
     };
 
     graph.getParentsOfSet = function (nodeIdSet) {
-        return Utils.concatenate(
-            graph.highlightedNodes.map(
-                nodeId => graph.nodes[nodeId].parents.filter(
-                    parentId => !Utils.isIn(parentId, graph.highlightedNodes))));
+        return Set.subtract(
+            Set.unionMap(
+                nodeIdSet,
+                nodeId => graph.nodes[nodeId].parents
+            ),
+            nodeIdSet
+        );
     };
 
     graph.getChildrenOfSet = function (nodeIdSet) {
-        return Utils.concatenate(
-            graph.highlightedNodes.map(
-                nodeId => graph.nodes[nodeId].children.filter(
-                    childId => !Utils.isIn(childId, graph.highlightedNodes))));
+        return Set.subtract(
+            Set.unionMap(
+                nodeIdSet,
+                nodeId => graph.nodes[nodeId].children
+            ),
+            nodeIdSet
+        );
     };
 
-    graph.extractNodeSet = function (nodeIdSet) {
+    graph.extractNodes = function (nodeIdSet) {
         extractedNodes = {};
-        for (i=0; i<nodeIdSet.length; i++) {
-            extractedNodes[nodeIdSet[i]] =
-                graph.nodes[nodeIdSet[i]];
-            delete graph.nodes[nodeIdSet[i]];
+        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
+            nodeId = Set.lookupIndex(i, nodeIdSet);
+            extractedNodes[nodeId] =
+                graph.nodes[nodeId];
+            delete graph.nodes[nodeId];
         }
         return extractedNodes;
     };
@@ -165,21 +175,21 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         // position of the group node to all subgraph nodes.
         // The initial position of the group node is known to be the
         // centroid of the subgraph nodes.
-        centroid = Utils.centroidOfPoints(Object.values(subgraph));
+        centroid = Utils.centroidOfPoints(Object.values(subgraph.nodes));
         groupMovementVector = {
             "x": newCenterPoint.x - centroid.x,
             "y": newCenterPoint.y - centroid.y,
         };
-        for (i=0; i<Object.keys(subgraph).length; i++) {
-            subgraphNodeId = Object.keys(subgraph)[i];
-            subgraph[subgraphNodeId].x += groupMovementVector.x;
-            subgraph[subgraphNodeId].y += groupMovementVector.y;
+        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraph.nodes)[i];
+            subgraph.nodes[subgraphNodeId].x += groupMovementVector.x;
+            subgraph.nodes[subgraphNodeId].y += groupMovementVector.y;
         }
 
         // Add nodes to graph top level
-        for (i=0; i<Object.keys(subgraph).length; i++) {
-            subgraphNodeId = Object.keys(subgraph)[i];
-            graph.nodes[subgraphNodeId] = subgraph[subgraphNodeId];
+        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraph.nodes)[i];
+            graph.nodes[subgraphNodeId] = subgraph.nodes[subgraphNodeId];
         }
 
         return graph;
@@ -193,35 +203,34 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         parents = graph.getParentsOfSet(graph.highlightedNodes);
         children = graph.getChildrenOfSet(graph.highlightedNodes);
         centroid = Utils.centroidOfPoints(
-            graph.highlightedNodes.map(nodeId => graph.nodes[nodeId]));
+            Set.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
 
-        graph.createNode(centroid.x, centroid.y, parents, children);
-        groupNodeId = graph.focusedNodeId;
+        groupNodeId = graph.createNode(centroid.x, centroid.y, parents, children);
 
         graph.removeEdgesToFromSet(graph.highlightedNodes);
 
         // Hide the highlighted nodes inside the group node
-        graph.nodes[groupNodeId].subgraph =
-            graph.extractNodeSet(graph.highlightedNodes);
+        graph.nodes[groupNodeId].subgraph.nodes =
+            graph.extractNodes(graph.highlightedNodes);
 
-        graph.highlightedNodes = [];
+        graph.highlightedNodes = Set.empty();
         graph.focusedNodeId = groupNodeId;
 
         return graph;
     };
 
     graph.expandGroup = function (groupNodeId) {
-        graph.removeEdgesToFromSet([groupNodeId]);
-        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraph);
-
         // TODO: Move other nodes out of the way!
         graph.restoreSubgraphNodes(graph.nodes[groupNodeId],
-                                  graph.nodes[groupNodeId].subgraph);
+                                   graph.nodes[groupNodeId].subgraph);
+
+        graph.removeEdgesToFromSet(Set.singleton(groupNodeId));
+        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraph);
 
         // Pick the first node of group to have the focus
-        graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraph)[0];
+        graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraph.nodes)[0];
         // Highlight expanded group
-        graph.highlightedNodes = Object.keys(graph.nodes[groupNodeId].subgraph);
+        graph.highlightedNodes = Set.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
 
         // Remove group node
         delete graph.nodes[groupNodeId];
@@ -236,7 +245,7 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.toggleGroupExpand = function () {
-        if (graph.highlightedNodes.length == 0) {
+        if (Set.cardinality(graph.highlightedNodes) == 0) {
             graph.expandGroupInFocus();
 
         } else {
@@ -250,16 +259,16 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
 
     graph.traverseUp = function () {
         parents = graph.nodes[graph.focusedNodeId].parents;
-        if (parents.length > 0) {
-            graph.focusedNodeId = parents[0];
+        if (Set.cardinality(parents) > 0) {
+            graph.focusedNodeId = Set.lookupIndex(0, parents);
         }
         return graph;
     };
 
     graph.traverseDown = function () {
         children = graph.nodes[graph.focusedNodeId].children;
-        if (children.length > 0) {
-            graph.focusedNodeId = children[0];
+        if (Set.cardinality(children) > 0) {
+            graph.focusedNodeId = Set.lookupIndex(children);
         }
         return graph;
     };
@@ -278,8 +287,8 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
 
     graph.traverseAddGroup = function (traversalFunc) {
         return function () {
-            focusedNodeIdId = graph.nodes[traverselFunc];
-            graph.highlightedNodes.push(focusedNodeIdId);
+            focusedNodeId = graph.nodes[traverselFunc];
+            Set.insertInPlace(focusedNodeId, graph.highlightedNodes);
             return graph;
         };
     };
@@ -291,15 +300,14 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
           is spatially coherent.
           */
         siblingsAndCoparentsIds = [];
-        graph.nodes[nodeId].parents.map(
-            parentId => graph.nodes[parentId].children.map(
+        Set.map(graph.nodes[nodeId].parents,
+            parentId => Set.map(graph.nodes[parentId].children,
                 siblingId => siblingsAndCoparentsIds.push(siblingId)
             )
         );
-        graph.nodes[nodeId].children.map(
-            childId => graph.nodes[childId].parents.map(
-                coparentId => siblingsAndCoparentsIds.push(coparentId)
-            )
+        Set.map(graph.nodes[nodeId].children,
+            childId => Set.map(graph.nodes[childId].parents,
+                coparentId => siblingsAndCoparentsIds.push(coparentId))
         );
         // Sort siblings by x index.
         // Store graph so that the sorting comparison function can access it,
@@ -326,25 +334,22 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.clearHighlights = function () {
-        graph.highlightedNodes = [];
+        graph.highlightedNodes = Set.empty();
         return graph;
     };
 
     graph.highlightFocusNode = function () {
-        if (!Utils.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
-            graph.highlightedNodes.push(graph.focusedNodeId);
-        }
+        Set.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.unHighlightFocusNode = function () {
-        graph.highlightedNodes = Utils.arrayWithoutElement(
-            graph.focusedNodeId, graph.highlightedNodes);
+        Set.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.toggleHighlightFocusNode = function () {
-        if (!Utils.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!Set.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
             graph.highlightFocusNode();
         } else {
             graph.unHighlightFocusNode();
@@ -364,9 +369,10 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.getNewNodePosition = function (parentId) {
         // Find right-most child
         children = graph.nodes[parentId].children;
-        if (children.length > 0) {
-            rightmostChildId = children[
-                Utils.argMax(children.map(childId => graph.nodes[childId].x))];
+        if (Set.cardinality(children) > 0) {
+            rightmostChildId = Set.lookupIndex(
+                Utils.argMax(Set.toArray(Set.map(children, childId => graph.nodes[childId].x))),
+                children);
             return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
         } else {
             return graph.getNewPositionBelowOf(graph.nodes[parentId]);
@@ -394,3 +400,4 @@ module.exports = function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         }
     };
 };
+module.exports = Graph;
