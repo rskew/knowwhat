@@ -18405,7 +18405,7 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.y = y;
     this.parents = parents;
     this.children = children;
-    this.subgraph = new Graph({}, "", StringSet.empty());
+    this.subgraphNodes = {};
 }
 
 function Graph(graphNodes, focusedNodeId, highlightedNodes) {
@@ -18466,7 +18466,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             // you going to do
             nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
         }
-        for(i=0; i<Object.values(focusedNode.subgraph.nodes).length; i++) {
+        for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
         }
         graph.deleteNode(graph.focusedNodeId);
         graph.focusedNodeId = nextFocusId;
@@ -18522,15 +18522,15 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return graph;
     };
 
-    graph.restoreEdgesToFromSubgraph = function (subgraph) {
-        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraph.nodes)[i];
-            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
-                parentId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
+    graph.restoreEdgesToFromSubgraph = function (subgraphNodes) {
+        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].parents);
                 graph.addEdge(parentId, subgraphNodeId);
             }
-            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
-                childId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
+            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].children);
                 graph.addEdge(subgraphNodeId, childId);
             }
         }
@@ -18572,26 +18572,26 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return extractedNodes;
     };
 
-    graph.restoreSubgraphNodes = function (newCenterPoint, subgraph) {
+    graph.restoreSubgraphNodes = function (newCenterPoint, subgraphNodes) {
         // Make up for motion of the group node by applying the change in
-        // position of the group node to all subgraph nodes.
+        // position of the group node to all subgraphNodes.
         // The initial position of the group node is known to be the
-        // centroid of the subgraph nodes.
-        centroid = Utils.centroidOfPoints(Object.values(subgraph.nodes));
+        // centroid of the subgraphNodes.
+        centroid = Utils.centroidOfPoints(Object.values(subgraphNodes));
         groupMovementVector = {
             "x": newCenterPoint.x - centroid.x,
             "y": newCenterPoint.y - centroid.y,
         };
-        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraph.nodes)[i];
-            subgraph.nodes[subgraphNodeId].x += groupMovementVector.x;
-            subgraph.nodes[subgraphNodeId].y += groupMovementVector.y;
+        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            subgraphNodes[subgraphNodeId].x += groupMovementVector.x;
+            subgraphNodes[subgraphNodeId].y += groupMovementVector.y;
         }
 
         // Add nodes to graph top level
-        for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraph.nodes)[i];
-            graph.nodes[subgraphNodeId] = subgraph.nodes[subgraphNodeId];
+        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            graph.nodes[subgraphNodeId] = subgraphNodes[subgraphNodeId];
         }
 
         return graph;
@@ -18612,7 +18612,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         graph.removeEdgesToFromStringSet(graph.highlightedNodes);
 
         // Hide the highlighted nodes inside the group node
-        graph.nodes[groupNodeId].subgraph.nodes =
+        graph.nodes[groupNodeId].subgraphNodes =
             graph.extractNodes(graph.highlightedNodes);
 
         graph.highlightedNodes = StringSet.empty();
@@ -18624,15 +18624,15 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.expandGroup = function (groupNodeId) {
         // TODO: Move other nodes out of the way!
         graph.restoreSubgraphNodes(graph.nodes[groupNodeId],
-                                   graph.nodes[groupNodeId].subgraph);
+                                   graph.nodes[groupNodeId].subgraphNodes);
 
         graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
-        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraph);
+        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraphNodes);
 
         // Pick the first node of group to have the focus
-        graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraph.nodes)[0];
+        graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
         // Highlight expanded group
-        graph.highlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
+        graph.highlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
 
         // Remove group node
         delete graph.nodes[groupNodeId];
@@ -18641,7 +18641,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.expandGroupInFocus = function () {
-        if (!Utils.isEmptyObject(graph.nodes[graph.focusedNodeId].subgraph)) {
+        if (!Utils.isEmptyObject(graph.nodes[graph.focusedNodeId].subgraphNodes)) {
             graph.expandGroup(graph.focusedNodeId);
         }
     };
@@ -18911,7 +18911,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -18922,7 +18922,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -18991,7 +18991,7 @@ module.exports = function GraphUI(graph) {
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("r", d => {
-                        if (Object.keys(d[1].subgraph.nodes).length > 0) {
+                        if (Object.keys(d[1].subgraphNodes).length > 0) {
                             return 12;
                         } else {
                             return 7;
@@ -32406,9 +32406,6 @@ var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/outpu
 var Point2D = function (x) {
     return x;
 };
-var Graph = function (x) {
-    return x;
-};
 var GraphNode = function (x) {
     return x;
 };
@@ -32497,6 +32494,9 @@ var UnHighlight = (function () {
     };
     return UnHighlight;
 })();
+var Graph = function (x) {
+    return x;
+};
 var singletonNodeIdSet = function (nodeId) {
     return Foreign_Object.singleton(nodeId)(Data_Unit.unit);
 };
@@ -32694,7 +32694,7 @@ var demo = (function () {
         y: 100.0,
         children: singletonNodeIdSet("thingo"),
         parents: emptyNodeIdSet,
-        subgraph: emptyGraph
+        subgraph: Foreign_Object.empty
     }));
     return Foreign_Object.fromFoldable(Data_Foldable.foldableArray)((function (v) {
         return Foreign_Object.toUnfoldable(Data_Unfoldable.unfoldableArray)(v.nodes);
@@ -32705,7 +32705,7 @@ var demo = (function () {
         y: 100.0,
         children: emptyNodeIdSet,
         parents: singletonNodeIdSet("goofus"),
-        subgraph: emptyGraph
+        subgraph: Foreign_Object.empty
     }))));
 })();
 module.exports = {
@@ -34041,7 +34041,7 @@ var graphNodes = {
         "children": StringSet.fromArray([
             "b", "c",
         ]),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "b": {
         "text": "TODO: woohoo!",
@@ -34049,7 +34049,7 @@ var graphNodes = {
         "y": 200,
         "parents": StringSet.fromArray(["a"]),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "c": {
         "text": "today I frink",
@@ -34057,7 +34057,7 @@ var graphNodes = {
         "y": 150,
         "parents": StringSet.fromArray(["a"]),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "d": {
         "text": "shopping list: ka-pow!",
@@ -34065,7 +34065,7 @@ var graphNodes = {
         "y": 250,
         "parents": StringSet.empty(),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
 };
 

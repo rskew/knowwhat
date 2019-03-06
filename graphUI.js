@@ -95,7 +95,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -106,7 +106,7 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
                     .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
                     .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraph.nodes)) {
+                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
@@ -175,7 +175,7 @@ module.exports = function GraphUI(graph) {
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("r", d => {
-                        if (Object.keys(d[1].subgraph.nodes).length > 0) {
+                        if (Object.keys(d[1].subgraphNodes).length > 0) {
                             return 12;
                         } else {
                             return 7;

@@ -14,7 +14,7 @@ var graphNodes = {
         "children": StringSet.fromArray([
             "b", "c",
         ]),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "b": {
         "text": "TODO: woohoo!",
@@ -22,7 +22,7 @@ var graphNodes = {
         "y": 200,
         "parents": StringSet.fromArray(["a"]),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "c": {
         "text": "today I frink",
@@ -30,7 +30,7 @@ var graphNodes = {
         "y": 150,
         "parents": StringSet.fromArray(["a"]),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
     "d": {
         "text": "shopping list: ka-pow!",
@@ -38,7 +38,7 @@ var graphNodes = {
         "y": 250,
         "parents": StringSet.empty(),
         "children": StringSet.empty(),
-        "subgraph": new Graph({}, "", StringSet.empty()),
+        "subgraphNodes": {},
     },
 };
 
