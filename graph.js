@@ -1,5 +1,5 @@
 const Utils = require('./utils.js');
-const Set = require('./set.js');
+const StringSet = require('./stringSet.js');
 
 function GraphNodeBody(text, x, y, parents, children) {
     this.text = text;
@@ -7,7 +7,7 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.y = y;
     this.parents = parents;
     this.children = children;
-    this.subgraph = new Graph({}, "", Set.empty());
+    this.subgraph = new Graph({}, "", StringSet.empty());
 }
 
 function Graph(graphNodes, focusedNodeId, highlightedNodes) {
@@ -32,7 +32,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return [].concat.apply(
             [], [].concat.apply(
                 [], Object.entries(graph.nodes).map(
-                    node => Set.toArray(node[1].children).map(
+                    node => StringSet.toArray(node[1].children).map(
                         target => ({"source": graph.nodes[node[0]],
                                     "target": graph.nodes[target]})))));
     };
@@ -40,9 +40,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.newNodeBelowFocus = function () {
         if (graph.focusedNodeId != null) {
             newNodePos = graph.getNewNodePosition(graph.focusedNodeId);
-            graph.createNode(newNodePos.x, newNodePos.y, Set.singleton(graph.focusedNodeId), Set.empty());
+            graph.createNode(newNodePos.x, newNodePos.y, StringSet.singleton(graph.focusedNodeId), StringSet.empty());
         } else {
-            graph.createNode(initNodePos.x, initNodePos.y, Set.empty(), Set.empty());
+            graph.createNode(initNodePos.x, initNodePos.y, StringSet.empty(), StringSet.empty());
         }
         return graph;
     };
@@ -51,18 +51,18 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         newNodeId = Utils.uuidv4();
         graph.nodes[newNodeId] = new GraphNodeBody(
             " ", x, y, parentIds, childIds);
-        Set.map(parentIds, parentId => Set.insertInPlace(newNodeId, graph.nodes[parentId].children));
-        Set.map(childIds, childId => Set.insertInPlace(newNodeId, graph.nodes[childId].parents));
+        StringSet.map(parentIds, parentId => StringSet.insertInPlace(newNodeId, graph.nodes[parentId].children));
+        StringSet.map(childIds, childId => StringSet.insertInPlace(newNodeId, graph.nodes[childId].parents));
         graph.focusedNodeId = newNodeId;
         return newNodeId;
     };
 
     graph.removeFocusedNode = function () {
         focusedNode = graph.nodes[graph.focusedNodeId];
-        if (Set.cardinality(focusedNode.parents) > 0) {
-            nextFocusId = Set.lookupIndex(0, focusedNode.parents);
-        } else if (Set.cardinality(focusedNode.children) > 0) {
-            nextFocusId = Set.lookupIndex(0, focusedNode.children);
+        if (StringSet.cardinality(focusedNode.parents) > 0) {
+            nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
+        } else if (StringSet.cardinality(focusedNode.children) > 0) {
+            nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
         } else {
             // Give the focus to the first node in the list, because what else are
             // you going to do
@@ -78,15 +78,15 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.deleteNode = function (nodeToRemoveId) {
         // Remove edges to/from the node in other
         // node objects
-        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
-            parentId = setLookupIndex(i, graph.nodes[nodeToRemoveId].parents);
-            Set.deleteInPlace(
+        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
+            parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
+            StringSet.deleteInPlace(
                 nodeToRemoveId,
                 graph.nodes[parentId].children);
         }
-        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
-            childId = Set.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
-            Set.deleteInPlace(nodeToRemoveId,
+        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
+            childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
+            StringSet.deleteInPlace(nodeToRemoveId,
                 graph.nodes[childId].parents);
         }
         // Remove the node
@@ -95,27 +95,27 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.addEdge = function(sourceId, targetId) {
-        Set.insertInPlace(targetId, graph.nodes[sourceId].children);
-        Set.insertInPlace(sourceId, graph.nodes[targetId].parents);
+        StringSet.insertInPlace(targetId, graph.nodes[sourceId].children);
+        StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
         return graph;
     };
 
 
-    graph.removeEdgesToFromSet = function (nodeIdSet) {
-        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
-            currentNodeId = Set.lookupIndex(i, nodeIdSet);
-            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].parents); j++) {
-                parentId = Set.lookupIndex(j, graph.nodes[currentNodeId].parents);
-                if (!Set.isIn(parentId, nodeIdSet)) {
-                    Set.deleteInPlace(
+    graph.removeEdgesToFromStringSet = function (nodeIdStringSet) {
+        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
+            currentNodeId = StringSet.lookupIndex(i, nodeIdStringSet);
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].parents);
+                if (!StringSet.isIn(parentId, nodeIdStringSet)) {
+                    StringSet.deleteInPlace(
                         currentNodeId,
                         graph.nodes[parentId].children);
                 }
             }
-            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].children); j++) {
-                childId = Set.lookupIndex(j, graph.nodes[currentNodeId].children);
-                if (!Set.isIn(childId, nodeIdSet)) {
-                    Set.deleteInPlace(
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].children);
+                if (!StringSet.isIn(childId, nodeIdStringSet)) {
+                    StringSet.deleteInPlace(
                         currentNodeId,
                         graph.nodes[childId].parents);
                 }
@@ -127,42 +127,46 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.restoreEdgesToFromSubgraph = function (subgraph) {
         for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
             subgraphNodeId = Object.keys(subgraph.nodes)[i];
-            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
-                parentId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
+            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
                 graph.addEdge(parentId, subgraphNodeId);
             }
-            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
-                childId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
+            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
                 graph.addEdge(subgraphNodeId, childId);
             }
         }
         return graph;
     };
 
-    graph.getParentsOfSet = function (nodeIdSet) {
-        return Set.subtract(
-            Set.unionMap(
-                nodeIdSet,
-                nodeId => graph.nodes[nodeId].parents
-            ),
-            nodeIdSet
+    graph.getParentsOfStringSet = function (nodeIdStringSet) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                StringSet.toArray(nodeIdStringSet).map(
+                    nodeId => StringSet.toArray(graph.nodes[nodeId].parents)
+                )
+            ).filter(
+                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+            )
         );
     };
 
-    graph.getChildrenOfSet = function (nodeIdSet) {
-        return Set.subtract(
-            Set.unionMap(
-                nodeIdSet,
-                nodeId => graph.nodes[nodeId].children
-            ),
-            nodeIdSet
+    graph.getChildrenOfStringSet = function (nodeIdStringSet) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                StringSet.toArray(nodeIdStringSet).map(
+                    nodeId => StringSet.toArray(graph.nodes[nodeId].children)
+                )
+            ).filter(
+                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+            )
         );
     };
 
-    graph.extractNodes = function (nodeIdSet) {
+    graph.extractNodes = function (nodeIdStringSet) {
         extractedNodes = {};
-        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
-            nodeId = Set.lookupIndex(i, nodeIdSet);
+        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
+            nodeId = StringSet.lookupIndex(i, nodeIdStringSet);
             extractedNodes[nodeId] =
                 graph.nodes[nodeId];
             delete graph.nodes[nodeId];
@@ -200,20 +204,20 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     //////// Grouping/ungrouping
 
     graph.groupHighlighted = function () {
-        parents = graph.getParentsOfSet(graph.highlightedNodes);
-        children = graph.getChildrenOfSet(graph.highlightedNodes);
+        parents = graph.getParentsOfStringSet(graph.highlightedNodes);
+        children = graph.getChildrenOfStringSet(graph.highlightedNodes);
         centroid = Utils.centroidOfPoints(
-            Set.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
+            StringSet.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
 
         groupNodeId = graph.createNode(centroid.x, centroid.y, parents, children);
 
-        graph.removeEdgesToFromSet(graph.highlightedNodes);
+        graph.removeEdgesToFromStringSet(graph.highlightedNodes);
 
         // Hide the highlighted nodes inside the group node
         graph.nodes[groupNodeId].subgraph.nodes =
             graph.extractNodes(graph.highlightedNodes);
 
-        graph.highlightedNodes = Set.empty();
+        graph.highlightedNodes = StringSet.empty();
         graph.focusedNodeId = groupNodeId;
 
         return graph;
@@ -224,13 +228,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         graph.restoreSubgraphNodes(graph.nodes[groupNodeId],
                                    graph.nodes[groupNodeId].subgraph);
 
-        graph.removeEdgesToFromSet(Set.singleton(groupNodeId));
+        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
         graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraph);
 
         // Pick the first node of group to have the focus
         graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraph.nodes)[0];
         // Highlight expanded group
-        graph.highlightedNodes = Set.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
+        graph.highlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
 
         // Remove group node
         delete graph.nodes[groupNodeId];
@@ -245,7 +249,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.toggleGroupExpand = function () {
-        if (Set.cardinality(graph.highlightedNodes) == 0) {
+        if (StringSet.cardinality(graph.highlightedNodes) == 0) {
             graph.expandGroupInFocus();
 
         } else {
@@ -259,16 +263,16 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
 
     graph.traverseUp = function () {
         parents = graph.nodes[graph.focusedNodeId].parents;
-        if (Set.cardinality(parents) > 0) {
-            graph.focusedNodeId = Set.lookupIndex(0, parents);
+        if (StringSet.cardinality(parents) > 0) {
+            graph.focusedNodeId = StringSet.lookupIndex(0, parents);
         }
         return graph;
     };
 
     graph.traverseDown = function () {
         children = graph.nodes[graph.focusedNodeId].children;
-        if (Set.cardinality(children) > 0) {
-            graph.focusedNodeId = Set.lookupIndex(children);
+        if (StringSet.cardinality(children) > 0) {
+            graph.focusedNodeId = StringSet.lookupIndex(0, children);
         }
         return graph;
     };
@@ -288,7 +292,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.traverseAddGroup = function (traversalFunc) {
         return function () {
             focusedNodeId = graph.nodes[traverselFunc];
-            Set.insertInPlace(focusedNodeId, graph.highlightedNodes);
+            StringSet.insertInPlace(focusedNodeId, graph.highlightedNodes);
             return graph;
         };
     };
@@ -300,13 +304,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
           is spatially coherent.
           */
         siblingsAndCoparentsIds = [];
-        Set.map(graph.nodes[nodeId].parents,
-            parentId => Set.map(graph.nodes[parentId].children,
+        StringSet.map(graph.nodes[nodeId].parents,
+            parentId => StringSet.map(graph.nodes[parentId].children,
                 siblingId => siblingsAndCoparentsIds.push(siblingId)
             )
         );
-        Set.map(graph.nodes[nodeId].children,
-            childId => Set.map(graph.nodes[childId].parents,
+        StringSet.map(graph.nodes[nodeId].children,
+            childId => StringSet.map(graph.nodes[childId].parents,
                 coparentId => siblingsAndCoparentsIds.push(coparentId))
         );
         // Sort siblings by x index.
@@ -334,22 +338,22 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.clearHighlights = function () {
-        graph.highlightedNodes = Set.empty();
+        graph.highlightedNodes = StringSet.empty();
         return graph;
     };
 
     graph.highlightFocusNode = function () {
-        Set.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        StringSet.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.unHighlightFocusNode = function () {
-        Set.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        StringSet.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.toggleHighlightFocusNode = function () {
-        if (!Set.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!StringSet.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
             graph.highlightFocusNode();
         } else {
             graph.unHighlightFocusNode();
@@ -369,9 +373,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.getNewNodePosition = function (parentId) {
         // Find right-most child
         children = graph.nodes[parentId].children;
-        if (Set.cardinality(children) > 0) {
-            rightmostChildId = Set.lookupIndex(
-                Utils.argMax(Set.toArray(Set.map(children, childId => graph.nodes[childId].x))),
+        if (StringSet.cardinality(children) > 0) {
+            rightmostChildId = StringSet.lookupIndex(
+                Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
                 children);
             return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
         } else {

@@ -11,19 +11,10 @@ var empty = function () {
 };
 exports.empty = empty;
 
-// Private
-var key = function(element) {
-    if (element == undefined) {
-        return 'undefined';
-    } else {
-        return element.toSource().substring(0,200);
-    }
-};
-
 var fromArray = function(arr) {
     newSet = empty();
     for (i=0; i<arr.length; i++) {
-        newSet[key(arr[i])] = arr[i];
+        insertInPlace(arr[i], newSet);
     };
     return newSet;
 };
@@ -36,31 +27,31 @@ exports.singleton = singleton;
 
 
 var toArray = function(set) {
-    return Object.values(set);
+    return Object.keys(set);
 };
 exports.toArray = toArray;
 
 var copy = function(set) {
     // fromArray does an explicit copy :thumbsup:
     return fromArray(toArray(set));
-}
+};
 exports.copy = copy;
 
 //////
 // Modifiers
 
 var insertInPlace = function(newElement, set) {
-    set[key(newElement)] = newElement;
+    set[newElement] = {};
 };
 exports.insertInPlace = insertInPlace;
 
 var deleteInPlace = function(element, set) {
-    delete set[key(element)];
+    delete set[element];
 };
 exports.deleteInPlace = deleteInPlace;
 
 var lookupIndex = function(index, set) {
-    return Object.values(set)[index];
+    return toArray(set)[index];
 };
 exports.lookupIndex = lookupIndex;
 
@@ -68,12 +59,12 @@ exports.lookupIndex = lookupIndex;
 // Properties
 
 var cardinality = function(set) {
-    return Object.keys(set).length;
+    return toArray(set).length;
 };
 exports.cardinality = cardinality;
 
 var isIn = function(element, set) {
-    return Utils.isIn(key(element), Object.keys(set));
+    return Utils.isIn(element, toArray(set));
 };
 exports.isIn = isIn;
 
@@ -85,38 +76,22 @@ var filter = function(set, func) {
 };
 exports.filter = filter;
 
+// Warning: StringSet.map returns a StringSet, so if
+// you pass a function that returns something other than
+// a string, it will be stringified by the conversion to
+// a StringSet element!
 var map = function(set, func) {
     return fromArray(toArray(set).map(func));
 };
 exports.map = map;
 
-var unionMap = function(set, func) {
-    return union(map(set, func));
-};
-exports.unionMap = unionMap;
-
 //////
 // Set operations
 
 var subtract = function(plus, minus) {
-    result = copy(plus);
-    map(
-        minus,
-        element => deleteInPlace(element, result)
+    return filter(
+        copy(plus),
+        element => !isIn(element, minus)
     );
-    return result;
 };
 exports.subtract = subtract;
-
-var union = function(setOfSets) {
-    result = Set.empty();
-    map(
-        setOfSets,
-        set => map(
-            set,
-            element => insertInPlace(element, result)
-        )
-    );
-    return result;
-};
-exports.union = union;

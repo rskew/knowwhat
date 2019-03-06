@@ -18397,7 +18397,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
 /***/ (function(module, exports, __webpack_require__) {
 
 const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
-const Set = __webpack_require__(/*! ./set.js */ "./set.js");
+const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
 
 function GraphNodeBody(text, x, y, parents, children) {
     this.text = text;
@@ -18405,7 +18405,7 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.y = y;
     this.parents = parents;
     this.children = children;
-    this.subgraph = new Graph({}, "", Set.empty());
+    this.subgraph = new Graph({}, "", StringSet.empty());
 }
 
 function Graph(graphNodes, focusedNodeId, highlightedNodes) {
@@ -18430,7 +18430,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return [].concat.apply(
             [], [].concat.apply(
                 [], Object.entries(graph.nodes).map(
-                    node => Set.toArray(node[1].children).map(
+                    node => StringSet.toArray(node[1].children).map(
                         target => ({"source": graph.nodes[node[0]],
                                     "target": graph.nodes[target]})))));
     };
@@ -18438,9 +18438,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.newNodeBelowFocus = function () {
         if (graph.focusedNodeId != null) {
             newNodePos = graph.getNewNodePosition(graph.focusedNodeId);
-            graph.createNode(newNodePos.x, newNodePos.y, Set.singleton(graph.focusedNodeId), Set.empty());
+            graph.createNode(newNodePos.x, newNodePos.y, StringSet.singleton(graph.focusedNodeId), StringSet.empty());
         } else {
-            graph.createNode(initNodePos.x, initNodePos.y, Set.empty(), Set.empty());
+            graph.createNode(initNodePos.x, initNodePos.y, StringSet.empty(), StringSet.empty());
         }
         return graph;
     };
@@ -18449,18 +18449,18 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         newNodeId = Utils.uuidv4();
         graph.nodes[newNodeId] = new GraphNodeBody(
             " ", x, y, parentIds, childIds);
-        Set.map(parentIds, parentId => Set.insertInPlace(newNodeId, graph.nodes[parentId].children));
-        Set.map(childIds, childId => Set.insertInPlace(newNodeId, graph.nodes[childId].parents));
+        StringSet.map(parentIds, parentId => StringSet.insertInPlace(newNodeId, graph.nodes[parentId].children));
+        StringSet.map(childIds, childId => StringSet.insertInPlace(newNodeId, graph.nodes[childId].parents));
         graph.focusedNodeId = newNodeId;
         return newNodeId;
     };
 
     graph.removeFocusedNode = function () {
         focusedNode = graph.nodes[graph.focusedNodeId];
-        if (Set.cardinality(focusedNode.parents) > 0) {
-            nextFocusId = Set.lookupIndex(0, focusedNode.parents);
-        } else if (Set.cardinality(focusedNode.children) > 0) {
-            nextFocusId = Set.lookupIndex(0, focusedNode.children);
+        if (StringSet.cardinality(focusedNode.parents) > 0) {
+            nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
+        } else if (StringSet.cardinality(focusedNode.children) > 0) {
+            nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
         } else {
             // Give the focus to the first node in the list, because what else are
             // you going to do
@@ -18476,15 +18476,15 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.deleteNode = function (nodeToRemoveId) {
         // Remove edges to/from the node in other
         // node objects
-        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
-            parentId = setLookupIndex(i, graph.nodes[nodeToRemoveId].parents);
-            Set.deleteInPlace(
+        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
+            parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
+            StringSet.deleteInPlace(
                 nodeToRemoveId,
                 graph.nodes[parentId].children);
         }
-        for (i=0; i<Set.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
-            childId = Set.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
-            Set.deleteInPlace(nodeToRemoveId,
+        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
+            childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
+            StringSet.deleteInPlace(nodeToRemoveId,
                 graph.nodes[childId].parents);
         }
         // Remove the node
@@ -18493,27 +18493,27 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.addEdge = function(sourceId, targetId) {
-        Set.insertInPlace(targetId, graph.nodes[sourceId].children);
-        Set.insertInPlace(sourceId, graph.nodes[targetId].parents);
+        StringSet.insertInPlace(targetId, graph.nodes[sourceId].children);
+        StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
         return graph;
     };
 
 
-    graph.removeEdgesToFromSet = function (nodeIdSet) {
-        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
-            currentNodeId = Set.lookupIndex(i, nodeIdSet);
-            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].parents); j++) {
-                parentId = Set.lookupIndex(j, graph.nodes[currentNodeId].parents);
-                if (!Set.isIn(parentId, nodeIdSet)) {
-                    Set.deleteInPlace(
+    graph.removeEdgesToFromStringSet = function (nodeIdStringSet) {
+        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
+            currentNodeId = StringSet.lookupIndex(i, nodeIdStringSet);
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].parents);
+                if (!StringSet.isIn(parentId, nodeIdStringSet)) {
+                    StringSet.deleteInPlace(
                         currentNodeId,
                         graph.nodes[parentId].children);
                 }
             }
-            for (j=0; j<Set.cardinality(graph.nodes[currentNodeId].children); j++) {
-                childId = Set.lookupIndex(j, graph.nodes[currentNodeId].children);
-                if (!Set.isIn(childId, nodeIdSet)) {
-                    Set.deleteInPlace(
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].children);
+                if (!StringSet.isIn(childId, nodeIdStringSet)) {
+                    StringSet.deleteInPlace(
                         currentNodeId,
                         graph.nodes[childId].parents);
                 }
@@ -18525,42 +18525,46 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.restoreEdgesToFromSubgraph = function (subgraph) {
         for (i=0; i<Object.keys(subgraph.nodes).length; i++) {
             subgraphNodeId = Object.keys(subgraph.nodes)[i];
-            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
-                parentId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
+            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].parents);
                 graph.addEdge(parentId, subgraphNodeId);
             }
-            for (j=0; j<Set.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
-                childId = Set.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
+            for (j=0; j<StringSet.cardinality(subgraph.nodes[subgraphNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, subgraph.nodes[subgraphNodeId].children);
                 graph.addEdge(subgraphNodeId, childId);
             }
         }
         return graph;
     };
 
-    graph.getParentsOfSet = function (nodeIdSet) {
-        return Set.subtract(
-            Set.unionMap(
-                nodeIdSet,
-                nodeId => graph.nodes[nodeId].parents
-            ),
-            nodeIdSet
+    graph.getParentsOfStringSet = function (nodeIdStringSet) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                StringSet.toArray(nodeIdStringSet).map(
+                    nodeId => StringSet.toArray(graph.nodes[nodeId].parents)
+                )
+            ).filter(
+                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+            )
         );
     };
 
-    graph.getChildrenOfSet = function (nodeIdSet) {
-        return Set.subtract(
-            Set.unionMap(
-                nodeIdSet,
-                nodeId => graph.nodes[nodeId].children
-            ),
-            nodeIdSet
+    graph.getChildrenOfStringSet = function (nodeIdStringSet) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                StringSet.toArray(nodeIdStringSet).map(
+                    nodeId => StringSet.toArray(graph.nodes[nodeId].children)
+                )
+            ).filter(
+                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+            )
         );
     };
 
-    graph.extractNodes = function (nodeIdSet) {
+    graph.extractNodes = function (nodeIdStringSet) {
         extractedNodes = {};
-        for (i=0; i<Set.cardinality(nodeIdSet); i++) {
-            nodeId = Set.lookupIndex(i, nodeIdSet);
+        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
+            nodeId = StringSet.lookupIndex(i, nodeIdStringSet);
             extractedNodes[nodeId] =
                 graph.nodes[nodeId];
             delete graph.nodes[nodeId];
@@ -18598,20 +18602,20 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     //////// Grouping/ungrouping
 
     graph.groupHighlighted = function () {
-        parents = graph.getParentsOfSet(graph.highlightedNodes);
-        children = graph.getChildrenOfSet(graph.highlightedNodes);
+        parents = graph.getParentsOfStringSet(graph.highlightedNodes);
+        children = graph.getChildrenOfStringSet(graph.highlightedNodes);
         centroid = Utils.centroidOfPoints(
-            Set.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
+            StringSet.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
 
         groupNodeId = graph.createNode(centroid.x, centroid.y, parents, children);
 
-        graph.removeEdgesToFromSet(graph.highlightedNodes);
+        graph.removeEdgesToFromStringSet(graph.highlightedNodes);
 
         // Hide the highlighted nodes inside the group node
         graph.nodes[groupNodeId].subgraph.nodes =
             graph.extractNodes(graph.highlightedNodes);
 
-        graph.highlightedNodes = Set.empty();
+        graph.highlightedNodes = StringSet.empty();
         graph.focusedNodeId = groupNodeId;
 
         return graph;
@@ -18622,13 +18626,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         graph.restoreSubgraphNodes(graph.nodes[groupNodeId],
                                    graph.nodes[groupNodeId].subgraph);
 
-        graph.removeEdgesToFromSet(Set.singleton(groupNodeId));
+        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
         graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraph);
 
         // Pick the first node of group to have the focus
         graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraph.nodes)[0];
         // Highlight expanded group
-        graph.highlightedNodes = Set.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
+        graph.highlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraph.nodes));
 
         // Remove group node
         delete graph.nodes[groupNodeId];
@@ -18643,7 +18647,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.toggleGroupExpand = function () {
-        if (Set.cardinality(graph.highlightedNodes) == 0) {
+        if (StringSet.cardinality(graph.highlightedNodes) == 0) {
             graph.expandGroupInFocus();
 
         } else {
@@ -18657,16 +18661,16 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
 
     graph.traverseUp = function () {
         parents = graph.nodes[graph.focusedNodeId].parents;
-        if (Set.cardinality(parents) > 0) {
-            graph.focusedNodeId = Set.lookupIndex(0, parents);
+        if (StringSet.cardinality(parents) > 0) {
+            graph.focusedNodeId = StringSet.lookupIndex(0, parents);
         }
         return graph;
     };
 
     graph.traverseDown = function () {
         children = graph.nodes[graph.focusedNodeId].children;
-        if (Set.cardinality(children) > 0) {
-            graph.focusedNodeId = Set.lookupIndex(children);
+        if (StringSet.cardinality(children) > 0) {
+            graph.focusedNodeId = StringSet.lookupIndex(0, children);
         }
         return graph;
     };
@@ -18686,7 +18690,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.traverseAddGroup = function (traversalFunc) {
         return function () {
             focusedNodeId = graph.nodes[traverselFunc];
-            Set.insertInPlace(focusedNodeId, graph.highlightedNodes);
+            StringSet.insertInPlace(focusedNodeId, graph.highlightedNodes);
             return graph;
         };
     };
@@ -18698,13 +18702,13 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
           is spatially coherent.
           */
         siblingsAndCoparentsIds = [];
-        Set.map(graph.nodes[nodeId].parents,
-            parentId => Set.map(graph.nodes[parentId].children,
+        StringSet.map(graph.nodes[nodeId].parents,
+            parentId => StringSet.map(graph.nodes[parentId].children,
                 siblingId => siblingsAndCoparentsIds.push(siblingId)
             )
         );
-        Set.map(graph.nodes[nodeId].children,
-            childId => Set.map(graph.nodes[childId].parents,
+        StringSet.map(graph.nodes[nodeId].children,
+            childId => StringSet.map(graph.nodes[childId].parents,
                 coparentId => siblingsAndCoparentsIds.push(coparentId))
         );
         // Sort siblings by x index.
@@ -18732,22 +18736,22 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.clearHighlights = function () {
-        graph.highlightedNodes = Set.empty();
+        graph.highlightedNodes = StringSet.empty();
         return graph;
     };
 
     graph.highlightFocusNode = function () {
-        Set.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        StringSet.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.unHighlightFocusNode = function () {
-        Set.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        StringSet.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
         return graph;
     };
 
     graph.toggleHighlightFocusNode = function () {
-        if (!Set.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!StringSet.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
             graph.highlightFocusNode();
         } else {
             graph.unHighlightFocusNode();
@@ -18767,9 +18771,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.getNewNodePosition = function (parentId) {
         // Find right-most child
         children = graph.nodes[parentId].children;
-        if (Set.cardinality(children) > 0) {
-            rightmostChildId = Set.lookupIndex(
-                Utils.argMax(Set.toArray(Set.map(children, childId => graph.nodes[childId].x))),
+        if (StringSet.cardinality(children) > 0) {
+            rightmostChildId = StringSet.lookupIndex(
+                Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
                 children);
             return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
         } else {
@@ -18812,7 +18816,7 @@ module.exports = Graph;
 
 var d3 = __webpack_require__(/*! ./d3.js */ "./d3.js");
 var Utils = __webpack_require__(/*! ./utils */ "./utils.js");
-var Set = __webpack_require__(/*! ./set.js */ "./set.js");
+var StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -18897,7 +18901,7 @@ module.exports = function GraphUI(graph) {
             .join("g")
             .classed("nodeLinks", true)
             .selectAll("line")
-            .data(d => Set.toArray(d[1].parents).map(
+            .data(d => StringSet.toArray(d[1].parents).map(
                 parentId => ({"source": parentId, "target": d[0]})),
                   edge => edge)
             .join(
@@ -19014,7 +19018,7 @@ module.exports = function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
@@ -19039,7 +19043,7 @@ module.exports = function GraphUI(graph) {
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
                             Utils.fadeIn(this, fadeSpeed);
@@ -19067,7 +19071,7 @@ module.exports = function GraphUI(graph) {
                         d3.select(this).classed("ready", false);
                         if (mouseState.clickedNode != undefined &&
                             mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !Set.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
+                            !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
                             d3.select(this).classed("ready", true);
                         }
                         Utils.fadeIn(this, fadeSpeed);
@@ -19111,7 +19115,7 @@ module.exports = function GraphUI(graph) {
     // Ctrl+click to create new unconnected node
     graphUI.svg.on("mousedown", function () {
         if (d3.event.ctrlKey) {
-            graphUI.graph.createNode(d3.event.x, d3.event.y, Set.empty(), Set.empty());
+            graphUI.graph.createNode(d3.event.x, d3.event.y, StringSet.empty(), StringSet.empty());
             graphUI.update();
         }
     });
@@ -33792,10 +33796,10 @@ module.exports = {
 
 /***/ }),
 
-/***/ "./set.js":
-/*!****************!*\
-  !*** ./set.js ***!
-  \****************/
+/***/ "./stringSet.js":
+/*!**********************!*\
+  !*** ./stringSet.js ***!
+  \**********************/
 /*! no static exports found */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -33812,19 +33816,10 @@ var empty = function () {
 };
 exports.empty = empty;
 
-// Private
-var key = function(element) {
-    if (element == undefined) {
-        return 'undefined';
-    } else {
-        return element.toSource().substring(0,200);
-    }
-};
-
 var fromArray = function(arr) {
     newSet = empty();
     for (i=0; i<arr.length; i++) {
-        newSet[key(arr[i])] = arr[i];
+        insertInPlace(arr[i], newSet);
     };
     return newSet;
 };
@@ -33837,31 +33832,31 @@ exports.singleton = singleton;
 
 
 var toArray = function(set) {
-    return Object.values(set);
+    return Object.keys(set);
 };
 exports.toArray = toArray;
 
 var copy = function(set) {
     // fromArray does an explicit copy :thumbsup:
     return fromArray(toArray(set));
-}
+};
 exports.copy = copy;
 
 //////
 // Modifiers
 
 var insertInPlace = function(newElement, set) {
-    set[key(newElement)] = newElement;
+    set[newElement] = {};
 };
 exports.insertInPlace = insertInPlace;
 
 var deleteInPlace = function(element, set) {
-    delete set[key(element)];
+    delete set[element];
 };
 exports.deleteInPlace = deleteInPlace;
 
 var lookupIndex = function(index, set) {
-    return Object.values(set)[index];
+    return toArray(set)[index];
 };
 exports.lookupIndex = lookupIndex;
 
@@ -33869,12 +33864,12 @@ exports.lookupIndex = lookupIndex;
 // Properties
 
 var cardinality = function(set) {
-    return Object.keys(set).length;
+    return toArray(set).length;
 };
 exports.cardinality = cardinality;
 
 var isIn = function(element, set) {
-    return Utils.isIn(key(element), Object.keys(set));
+    return Utils.isIn(element, toArray(set));
 };
 exports.isIn = isIn;
 
@@ -33886,41 +33881,25 @@ var filter = function(set, func) {
 };
 exports.filter = filter;
 
+// Warning: StringSet.map returns a StringSet, so if
+// you pass a function that returns something other than
+// a string, it will be stringified by the conversion to
+// a StringSet element!
 var map = function(set, func) {
     return fromArray(toArray(set).map(func));
 };
 exports.map = map;
 
-var unionMap = function(set, func) {
-    return union(map(set, func));
-};
-exports.unionMap = unionMap;
-
 //////
 // Set operations
 
 var subtract = function(plus, minus) {
-    result = copy(plus);
-    map(
-        minus,
-        element => deleteInPlace(element, result)
+    return filter(
+        copy(plus),
+        element => !isIn(element, minus)
     );
-    return result;
 };
 exports.subtract = subtract;
-
-var union = function(setOfSets) {
-    result = Set.empty();
-    map(
-        setOfSets,
-        set => map(
-            set,
-            element => insertInPlace(element, result)
-        )
-    );
-    return result;
-};
-exports.union = union;
 
 
 /***/ }),
@@ -34048,7 +34027,7 @@ exports.distanceToClosestPoint2D = distanceToClosestPoint2D;
 
 const Graph = __webpack_require__(/*! ./graph.js */ "./graph.js");
 const GraphUI = __webpack_require__(/*! ./graphUI.js */ "./graphUI.js");
-const Set = __webpack_require__(/*! ./set.js */ "./set.js");
+const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
 
 ///////////////////////////////////
 //////// Data
@@ -34058,39 +34037,39 @@ var graphNodes = {
         "text": "do all the things plz",
         "x": 100,
         "y": 100,
-        "parents": Set.empty(),
-        "children": Set.fromArray([
+        "parents": StringSet.empty(),
+        "children": StringSet.fromArray([
             "b", "c",
         ]),
-        "subgraph": new Graph({}, "", Set.empty()),
+        "subgraph": new Graph({}, "", StringSet.empty()),
     },
     "b": {
         "text": "TODO: woohoo!",
         "x": 150,
         "y": 200,
-        "parents": Set.fromArray(["a"]),
-        "children": Set.empty(),
-        "subgraph": new Graph({}, "", Set.empty()),
+        "parents": StringSet.fromArray(["a"]),
+        "children": StringSet.empty(),
+        "subgraph": new Graph({}, "", StringSet.empty()),
     },
     "c": {
         "text": "today I frink",
         "x": 100,
         "y": 150,
-        "parents": Set.fromArray(["a"]),
-        "children": Set.empty(),
-        "subgraph": new Graph({}, "", Set.empty()),
+        "parents": StringSet.fromArray(["a"]),
+        "children": StringSet.empty(),
+        "subgraph": new Graph({}, "", StringSet.empty()),
     },
     "d": {
         "text": "shopping list: ka-pow!",
         "x": 200,
         "y": 250,
-        "parents": Set.empty(),
-        "children": Set.empty(),
-        "subgraph": new Graph({}, "", Set.empty()),
+        "parents": StringSet.empty(),
+        "children": StringSet.empty(),
+        "subgraph": new Graph({}, "", StringSet.empty()),
     },
 };
 
-var graph = new Graph(graphNodes, "a", Set.fromArray(["b"]));
+var graph = new Graph(graphNodes, "a", StringSet.fromArray(["b"]));
 var graphUI = new GraphUI(graph);
 
 
@@ -34102,8 +34081,9 @@ graphUI.update();
 // TODO: remove debugging hackz
 var purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
 window.purs = purs;
-window.graph= graph;
-window.Set = Set;
+window.graph = graph;
+window.graphUI = graphUI;
+window.StringSet = StringSet;
 
 
 /***/ })

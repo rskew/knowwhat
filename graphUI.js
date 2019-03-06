@@ -1,6 +1,6 @@
 var d3 = require("./d3.js");
 var Utils = require("./utils");
-var Set = require("./set.js");
+var StringSet = require("./stringSet.js");
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -85,7 +85,7 @@ module.exports = function GraphUI(graph) {
             .join("g")
             .classed("nodeLinks", true)
             .selectAll("line")
-            .data(d => Set.toArray(d[1].parents).map(
+            .data(d => StringSet.toArray(d[1].parents).map(
                 parentId => ({"source": parentId, "target": d[0]})),
                   edge => edge)
             .join(
@@ -202,7 +202,7 @@ module.exports = function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
@@ -227,7 +227,7 @@ module.exports = function GraphUI(graph) {
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => Set.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
                             Utils.fadeIn(this, fadeSpeed);
@@ -255,7 +255,7 @@ module.exports = function GraphUI(graph) {
                         d3.select(this).classed("ready", false);
                         if (mouseState.clickedNode != undefined &&
                             mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !Set.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
+                            !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
                             d3.select(this).classed("ready", true);
                         }
                         Utils.fadeIn(this, fadeSpeed);
@@ -299,7 +299,7 @@ module.exports = function GraphUI(graph) {
     // Ctrl+click to create new unconnected node
     graphUI.svg.on("mousedown", function () {
         if (d3.event.ctrlKey) {
-            graphUI.graph.createNode(d3.event.x, d3.event.y, Set.empty(), Set.empty());
+            graphUI.graph.createNode(d3.event.x, d3.event.y, StringSet.empty(), StringSet.empty());
             graphUI.update();
         }
     });
