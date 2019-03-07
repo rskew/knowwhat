@@ -100,7 +100,6 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return graph;
     };
 
-
     graph.removeEdgesToFromStringSet = function (nodeIdStringSet) {
         for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
             currentNodeId = StringSet.lookupIndex(i, nodeIdStringSet);
@@ -188,11 +187,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             subgraphNodeId = Object.keys(subgraphNodes)[i];
             subgraphNodes[subgraphNodeId].x += groupMovementVector.x;
             subgraphNodes[subgraphNodeId].y += groupMovementVector.y;
-        }
-
-        // Add nodes to graph top level
-        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            // Add nodes to graph top level
             graph.nodes[subgraphNodeId] = subgraphNodes[subgraphNodeId];
         }
 
@@ -251,7 +246,6 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.toggleGroupExpand = function () {
         if (StringSet.cardinality(graph.highlightedNodes) == 0) {
             graph.expandGroupInFocus();
-
         } else {
             graph.groupHighlighted();
         }

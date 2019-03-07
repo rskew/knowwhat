@@ -18498,7 +18498,6 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return graph;
     };
 
-
     graph.removeEdgesToFromStringSet = function (nodeIdStringSet) {
         for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
             currentNodeId = StringSet.lookupIndex(i, nodeIdStringSet);
@@ -18586,11 +18585,7 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             subgraphNodeId = Object.keys(subgraphNodes)[i];
             subgraphNodes[subgraphNodeId].x += groupMovementVector.x;
             subgraphNodes[subgraphNodeId].y += groupMovementVector.y;
-        }
-
-        // Add nodes to graph top level
-        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            // Add nodes to graph top level
             graph.nodes[subgraphNodeId] = subgraphNodes[subgraphNodeId];
         }
 
@@ -18649,7 +18644,6 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.toggleGroupExpand = function () {
         if (StringSet.cardinality(graph.highlightedNodes) == 0) {
             graph.expandGroupInFocus();
-
         } else {
             graph.groupHighlighted();
         }
@@ -18850,6 +18844,7 @@ module.exports = function GraphUI(graph) {
         .attr("height", height);
 
     // Define Z axis ordering of elements
+    graphUI.svg.append("g").attr("id", "text");
     graphUI.svg.append("g").attr("id", "nodeHalos");
     graphUI.svg.append("g").attr("id", "links");
     graphUI.svg.append("g").attr("id", "nodes");
@@ -18948,7 +18943,7 @@ module.exports = function GraphUI(graph) {
     };
 
     graphUI.updateText = function () {
-        graphUI.svg.selectAll("foreignObject")
+        graphUI.svg.select("#text").selectAll("foreignObject")
             .data(Object.entries(graphUI.graph.nodes), d => d[0])
             .join(
                 enter => enter.append("foreignObject")
@@ -18960,11 +18955,11 @@ module.exports = function GraphUI(graph) {
                     .append('div')
                     .attr("contentEditable", true)
                     .text(d => d[1].text)
+                    .lower()
                     .on("keydown", function (d) {
                         d[1].text = this.innerText;
                         graphUI.update();
-                    })
-                    .lower(),
+                    }),
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
@@ -18978,7 +18973,6 @@ module.exports = function GraphUI(graph) {
                             d3.select(this).select("div").select("div").node().blur();
                         }
                     })
-                    .lower()
             );
 
     };
@@ -32544,7 +32538,7 @@ var applyGraphOp = function (v) {
                     y: v1.value1.y,
                     children: v2.children,
                     parents: v2.parents,
-                    subgraph: v2.subgraph
+                    subgraphNodes: v2.subgraphNodes
                 }));
             };
             return Graph((function (v2) {
@@ -32573,7 +32567,7 @@ var applyGraphOp = function (v) {
                             children: v3,
                             id: v2.value0.id,
                             parents: v2.value0.parents,
-                            subgraph: v2.value0.subgraph,
+                            subgraphNodes: v2.value0.subgraphNodes,
                             text: v2.value0.text,
                             x: v2.value0.x,
                             y: v2.value0.y
@@ -32592,7 +32586,7 @@ var applyGraphOp = function (v) {
                             parents: v3,
                             children: v2.value0.children,
                             id: v2.value0.id,
-                            subgraph: v2.value0.subgraph,
+                            subgraphNodes: v2.value0.subgraphNodes,
                             text: v2.value0.text,
                             x: v2.value0.x,
                             y: v2.value0.y
@@ -32620,7 +32614,7 @@ var applyGraphOp = function (v) {
                             children: v3,
                             id: v2.value0.id,
                             parents: v2.value0.parents,
-                            subgraph: v2.value0.subgraph,
+                            subgraphNodes: v2.value0.subgraphNodes,
                             text: v2.value0.text,
                             x: v2.value0.x,
                             y: v2.value0.y
@@ -32639,7 +32633,7 @@ var applyGraphOp = function (v) {
                             parents: v3,
                             children: v2.value0.children,
                             id: v2.value0.id,
-                            subgraph: v2.value0.subgraph,
+                            subgraphNodes: v2.value0.subgraphNodes,
                             text: v2.value0.text,
                             x: v2.value0.x,
                             y: v2.value0.y
@@ -32688,24 +32682,24 @@ var applyGraphOp = function (v) {
 };
 var demo = (function () {
     var goober = applyGraphOp(emptyGraph)(AddNode.create("goofus")({
-        text: "fdsa",
+        text: "goofus",
         id: "goofus",
-        x: 55.0,
+        x: 455.0,
         y: 100.0,
         children: singletonNodeIdSet("thingo"),
         parents: emptyNodeIdSet,
-        subgraph: Foreign_Object.empty
+        subgraphNodes: Foreign_Object.empty
     }));
     return Foreign_Object.fromFoldable(Data_Foldable.foldableArray)((function (v) {
         return Foreign_Object.toUnfoldable(Data_Unfoldable.unfoldableArray)(v.nodes);
     })(applyGraphOp(goober)(AddNode.create("thingo")({
-        text: "asdf",
+        text: "thingo",
         id: "thingo",
-        x: 5.0,
+        x: 205.0,
         y: 100.0,
         children: emptyNodeIdSet,
         parents: singletonNodeIdSet("goofus"),
-        subgraph: Foreign_Object.empty
+        subgraphNodes: Foreign_Object.empty
     }))));
 })();
 module.exports = {
@@ -34011,7 +34005,7 @@ var distanceToClosestPoint2D = function(point, neighbors) {
             minDist = thisDist;
         }
     }
-    return thisDist;
+    return minDist;
 }
 exports.distanceToClosestPoint2D = distanceToClosestPoint2D;
 
@@ -34084,6 +34078,10 @@ window.purs = purs;
 window.graph = graph;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
+
+window.graph.clearHighlights();
+window.graph.nodes = JSON.parse(JSON.stringify(window.purs.demo));
+window.graphUI.update();
 
 
 /***/ })

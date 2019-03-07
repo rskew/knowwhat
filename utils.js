@@ -98,6 +98,6 @@ var distanceToClosestPoint2D = function(point, neighbors) {
             minDist = thisDist;
         }
     }
-    return thisDist;
+    return minDist;
 }
 exports.distanceToClosestPoint2D = distanceToClosestPoint2D;

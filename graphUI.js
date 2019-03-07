@@ -34,6 +34,7 @@ module.exports = function GraphUI(graph) {
         .attr("height", height);
 
     // Define Z axis ordering of elements
+    graphUI.svg.append("g").attr("id", "text");
     graphUI.svg.append("g").attr("id", "nodeHalos");
     graphUI.svg.append("g").attr("id", "links");
     graphUI.svg.append("g").attr("id", "nodes");
@@ -132,7 +133,7 @@ module.exports = function GraphUI(graph) {
     };
 
     graphUI.updateText = function () {
-        graphUI.svg.selectAll("foreignObject")
+        graphUI.svg.select("#text").selectAll("foreignObject")
             .data(Object.entries(graphUI.graph.nodes), d => d[0])
             .join(
                 enter => enter.append("foreignObject")
@@ -144,11 +145,11 @@ module.exports = function GraphUI(graph) {
                     .append('div')
                     .attr("contentEditable", true)
                     .text(d => d[1].text)
+                    .lower()
                     .on("keydown", function (d) {
                         d[1].text = this.innerText;
                         graphUI.update();
-                    })
-                    .lower(),
+                    }),
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
@@ -162,7 +163,6 @@ module.exports = function GraphUI(graph) {
                             d3.select(this).select("div").select("div").node().blur();
                         }
                     })
-                    .lower()
             );
 
     };

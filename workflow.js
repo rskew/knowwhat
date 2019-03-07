@@ -57,3 +57,7 @@ window.purs = purs;
 window.graph = graph;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
+
+window.graph.clearHighlights();
+window.graph.nodes = JSON.parse(JSON.stringify(window.purs.demo));
+window.graphUI.update();
