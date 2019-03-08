@@ -101,3 +101,8 @@ var distanceToClosestPoint2D = function(point, neighbors) {
     return minDist;
 }
 exports.distanceToClosestPoint2D = distanceToClosestPoint2D;
+
+var deepCopyObject = function (o) {
+    return JSON.parse(JSON.stringify(o));
+};
+exports.deepCopyObject = deepCopyObject;

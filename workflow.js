@@ -1,6 +1,7 @@
 const Graph = require('./graph.js');
 const GraphUI = require('./graphUI.js');
 const StringSet = require('./stringSet.js');
+const Utils = require('./utils.js');
 
 ///////////////////////////////////
 //////// Data
@@ -45,6 +46,12 @@ var graphNodes = {
 var graph = new Graph(graphNodes, "a", StringSet.fromArray(["b"]));
 var graphUI = new GraphUI(graph);
 
+function copyPursGraph(pursGraph) {
+    return new Graph(Utils.deepCopyObject(pursGraph.nodes),
+                     pursGraph.focusNode,
+                     pursGraph.highlightedNodes);
+};
+
 
 ///////////////////////////////////
 //////// Main
@@ -58,6 +65,5 @@ window.graph = graph;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
-window.graph.clearHighlights();
-window.graph.nodes = JSON.parse(JSON.stringify(window.purs.demo));
+window.graphUI.graph = copyPursGraph(purs.demo);
 window.graphUI.update();

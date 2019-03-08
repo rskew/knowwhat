@@ -3,18 +3,7 @@ module Main where
 -- | Simple graph representation with undo-able operations.
 
 ------
--- TODO
--- - simplest implementation
--- - ffi for d3 view code to use this
---
---
-------
--- data structures
---
--- no attempt to make more general versions of the data structures yet
---
-------
--- optimisations:
+-- todo optimisations:
 -- - combining sequential node moves into a single move (think dragging)
 -- - ST monad for mutable updates to graph
 -- - truncating undo/redo history to stop the memory leak
@@ -33,17 +22,14 @@ module Main where
 -- - storing node body information when removing
 -- - handling missing edges on redos
 
-import Prelude (Unit, unit, ($))
-import Effect (Effect)
-import Effect.Console (log)
+import Prelude (Unit, unit, ($), (<<<), identity, map)
 import Data.Maybe (Maybe(..))
 import Foreign.Object as Object
 import Foreign.Object (Object)
-
-main :: Effect Unit
-main = do
-  log "Hello :|"
-
+import Data.Lens (Lens', lens, over, set, setJust)
+import Data.Symbol (SProxy(..))
+import Data.Lens.Record (prop)
+import Data.Lens.At (at)
 
 type NodeId = String
 
@@ -84,7 +70,7 @@ newtype GraphNode = GraphNode
   , subgraphNodes :: Object GraphNode
   }
 
-newtype Point2D = Point2D {x :: Number, y :: Number}
+type Point2D = {x :: Number, y :: Number}
 
 data GraphOp =
     AddNode NodeId GraphNode
@@ -100,67 +86,110 @@ data GraphOp =
   | UnHighlight NodeId
 
 
-applyGraphOp :: Graph -> GraphOp -> Graph
-applyGraphOp (Graph g) (AddNode nodeId nodeBody) =
-  Graph $ _ { nodes = _ } g $ Object.insert nodeId nodeBody g.nodes
-applyGraphOp (Graph g) (RemoveNode nodeId) =
-  Graph $ _ { nodes = _ } g $ Object.delete nodeId g.nodes
--- some lenses might help here
-applyGraphOp (Graph g) (MoveNode nodeId (Point2D pos)) =
-  Graph $ g {nodes = _ } $ Object.update mover nodeId g.nodes
-    where
-      mover (GraphNode gn) = Just $ GraphNode $ gn { x = pos.x, y = pos.y }
-applyGraphOp g EndMovement = g
-applyGraphOp (Graph g) (AddEdge edge) =
-  Graph $ g { nodes = _ }
-        $ (\nodes -> case (Object.lookup edge.from nodes) of
-                   Just (GraphNode node) ->
-                     Object.insert edge.from (GraphNode (node { children = _ } (insert edge.to node.children))) nodes
-                   Nothing -> nodes)
-        $ (\nodes -> case (Object.lookup edge.to nodes) of
-                   Just (GraphNode node) ->
-                     Object.insert edge.to (GraphNode (node { parents = _ } (insert edge.from node.parents))) nodes
-                   Nothing -> nodes)
-        $ g.nodes
-applyGraphOp (Graph g) (RemoveEdge edge) =
-  Graph $ g { nodes = _ }
-        $ (\nodes -> case (Object.lookup edge.from nodes) of
-                       Just (GraphNode node) ->
-                         Object.insert edge.from (GraphNode (node { children = _ } (delete edge.to node.children))) nodes
-                       Nothing -> nodes)
-        $ (\nodes -> case (Object.lookup edge.to nodes) of
-                       Just (GraphNode node) ->
-                         Object.insert edge.to (GraphNode (node { parents = _ } (delete edge.from node.parents))) nodes
-                       Nothing -> nodes)
-        $ g.nodes
-applyGraphOp (Graph g) (UpdateFocus nodeId) = Graph $ _ { focusNode = nodeId} g
-applyGraphOp (Graph g) (Highlight nodeId) =
-  Graph $ _ { highlightedNodes = _ } g $ insert nodeId g.highlightedNodes
-applyGraphOp (Graph g) (UnHighlight nodeId) =
-  Graph $ _ { highlightedNodes = _ } g $ delete nodeId g.highlightedNodes
+------
+-- Lens boilerplate
+
+_Graph :: Lens' Graph {nodes :: Object GraphNode,
+                       focusNode :: NodeId,
+                       highlightedNodes :: NodeIdSet}
+_Graph = lens (\(Graph g) -> g) (\_ -> Graph)
+
+_nodes :: forall r. Lens' { nodes :: Object GraphNode | r } (Object GraphNode)
+_nodes = prop (SProxy :: SProxy "nodes")
+
+_highlightedNodes :: forall r. Lens' { highlightedNodes :: NodeIdSet | r } NodeIdSet
+_highlightedNodes = prop (SProxy :: SProxy "highlightedNodes")
+
+_GraphNode :: Lens' GraphNode { text :: String
+                              , id :: NodeId
+                              , x :: Number
+                              , y :: Number
+                              , children :: NodeIdSet
+                              , parents :: NodeIdSet
+                              , subgraphNodes :: Object GraphNode
+                              }
+_GraphNode = lens (\(GraphNode n) -> n) (\_ -> GraphNode)
+
+_parents :: forall r. Lens' { parents :: NodeIdSet | r } NodeIdSet
+_parents = prop (SProxy :: SProxy "parents")
+
+_children :: forall r. Lens' { children :: NodeIdSet | r } NodeIdSet
+_children = prop (SProxy :: SProxy "children")
+
+_x :: forall r. Lens' { x :: Number | r } Number
+_x = prop (SProxy :: SProxy "x")
+
+_y :: forall r. Lens' { y :: Number | r } Number
+_y = prop (SProxy :: SProxy "y")
 
 
-demo :: Object GraphNode
-demo = Object.fromFoldable $ (\(Graph asdf) -> ((Object.toUnfoldable asdf.nodes) :: Array _))
-       $ applyGraphOp goober $ AddNode "thingo" $ GraphNode
-  { text: "thingo"
-  , id : "thingo"
-  , x : 205.0
-  , y : 100.0
-  , children : emptyNodeIdSet
-  , parents : singletonNodeIdSet "goofus"
-  , subgraphNodes : Object.empty
-  }
-  where
-    goober = applyGraphOp emptyGraph $ AddNode "goofus" $ GraphNode
-      { text: "goofus"
-      , id : "goofus"
-      , x: 455.0
-      , y: 100.0
-      , children : singletonNodeIdSet "thingo"
-      , parents : emptyNodeIdSet
-      , subgraphNodes : Object.empty
-      }
+------
+-- How GraphNode and Graph actually work
+
+addParent :: NodeId -> GraphNode -> GraphNode
+addParent nodeId = over (_GraphNode <<< _parents) $ insert nodeId
+
+deleteParent :: NodeId -> GraphNode -> GraphNode
+deleteParent nodeId = over (_GraphNode <<< _parents) $ delete nodeId
+
+addChild :: NodeId -> GraphNode -> GraphNode
+addChild nodeId = over (_GraphNode <<< _children) $ insert nodeId
+
+deleteChild :: NodeId -> GraphNode -> GraphNode
+deleteChild nodeId = over (_GraphNode <<< _children) $ delete nodeId
+
+moveNode :: Point2D -> GraphNode -> GraphNode
+moveNode pos = set (_GraphNode <<< _x) pos.x <<<
+               set (_GraphNode <<< _y) pos.y
+
+
+applyOp :: GraphOp -> Graph -> Graph
+applyOp (AddNode nodeId nodeBody) =
+  setJust (_Graph <<< _nodes <<< (at nodeId)) nodeBody
+applyOp (RemoveNode nodeId) =
+  set (_Graph <<< _nodes <<< (at nodeId)) Nothing
+applyOp (MoveNode nodeId pos) =
+  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ moveNode pos
+applyOp EndMovement = identity
+applyOp (AddEdge edge) =
+  over (_Graph <<< _nodes <<< (at edge.to)) (map (addParent edge.from))
+  <<<
+  over (_Graph <<< _nodes <<< (at edge.from)) (map (addChild edge.to))
+applyOp (RemoveEdge edge) =
+  over (_Graph <<< _nodes <<< (at edge.to)) (map (deleteParent edge.from))
+  <<<
+  over (_Graph <<< _nodes <<< (at edge.from)) (map (deleteChild edge.to))
+applyOp (UpdateFocus nodeId) =
+  over _Graph (_ { focusNode = nodeId})
+applyOp (Highlight nodeId) =
+  over (_Graph <<< _highlightedNodes) (insert nodeId)
+applyOp (UnHighlight nodeId) =
+  over (_Graph <<< _highlightedNodes) (delete nodeId)
+
+
+
+
+demo :: Graph
+demo = applyOp (UpdateFocus "goofus")
+       $ applyOp (Highlight "thingo")
+       $ applyOp (AddNode "thingo" $ GraphNode
+           { text: "thingo"
+           , id : "thingo"
+           , x : 205.0
+           , y : 100.0
+           , children : emptyNodeIdSet
+           , parents : singletonNodeIdSet "goofus"
+           , subgraphNodes : Object.empty
+           })
+       $ applyOp (AddNode "goofus" $ GraphNode
+           { text: "goofus"
+           , id : "goofus"
+           , x: 455.0
+           , y: 100.0
+           , children : singletonNodeIdSet "thingo"
+           , parents : emptyNodeIdSet
+           , subgraphNodes : Object.empty
+           }) emptyGraph
 
 --type UndoableGraph = List (OpOrUndo GraphOp)
 --
@@ -185,7 +214,7 @@ demo = Object.fromFoldable $ (\(Graph asdf) -> ((Object.toUnfoldable asdf.nodes)
 ---- | to Undos and Redos ahead of them in the list. This way, the effect
 ---- | of a weird sequence of Undos/Redos can't leave the graph in an invalid state
 ---- | as a simple sequence of grap ops (without Undo/Redo) must produce a valid graph.
---buildGraph ops = foldl applyGraphOp empty $ undoRedoReverse ops
+--buildGraph ops = foldl applyOp empty $ undoRedoReverse ops
 --  where
 --    undoRedoReverse ops = urr 0 0 ops
 --    urr 0     redos ( OpOrUndo op : ops ) = urr 0 redos ops <> [op]
