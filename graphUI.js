@@ -296,6 +296,11 @@ module.exports = function GraphUI(graph) {
         });
     };
 
+    // Prevent default events
+    d3.select("body").on("keypress", function () {
+        d3.event.preventDefault();
+    });
+
     // Ctrl+click to create new unconnected node
     graphUI.svg.on("mousedown", function () {
         if (d3.event.ctrlKey) {
