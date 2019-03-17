@@ -8,6 +8,7 @@ const Utils = require('./utils.js');
 
 var graphNodes = {
     "a": {
+        "id": "a",
         "text": "do all the things plz",
         "x": 100,
         "y": 100,
@@ -18,6 +19,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "b": {
+        "id": "b",
         "text": "TODO: woohoo!",
         "x": 150,
         "y": 200,
@@ -26,6 +28,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "c": {
+        "id": "c",
         "text": "today I frink",
         "x": 100,
         "y": 150,
@@ -34,6 +37,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "d": {
+        "id": "d",
         "text": "shopping list: ka-pow!",
         "x": 200,
         "y": 250,
@@ -59,11 +63,15 @@ function copyPursGraph(pursGraph) {
 graphUI.update();
 
 // TODO: remove debugging hackz
-var purs = require('./purescript/output/Main/index.js');
-window.purs = purs;
-window.graph = graph;
+var Purs = require('./purescript/output/Main/index.js');
+window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
-window.graphUI.graph = copyPursGraph(purs.demo);
+window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
+window.graphUI.graph.newNodeBelowFocus();
+window.graphUI.update();
+window.graphUI.graph.usePursGraph();
+window.graphUI.update();
+window.graph = window.graphUI.graph;

@@ -18398,8 +18398,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
 const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
 const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
+const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
 
-function GraphNodeBody(text, x, y, parents, children) {
+function GraphNodeBody(id, text, x, y, parents, children) {
+    this.id = id;
     this.text = text;
     this.x = x;
     this.y = y;
@@ -18408,16 +18410,50 @@ function GraphNodeBody(text, x, y, parents, children) {
     this.subgraphNodes = {};
 }
 
-function Graph(graphNodes, focusedNodeId, highlightedNodes) {
+function Graph(graphNodes, focusNode, highlightedNodes) {
     var graph = this;
     graph.nodes = graphNodes;
-    graph.focusedNodeId = focusedNodeId;
+    graph.focusNode = focusNode;
     graph.highlightedNodes = highlightedNodes;
+
+    // Create the Purescript graph to play along with the JS one
+    graph.pursGraph = Purs.emptyUndoableGraph;
+    graph.updatePurs = function(graphOp) {
+        graph.pursGraph = Purs.doOp(graphOp)(graph.pursGraph);
+    };
+
+    graph.copyNode = function (node) {
+        newNodeBody = new GraphNodeBody(node.id,
+                                        node.text,
+                                        node.x,
+                                        node.y,
+                                        node.parents,
+                                        node.children);
+        newNodeBody.subgraphNodes = node.subgraphNodes;
+        return newNodeBody;
+    };
+    for (i=0; i<Object.keys(graphNodes).length; i++) {
+        node = Object.values(graphNodes)[i];
+        graph.updatePurs(Purs.AddNode.create(graph.copyNode(node)));
+    }
+    for (i=0; i<Object.keys(highlightedNodes).length; i++) {
+        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlightedNodes)));
+    }
+    graph.updatePurs(Purs.UpdateFocus.create(focusNode));
+
+    graph.usePursGraph = function() {
+        builtPursGraph = Purs.buildGraph(graph.pursGraph);
+        graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
+        graph.focusNode = builtPursGraph.focusNode;
+        graph.highlightedNodes = builtPursGraph.highlightedNodes;
+        console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
+        return graph;
+    };
 
     ///////////////////////////////////
     //////// Constants
 
-    // TODO: graph should go with layout logic
+    // TODO: should go with layout logic
     var initNodePos = {"x": 100, "y": 100},
         newNodeOffset = {"x": 100, "y": 100},
         newNodeClearenceThreshold = 80;
@@ -18436,27 +18472,51 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.newNodeBelowFocus = function () {
-        if (graph.focusedNodeId != null) {
-            newNodePos = graph.getNewNodePosition(graph.focusedNodeId);
-            graph.createNode(newNodePos.x, newNodePos.y, StringSet.singleton(graph.focusedNodeId), StringSet.empty());
+        if (graph.focusNode != null) {
+            newNodePos = graph.getNewNodePosition(graph.focusNode);
+            graph.createNode(newNodePos.x,
+                             newNodePos.y,
+                             StringSet.singleton(graph.focusNode),
+                             StringSet.empty());
         } else {
-            graph.createNode(initNodePos.x, initNodePos.y, StringSet.empty(), StringSet.empty());
+            graph.createNode(initNodePos.x,
+                             initNodePos.y,
+                             StringSet.empty(),
+                             StringSet.empty());
         }
         return graph;
     };
 
     graph.createNode = function (x, y, parentIds, childIds) {
         newNodeId = Utils.uuidv4();
-        graph.nodes[newNodeId] = new GraphNodeBody(
-            " ", x, y, parentIds, childIds);
-        StringSet.map(parentIds, parentId => StringSet.insertInPlace(newNodeId, graph.nodes[parentId].children));
-        StringSet.map(childIds, childId => StringSet.insertInPlace(newNodeId, graph.nodes[childId].parents));
-        graph.focusedNodeId = newNodeId;
+        newNodeBody = new GraphNodeBody(
+            newNodeId, " ", x, y, parentIds, childIds);
+
+        //// Old JS graph
+        //graph.nodes[newNodeId] = newNodeBody;
+        //StringSet.map(parentIds, parentId => StringSet.insertInPlace(
+        //    newNodeId, graph.nodes[parentId].children));
+        //StringSet.map(childIds, childId => StringSet.insertInPlace(
+        //    newNodeId, graph.nodes[childId].parents));
+
+        // New PS graph
+        graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
+        for (i=0; i<StringSet.cardinality(parentIds); i++) {
+            graph.updatePurs(Purs.AddEdge.create(
+                {"from": StringSet.lookupIndex(i, parentIds), "to":   newNodeId}));
+        }
+        for (i=0; i<StringSet.cardinality(childIds); i++) {
+            graph.updatePurs(Purs.AddEdge.create(
+                {"from": newNodeId, "to":   StringSet.lookupIndex(i, childIds)}));
+        }
+
+        graph.focusOn(newNodeId);
+
         return newNodeId;
     };
 
     graph.removeFocusedNode = function () {
-        focusedNode = graph.nodes[graph.focusedNodeId];
+        focusedNode = graph.nodes[graph.focusNode];
         if (StringSet.cardinality(focusedNode.parents) > 0) {
             nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
         } else if (StringSet.cardinality(focusedNode.children) > 0) {
@@ -18464,12 +18524,12 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         } else {
             // Give the focus to the first node in the list, because what else are
             // you going to do
-            nextFocusId = Utils.arrayWithoutElement(graph.focusedNodeId, Object.keys(graph.nodes))[0];
+            nextFocusId = Utils.arrayWithoutElement(graph.focusNode, Object.keys(graph.nodes))[0];
         }
         for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
         }
-        graph.deleteNode(graph.focusedNodeId);
-        graph.focusedNodeId = nextFocusId;
+        graph.deleteNode(graph.focusNode);
+        graph.focusOn(nextFocusId);
         return graph;
     };
 
@@ -18478,43 +18538,77 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         // node objects
         for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
             parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
-            StringSet.deleteInPlace(
-                nodeToRemoveId,
-                graph.nodes[parentId].children);
+            graph.deleteEdge(parentId, nodeToRemoveId);
         }
         for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
             childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
-            StringSet.deleteInPlace(nodeToRemoveId,
-                graph.nodes[childId].parents);
+            graph.deleteEdge(nodeToRemoveId, childId);
         }
         // Remove the node
-        delete graph.nodes[nodeToRemoveId];
+        //delete graph.nodes[nodeToRemoveId];
+        graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeToRemoveId]));
         return graph;
     };
 
     graph.addEdge = function(sourceId, targetId) {
-        StringSet.insertInPlace(targetId, graph.nodes[sourceId].children);
-        StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
+        //// Old JS graph
+        //StringSet.insertInPlace(targetId, graph.nodes[sourceId].children);
+        //StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
+
+        // New PS graph
+        graph.updatePurs(Purs.AddEdge.create({"from": sourceId, "to": targetId}));
+
         return graph;
     };
 
-    graph.removeEdgesToFromStringSet = function (nodeIdStringSet) {
-        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
-            currentNodeId = StringSet.lookupIndex(i, nodeIdStringSet);
+    graph.deleteEdge = function(sourceId, targetId) {
+        //// Old JS graph
+        //StringSet.deleteInPlace(targetId, graph.nodes[sourceId].children);
+        //StringSet.deleteInPlace(sourceId, graph.nodes[targetId].parents);
+
+        // New PS graph
+        graph.updatePurs(Purs.RemoveEdge.create({"from": sourceId, "to": targetId}));
+
+        return graph;
+    };
+
+    graph.updateText = function(nodeId, text) {
+        //graph.nodes[nodeId].text = text;
+        graph.updatePurs(Purs.UpdateText.create(nodeId)(text));
+
+        return graph;
+    };
+
+    graph.moveNode = function (nodeId, newPos) {
+        //graph.nodes[nodeId].x = newPos.x;
+        //graph.nodes[nodeId].y = newPos.y;
+        graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
+        return graph;
+    };
+
+    graph.removeEdgesToFromStringSet = function (selection) {
+        for (i=0; i<StringSet.cardinality(selection); i++) {
+            currentNodeId = StringSet.lookupIndex(i, selection);
             for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].parents); j++) {
                 parentId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].parents);
-                if (!StringSet.isIn(parentId, nodeIdStringSet)) {
-                    StringSet.deleteInPlace(
-                        currentNodeId,
-                        graph.nodes[parentId].children);
+                if (!StringSet.isIn(parentId, selection)) {
+                    //// Old JS graph
+                    //StringSet.deleteInPlace(
+                    //    currentNodeId,
+                    //    graph.nodes[parentId].children);
+                    // New PS graph
+                    graph.updatePurs(Purs.RemoveChild.create(parentId)(currentNodeId));
                 }
             }
             for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].children); j++) {
                 childId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].children);
-                if (!StringSet.isIn(childId, nodeIdStringSet)) {
-                    StringSet.deleteInPlace(
-                        currentNodeId,
-                        graph.nodes[childId].parents);
+                if (!StringSet.isIn(childId, selection)) {
+                    //// Old JS graph
+                    //StringSet.deleteInPlace(
+                    //    currentNodeId,
+                    //    graph.nodes[childId].parents);
+                    // New PS graph
+                    graph.updatePurs(Purs.RemoveParent.create(childId)(currentNodeId));
                 }
             }
         }
@@ -18537,25 +18631,37 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     };
 
     graph.getParentsOfStringSet = function (nodeIdStringSet) {
+        return graph.getParentsOfNodes(
+            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
+        );
+    };
+
+    graph.getParentsOfNodes = function (nodeArr) {
         return StringSet.fromArray(
             Utils.concatenate(
-                StringSet.toArray(nodeIdStringSet).map(
-                    nodeId => StringSet.toArray(graph.nodes[nodeId].parents)
+                nodeArr.map(
+                    node => StringSet.toArray(node.parents)
                 )
             ).filter(
-                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
             )
         );
     };
 
     graph.getChildrenOfStringSet = function (nodeIdStringSet) {
+        return graph.getChildrenOfNodes(
+            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
+        );
+    };
+
+    graph.getChildrenOfNodes = function (nodeArr) {
         return StringSet.fromArray(
             Utils.concatenate(
-                StringSet.toArray(nodeIdStringSet).map(
-                    nodeId => StringSet.toArray(graph.nodes[nodeId].children)
+                nodeArr.map(
+                    node => StringSet.toArray(node.children)
                 )
             ).filter(
-                nodeId => !StringSet.isIn(nodeId, nodeIdStringSet)
+                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
             )
         );
     };
@@ -18566,28 +18672,78 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
             nodeId = StringSet.lookupIndex(i, nodeIdStringSet);
             extractedNodes[nodeId] =
                 graph.nodes[nodeId];
-            delete graph.nodes[nodeId];
+            //delete graph.nodes[nodeId];
+            graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeId]));
         }
         return extractedNodes;
     };
 
-    graph.restoreSubgraphNodes = function (newCenterPoint, subgraphNodes) {
+    graph.restoreSubgraphNodes = function (newCenterPoint, subgraphNodes, groupText) {
         // Make up for motion of the group node by applying the change in
         // position of the group node to all subgraphNodes.
-        // The initial position of the group node is known to be the
-        // centroid of the subgraphNodes.
-        centroid = Utils.centroidOfPoints(Object.values(subgraphNodes));
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(Object.values(subgraphNodes))
+        );
         groupMovementVector = {
-            "x": newCenterPoint.x - centroid.x,
-            "y": newCenterPoint.y - centroid.y,
+            "x": newCenterPoint.x - terminalestNode.x,
+            "y": newCenterPoint.y - terminalestNode.y,
         };
         for (i=0; i<Object.keys(subgraphNodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraphNodes)[i];
-            subgraphNodes[subgraphNodeId].x += groupMovementVector.x;
-            subgraphNodes[subgraphNodeId].y += groupMovementVector.y;
+            subgraphNode = graph.copyNode(Object.values(subgraphNodes)[i]);
+            subgraphNode.x += groupMovementVector.x;
+            subgraphNode.y += groupMovementVector.y;
             // Add nodes to graph top level
-            graph.nodes[subgraphNodeId] = subgraphNodes[subgraphNodeId];
+            //graph.nodes[subgraphNodeId] = subgraphNode;
+            graph.updatePurs(Purs.AddNode.create(subgraphNode));
         }
+        graph.updatePurs(Purs.UpdateText.create(terminalestNode.id)(groupText));
+
+        return graph;
+    };
+
+    // Adds changes to gorup node edges to the terminal node of the subgraph.
+    // Adding edges only makes sense after subgraph nodes are restored.
+    graph.copyEdgeModsToTerminalestNode = function (groupNode) {
+        groupNodesStringSet = StringSet.fromArray(Object.keys(groupNode.subgraphNodes));
+        groupNodes = Object.values(groupNode.subgraphNodes);
+
+        groupParents = graph.getParentsOfNodes(groupNodes);
+        groupChildren = graph.getChildrenOfNodes(groupNodes);
+
+        groupNodeParents = graph.getParentsOfNodes([groupNode]);
+        groupNodeChildren = graph.getChildrenOfNodes([groupNode]);
+
+        newParents = StringSet.subtract(groupNodeParents, groupParents);
+        deletedParents = StringSet.subtract(groupParents, groupNodeParents);
+
+        newChildren = StringSet.subtract(groupNodeChildren, groupChildren);
+        deletedChildren = StringSet.subtract(groupChildren, groupNodeChildren);
+
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(groupNodes));
+
+        for (i=0; i<StringSet.cardinality(newParents); i++) {
+            graph.addEdge(StringSet.lookupIndex(i, newParents),
+                          terminalestNode.id);
+        };
+        for (i=0; i<StringSet.cardinality(deletedParents); i++) {
+            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
+                graph.deleteEdge(
+                    StringSet.lookupIndex(i, deletedParents),
+                    StringSet.lookupIndex(j, groupNodesStringSet));
+            };
+        };
+        for (i=0; i<StringSet.cardinality(newChildren); i++) {
+            graph.addEdge(terminalestNode.id,
+                          StringSet.lookupIndex(i, newChildren));
+        };
+        for (i=0; i<StringSet.cardinality(deletedChildren); i++) {
+            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
+                graph.deleteEdge(
+                    StringSet.lookupIndex(j, groupNodesStringSet),
+                    StringSet.lookupIndex(i, deletedChildren));
+            };
+        };
 
         return graph;
     };
@@ -18599,45 +18755,56 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     graph.groupHighlighted = function () {
         parents = graph.getParentsOfStringSet(graph.highlightedNodes);
         children = graph.getChildrenOfStringSet(graph.highlightedNodes);
-        centroid = Utils.centroidOfPoints(
-            StringSet.toArray(graph.highlightedNodes).map(nodeId => graph.nodes[nodeId]));
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlightedNodes)));
 
-        groupNodeId = graph.createNode(centroid.x, centroid.y, parents, children);
+        groupNodeId = graph.createNode(terminalestNode.x, terminalestNode.y, parents, children);
+        graph.updateText(groupNodeId, terminalestNode.text);
 
         graph.removeEdgesToFromStringSet(graph.highlightedNodes);
 
         // Hide the highlighted nodes inside the group node
-        graph.nodes[groupNodeId].subgraphNodes =
-            graph.extractNodes(graph.highlightedNodes);
+        newSubgraphNodes = graph.extractNodes(graph.highlightedNodes);
+        //graph.nodes[groupNodeId].subgraphNodes = newSubgraphNodes;
+        graph.updatePurs(Purs.UpdateSubgraphNodes.create(groupNodeId)(newSubgraphNodes));
 
-        graph.highlightedNodes = StringSet.empty();
-        graph.focusedNodeId = groupNodeId;
+        graph.clearHighlights();
+        graph.focusOn(groupNodeId);
 
         return graph;
     };
 
     graph.expandGroup = function (groupNodeId) {
-        // TODO: Move other nodes out of the way!
-        graph.restoreSubgraphNodes(graph.nodes[groupNodeId],
-                                   graph.nodes[groupNodeId].subgraphNodes);
+        groupNode = graph.nodes[groupNodeId];
 
-        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
+        graph.restoreSubgraphNodes(groupNode,
+                                   groupNode.subgraphNodes,
+                                   groupNode.text);
+
         graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraphNodes);
 
+        graph.copyEdgeModsToTerminalestNode(groupNode);
+
+        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
+
         // Pick the first node of group to have the focus
-        graph.focusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
+        // TODO: terminalestNode
+        newFocusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
+        graph.focusOn(newFocusedNodeId);
+
         // Highlight expanded group
-        graph.highlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
+        newHighlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
+        graph.replaceHighlighted(newHighlightedNodes);
 
         // Remove group node
-        delete graph.nodes[groupNodeId];
+        graph.deleteNode(groupNodeId);
 
         return graph;
     };
 
     graph.expandGroupInFocus = function () {
-        if (!Utils.isEmptyObject(graph.nodes[graph.focusedNodeId].subgraphNodes)) {
-            graph.expandGroup(graph.focusedNodeId);
+        if (!Utils.isEmptyObject(graph.nodes[graph.focusNode].subgraphNodes)) {
+            graph.expandGroup(graph.focusNode);
         }
     };
 
@@ -18654,37 +18821,40 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     //////// Traversal functions
 
     graph.traverseUp = function () {
-        parents = graph.nodes[graph.focusedNodeId].parents;
+        parents = graph.nodes[graph.focusNode].parents;
         if (StringSet.cardinality(parents) > 0) {
-            graph.focusedNodeId = StringSet.lookupIndex(0, parents);
+            newFocus = StringSet.lookupIndex(0, parents);
+            graph.focusOn(newFocus);
         }
         return graph;
     };
 
     graph.traverseDown = function () {
-        children = graph.nodes[graph.focusedNodeId].children;
+        children = graph.nodes[graph.focusNode].children;
         if (StringSet.cardinality(children) > 0) {
-            graph.focusedNodeId = StringSet.lookupIndex(0, children);
+            newFocus = StringSet.lookupIndex(0, children);
+            graph.focusOn(newFocus);
         }
         return graph;
     };
 
     graph.traverseLeft = function () {
-        graph.focusedNodeId = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusedNodeId).left;
+        newFocus = graph.getNeighboringSiblingOrCoparentIds(
+            graph.focusNode).left;
+        graph.focusOn(newFocus);
         return graph;
     };
 
     graph.traverseRight = function () {
-        graph.focusedNodeId = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusedNodeId).right;
+        newFocus = graph.getNeighboringSiblingOrCoparentIds(
+            graph.focusNode).right;
+        graph.focusOn(newFocus);
         return graph;
     };
 
     graph.traverseAddGroup = function (traversalFunc) {
         return function () {
-            focusedNodeId = graph.nodes[traverselFunc];
-            StringSet.insertInPlace(focusedNodeId, graph.highlightedNodes);
+            graph.focusOn(graph.nodes[traverselFunc]);
             return graph;
         };
     };
@@ -18711,9 +18881,9 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         graphNodes = graph.nodes;
         siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
         onLeft = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x < graph.nodes[graph.focusedNodeId].x);
+            nodeId => graph.nodes[nodeId].x < graph.nodes[graph.focusNode].x);
         onRight = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x > graph.nodes[graph.focusedNodeId].x);
+            nodeId => graph.nodes[nodeId].x > graph.nodes[graph.focusNode].x);
         return {
             "left": onLeft.length > 0
                 ? onLeft[onLeft.length - 1]
@@ -18726,26 +18896,36 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
     //////// Highlighting a selection/focusing
 
     graph.focusOn = function (nodeId) {
-        graph.focusedNodeId = nodeId;
+        //graph.focusNode = nodeId;
+        graph.updatePurs(Purs.UpdateFocus.create(nodeId));
     };
 
-    graph.clearHighlights = function () {
-        graph.highlightedNodes = StringSet.empty();
-        return graph;
+    graph.unHighlightNode = function(nodeId) {
+        //// Old JS graph
+        //StringSet.deleteInPlace(nodeId, graph.highlightedNodes);
+        // New PS graph
+        graph.updatePurs(Purs.UnHighlight.create(nodeId));
+    };
+
+    graph.highlightNode = function(nodeId) {
+        //// Old JS graph
+        //StringSet.insertInPlace(nodeId, graph.highlightedNodes);
+        // New PS graph
+        graph.updatePurs(Purs.Highlight.create(nodeId));
     };
 
     graph.highlightFocusNode = function () {
-        StringSet.insertInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        graph.highlightNode(graph.focusNode);
         return graph;
     };
 
     graph.unHighlightFocusNode = function () {
-        StringSet.deleteInPlace(graph.focusedNodeId, graph.highlightedNodes);
+        graph.unHighlightNode(graph.focusNode);
         return graph;
     };
 
     graph.toggleHighlightFocusNode = function () {
-        if (!StringSet.isIn(graph.focusedNodeId, graph.highlightedNodes)) {
+        if (!StringSet.isIn(graph.focusNode, graph.highlightedNodes)) {
             graph.highlightFocusNode();
         } else {
             graph.unHighlightFocusNode();
@@ -18753,14 +18933,25 @@ function Graph(graphNodes, focusedNodeId, highlightedNodes) {
         return graph;
     };
 
-    ///////////////////////////////////
-    //////// Node Spatial Arrangement
+    graph.replaceHighlighted = function(newHighlighted) {
+        oldHighlightedNodes = StringSet.copy(graph.highlightedNodes);
+        for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
+            graph.unHighlightNode(
+                StringSet.lookupIndex(i, oldHighlightedNodes));
+        };
+        for (i=0; i<StringSet.cardinality(newHighlighted); i++) {
+            graph.highlightNode(
+                StringSet.lookupIndex(i, newHighlighted));
+        };
+    };
 
-    graph.moveNode = function (nodeId, newPos) {
-        graph.nodes[nodeId].x = newPos.x;
-        graph.nodes[nodeId].y = newPos.y;
+    graph.clearHighlights = function () {
+        graph.replaceHighlighted(StringSet.empty());
         return graph;
     };
+
+    ///////////////////////////////////
+    //////// Node Spatial Arrangement
 
     graph.getNewNodePosition = function (parentId) {
         // Find right-most child
@@ -18957,7 +19148,11 @@ module.exports = function GraphUI(graph) {
                     .text(d => d[1].text)
                     .lower()
                     .on("keydown", function (d) {
-                        d[1].text = this.innerText;
+                        graphUI.graph.updateText(d[0], this.innerText);
+                        graphUI.update();
+                    })
+                    .on("keyup", function (d) {
+                        graphUI.graph.updateText(d[0], this.innerText);
                         graphUI.update();
                     }),
                 update => update
@@ -18967,14 +19162,13 @@ module.exports = function GraphUI(graph) {
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
-                            d[0] == graphUI.graph.focusedNodeId) {
+                            d[0] == graphUI.graph.focusNode) {
                             d3.select(this).select("div").select("div").node().focus();
                         } else {
                             d3.select(this).select("div").select("div").node().blur();
                         }
                     })
             );
-
     };
 
     graphUI.updateNodes = function () {
@@ -18993,13 +19187,13 @@ module.exports = function GraphUI(graph) {
                     })
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusedNodeId),
+                    .classed("focused", d => d[0] == graphUI.graph.focusNode),
                 update => update
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusedNodeId)
+                    .classed("focused", d => d[0] == graphUI.graph.focusNode)
             );
     };
 
@@ -19086,6 +19280,7 @@ module.exports = function GraphUI(graph) {
     };
 
     graphUI.update = function () {
+        graphUI.graph.usePursGraph();
 
         graphUI.updateEdges();
 
@@ -43615,33 +43810,67 @@ module.exports = {
 "use strict";
 // Generated by purs version 0.12.2
 
-var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
 var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Array = __webpack_require__(/*! ../Data.Array/index.js */ "./purescript/output/Data.Array/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Foldable = __webpack_require__(/*! ../Data.Foldable/index.js */ "./purescript/output/Data.Foldable/index.js");
 var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
 var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
 var Data_Lens = __webpack_require__(/*! ../Data.Lens/index.js */ "./purescript/output/Data.Lens/index.js");
 var Data_Lens_At = __webpack_require__(/*! ../Data.Lens.At/index.js */ "./purescript/output/Data.Lens.At/index.js");
+var Data_Lens_Getter = __webpack_require__(/*! ../Data.Lens.Getter/index.js */ "./purescript/output/Data.Lens.Getter/index.js");
+var Data_Lens_Internal_Forget = __webpack_require__(/*! ../Data.Lens.Internal.Forget/index.js */ "./purescript/output/Data.Lens.Internal.Forget/index.js");
 var Data_Lens_Lens = __webpack_require__(/*! ../Data.Lens.Lens/index.js */ "./purescript/output/Data.Lens.Lens/index.js");
 var Data_Lens_Record = __webpack_require__(/*! ../Data.Lens.Record/index.js */ "./purescript/output/Data.Lens.Record/index.js");
 var Data_Lens_Setter = __webpack_require__(/*! ../Data.Lens.Setter/index.js */ "./purescript/output/Data.Lens.Setter/index.js");
+var Data_List = __webpack_require__(/*! ../Data.List/index.js */ "./purescript/output/Data.List/index.js");
+var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
 var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
 var Data_Profunctor_Strong = __webpack_require__(/*! ../Data.Profunctor.Strong/index.js */ "./purescript/output/Data.Profunctor.Strong/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
 var Data_Symbol = __webpack_require__(/*! ../Data.Symbol/index.js */ "./purescript/output/Data.Symbol/index.js");
 var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
 var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
 var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Op = (function () {
+    function Op(value0) {
+        this.value0 = value0;
+    };
+    Op.create = function (value0) {
+        return new Op(value0);
+    };
+    return Op;
+})();
+var Undo = (function () {
+    function Undo() {
+
+    };
+    Undo.value = new Undo();
+    return Undo;
+})();
+var Redo = (function () {
+    function Redo() {
+
+    };
+    Redo.value = new Redo();
+    return Redo;
+})();
 var GraphNode = function (x) {
     return x;
 };
+var Graph = function (x) {
+    return x;
+};
 var AddNode = (function () {
-    function AddNode(value0, value1) {
+    function AddNode(value0) {
         this.value0 = value0;
-        this.value1 = value1;
     };
     AddNode.create = function (value0) {
-        return function (value1) {
-            return new AddNode(value0, value1);
-        };
+        return new AddNode(value0);
     };
     return AddNode;
 })();
@@ -43666,12 +43895,53 @@ var MoveNode = (function () {
     };
     return MoveNode;
 })();
-var EndMovement = (function () {
-    function EndMovement() {
-
+var AddParent = (function () {
+    function AddParent(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
     };
-    EndMovement.value = new EndMovement();
-    return EndMovement;
+    AddParent.create = function (value0) {
+        return function (value1) {
+            return new AddParent(value0, value1);
+        };
+    };
+    return AddParent;
+})();
+var RemoveParent = (function () {
+    function RemoveParent(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    RemoveParent.create = function (value0) {
+        return function (value1) {
+            return new RemoveParent(value0, value1);
+        };
+    };
+    return RemoveParent;
+})();
+var AddChild = (function () {
+    function AddChild(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    AddChild.create = function (value0) {
+        return function (value1) {
+            return new AddChild(value0, value1);
+        };
+    };
+    return AddChild;
+})();
+var RemoveChild = (function () {
+    function RemoveChild(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    RemoveChild.create = function (value0) {
+        return function (value1) {
+            return new RemoveChild(value0, value1);
+        };
+    };
+    return RemoveChild;
 })();
 var AddEdge = (function () {
     function AddEdge(value0) {
@@ -43690,6 +43960,30 @@ var RemoveEdge = (function () {
         return new RemoveEdge(value0);
     };
     return RemoveEdge;
+})();
+var UpdateText = (function () {
+    function UpdateText(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    UpdateText.create = function (value0) {
+        return function (value1) {
+            return new UpdateText(value0, value1);
+        };
+    };
+    return UpdateText;
+})();
+var UpdateSubgraphNodes = (function () {
+    function UpdateSubgraphNodes(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    UpdateSubgraphNodes.create = function (value0) {
+        return function (value1) {
+            return new UpdateSubgraphNodes(value0, value1);
+        };
+    };
+    return UpdateSubgraphNodes;
 })();
 var UpdateFocus = (function () {
     function UpdateFocus(value0) {
@@ -43718,22 +44012,59 @@ var UnHighlight = (function () {
     };
     return UnHighlight;
 })();
-var Graph = function (x) {
-    return x;
-};
 var singletonNodeIdSet = function (nodeId) {
     return Foreign_Object.singleton(nodeId)(Data_Unit.unit);
 };
 var insert = function (nodeId) {
     return Foreign_Object.insert(nodeId)(Data_Unit.unit);
 };
+var graphLength = function (graph) {
+    return Data_List.length(graph);
+};
+var fromMaybe = Data_Maybe.fromMaybe;
+var emptyUndoableGraph = Data_List_Types.Nil.value;
 var emptyNodeIdSet = Foreign_Object.empty;
+var oppy = AddNode.create({
+    text: "goofus",
+    id: "goofus",
+    x: 455.0,
+    y: 100.0,
+    children: singletonNodeIdSet("thingo"),
+    parents: emptyNodeIdSet,
+    subgraphNodes: Foreign_Object.empty
+});
 var emptyGraph = {
     nodes: Foreign_Object.empty,
     focusNode: "",
     highlightedNodes: emptyNodeIdSet
 };
 var $$delete = Foreign_Object["delete"];
+var addOp = function (op) {
+    return function (ops) {
+        if (op instanceof Op && op.value0 instanceof MoveNode) {
+            if (ops instanceof Data_List_Types.Cons && (ops.value0 instanceof Op && ops.value0.value0 instanceof MoveNode)) {
+                var $22 = op.value0.value0 === ops.value0.value0.value0;
+                if ($22) {
+                    return new Data_List_Types.Cons(op, ops.value1);
+                };
+                return new Data_List_Types.Cons(op, ops);
+            };
+            return new Data_List_Types.Cons(op, ops);
+        };
+        return new Data_List_Types.Cons(op, ops);
+    };
+};
+var doOp = function (op) {
+    return function (ops) {
+        return addOp(new Op(op))(ops);
+    };
+};
+var redo = function (ops) {
+    return addOp(Redo.value)(ops);
+};
+var undo = function (ops) {
+    return addOp(Undo.value)(ops);
+};
 var _y = function (dictStrong) {
     return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
         return "y";
@@ -43742,6 +44073,16 @@ var _y = function (dictStrong) {
 var _x = function (dictStrong) {
     return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
         return "x";
+    }))()()(Data_Symbol.SProxy.value)(dictStrong);
+};
+var _text = function (dictStrong) {
+    return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
+        return "text";
+    }))()()(Data_Symbol.SProxy.value)(dictStrong);
+};
+var _subgraphNodes = function (dictStrong) {
+    return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
+        return "subgraphNodes";
     }))()()(Data_Symbol.SProxy.value)(dictStrong);
 };
 var _parents = function (dictStrong) {
@@ -43772,34 +44113,73 @@ var _GraphNode = function (dictStrong) {
     })(dictStrong);
 };
 var addChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($27) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($27));
+    return Data_Lens_Setter.over(function ($74) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($74));
     })(insert(nodeId));
 };
 var addParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($28) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($28));
+    return Data_Lens_Setter.over(function ($75) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($75));
     })(insert(nodeId));
 };
-var deleteChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($29) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($29));
-    })($$delete(nodeId));
-};
-var deleteParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($30) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($30));
-    })($$delete(nodeId));
-};
 var moveNode = function (pos) {
-    return function ($31) {
-        return Data_Lens_Setter.set(function ($32) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($32));
-        })(pos.x)(Data_Lens_Setter.set(function ($33) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($33));
-        })(pos.y)($31));
+    return function ($76) {
+        return Data_Lens_Setter.set(function ($77) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($77));
+        })(pos.x)(Data_Lens_Setter.set(function ($78) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($78));
+        })(pos.y)($76));
     };
 };
+var removeChild = function (nodeId) {
+    return Data_Lens_Setter.over(function ($79) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($79));
+    })($$delete(nodeId));
+};
+var removeParent = function (nodeId) {
+    return Data_Lens_Setter.over(function ($80) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($80));
+    })($$delete(nodeId));
+};
+var terminalestNode = function (nodes) {
+    var nParents = function ($81) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($82) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($82));
+        })($81));
+    };
+    var nChildren = function ($83) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($84) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($84));
+        })($83));
+    };
+    var isTerminal = function (node) {
+        return nChildren(node) === 0;
+    };
+    var getY = Data_Lens_Getter.view(function ($85) {
+        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($85));
+    });
+    var lower = function (a) {
+        return function (b) {
+            return Data_Ord.compare(Data_Ord.ordNumber)(getY(a))(getY(b));
+        };
+    };
+    var mostParentsLowest = function (a) {
+        return function (b) {
+            return Data_Semigroup.append(Data_Ordering.semigroupOrdering)(Data_Ord.compare(Data_Ord.ordInt)(nParents(a))(nParents(b)))(lower(a)(b));
+        };
+    };
+    var v = Data_Array.filter(isTerminal)(nodes);
+    if (v.length === 0) {
+        return Data_Foldable.maximumBy(Data_Foldable.foldableArray)(lower)(nodes);
+    };
+    return Data_Foldable.maximumBy(Data_Foldable.foldableArray)(mostParentsLowest)(v);
+};
+var updateSubgraphNodes = Data_Lens_Setter.set(function ($86) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($86));
+});
+var updateText = Data_Lens_Setter.set(function ($87) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($87));
+});
 var _Graph = function (dictStrong) {
     return Data_Lens_Lens.lens(function (v) {
         return v;
@@ -43807,42 +44187,61 @@ var _Graph = function (dictStrong) {
         return Graph;
     })(dictStrong);
 };
-var applyOp = function (v) {
+var applyGraphOp = function (v) {
     if (v instanceof AddNode) {
-        return Data_Lens_Setter.setJust(function ($34) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($34)));
-        })(v.value1);
+        return Data_Lens_Setter.setJust(function ($88) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($88)));
+        })(v.value0);
     };
     if (v instanceof RemoveNode) {
-        return Data_Lens_Setter.set(function ($35) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($35)));
+        return Data_Lens_Setter.set(function ($89) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($89)));
         })(Data_Maybe.Nothing.value);
     };
     if (v instanceof MoveNode) {
-        return Data_Lens_Setter.over(function ($36) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($36)));
+        return Data_Lens_Setter.over(function ($90) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($90)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(moveNode(v.value1)));
     };
-    if (v instanceof EndMovement) {
-        return Control_Category.identity(Control_Category.categoryFn);
+    if (v instanceof AddParent) {
+        return Data_Lens_Setter.over(function ($91) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($91)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(addParent(v.value1)));
+    };
+    if (v instanceof RemoveParent) {
+        return Data_Lens_Setter.over(function ($92) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($92)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(removeParent(v.value1)));
+    };
+    if (v instanceof AddChild) {
+        return Data_Lens_Setter.over(function ($93) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($93)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(addChild(v.value1)));
+    };
+    if (v instanceof RemoveChild) {
+        return Data_Lens_Setter.over(function ($94) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($94)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(removeChild(v.value1)));
     };
     if (v instanceof AddEdge) {
-        return function ($37) {
-            return Data_Lens_Setter.over(function ($38) {
-                return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.to)(Data_Profunctor_Strong.strongFn)($38)));
-            })(Data_Functor.map(Data_Maybe.functorMaybe)(addParent(v.value0.from)))(Data_Lens_Setter.over(function ($39) {
-                return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.from)(Data_Profunctor_Strong.strongFn)($39)));
-            })(Data_Functor.map(Data_Maybe.functorMaybe)(addChild(v.value0.to)))($37));
+        return function ($95) {
+            return applyGraphOp(new AddParent(v.value0.to, v.value0.from))(applyGraphOp(new AddChild(v.value0.from, v.value0.to))($95));
         };
     };
     if (v instanceof RemoveEdge) {
-        return function ($40) {
-            return Data_Lens_Setter.over(function ($41) {
-                return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.to)(Data_Profunctor_Strong.strongFn)($41)));
-            })(Data_Functor.map(Data_Maybe.functorMaybe)(deleteParent(v.value0.from)))(Data_Lens_Setter.over(function ($42) {
-                return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.from)(Data_Profunctor_Strong.strongFn)($42)));
-            })(Data_Functor.map(Data_Maybe.functorMaybe)(deleteChild(v.value0.to)))($40));
+        return function ($96) {
+            return applyGraphOp(new RemoveParent(v.value0.to, v.value0.from))(applyGraphOp(new RemoveChild(v.value0.from, v.value0.to))($96));
         };
+    };
+    if (v instanceof UpdateText) {
+        return Data_Lens_Setter.over(function ($97) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($97)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(updateText(v.value1)));
+    };
+    if (v instanceof UpdateSubgraphNodes) {
+        return Data_Lens_Setter.over(function ($98) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($98)));
+        })(Data_Functor.map(Data_Maybe.functorMaybe)(updateSubgraphNodes(v.value1)));
     };
     if (v instanceof UpdateFocus) {
         return Data_Lens_Setter.over(_Graph(Data_Profunctor_Strong.strongFn))(function (v1) {
@@ -43854,18 +44253,87 @@ var applyOp = function (v) {
         });
     };
     if (v instanceof Highlight) {
-        return Data_Lens_Setter.over(function ($43) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($43));
+        return Data_Lens_Setter.over(function ($99) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($99));
         })(insert(v.value0));
     };
     if (v instanceof UnHighlight) {
-        return Data_Lens_Setter.over(function ($44) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($44));
+        return Data_Lens_Setter.over(function ($100) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($100));
         })($$delete(v.value0));
     };
-    throw new Error("Failed pattern match at Main (line 146, column 1 - line 146, column 37): " + [ v.constructor.name ]);
+    throw new Error("Failed pattern match at Main (line 168, column 1 - line 168, column 42): " + [ v.constructor.name ]);
 };
-var demo = applyOp(new UpdateFocus("goofus"))(applyOp(new Highlight("thingo"))(applyOp(AddNode.create("thingo")({
+var buildGraph = function (ops) {
+    var urr = function ($copy_v) {
+        return function ($copy_v1) {
+            return function ($copy_rev) {
+                return function ($copy_v2) {
+                    var $tco_var_v = $copy_v;
+                    var $tco_var_v1 = $copy_v1;
+                    var $tco_var_rev = $copy_rev;
+                    var $tco_done = false;
+                    var $tco_result;
+                    function $tco_loop(v, v1, rev, v2) {
+                        if (v === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Op)) {
+                            $tco_var_v = 0;
+                            $tco_var_v1 = v1;
+                            $tco_var_rev = new Data_List_Types.Cons(v2.value0.value0, rev);
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Op) {
+                            $tco_var_v = v - 1 | 0;
+                            $tco_var_v1 = v1;
+                            $tco_var_rev = rev;
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        if (v === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Redo)) {
+                            $tco_var_v = 0;
+                            $tco_var_v1 = v1 + 1 | 0;
+                            $tco_var_rev = rev;
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Redo) {
+                            $tco_var_v = v - 1 | 0;
+                            $tco_var_v1 = v1;
+                            $tco_var_rev = rev;
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        if (v1 === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Undo)) {
+                            $tco_var_v = v + 1 | 0;
+                            $tco_var_v1 = 0;
+                            $tco_var_rev = rev;
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Undo) {
+                            $tco_var_v = v;
+                            $tco_var_v1 = v1 - 1 | 0;
+                            $tco_var_rev = rev;
+                            $copy_v2 = v2.value1;
+                            return;
+                        };
+                        $tco_done = true;
+                        return rev;
+                    };
+                    while (!$tco_done) {
+                        $tco_result = $tco_loop($tco_var_v, $tco_var_v1, $tco_var_rev, $copy_v2);
+                    };
+                    return $tco_result;
+                };
+            };
+        };
+    };
+    var undoRedoReverse = function (ops$prime) {
+        return urr(0)(0)(Data_List_Types.Nil.value)(ops$prime);
+    };
+    return Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(emptyGraph)(undoRedoReverse(ops));
+};
+var demo = buildGraph(new Data_List_Types.Cons(new Op(new UpdateFocus("goofus")), new Data_List_Types.Cons(new Op(new Highlight("thingo")), new Data_List_Types.Cons(new Op(AddNode.create({
     text: "thingo",
     id: "thingo",
     x: 205.0,
@@ -43873,7 +44341,7 @@ var demo = applyOp(new UpdateFocus("goofus"))(applyOp(new Highlight("thingo"))(a
     children: emptyNodeIdSet,
     parents: singletonNodeIdSet("goofus"),
     subgraphNodes: Foreign_Object.empty
-}))(applyOp(AddNode.create("goofus")({
+})), new Data_List_Types.Cons(new Op(AddNode.create({
     text: "goofus",
     id: "goofus",
     x: 455.0,
@@ -43881,7 +44349,19 @@ var demo = applyOp(new UpdateFocus("goofus"))(applyOp(new Highlight("thingo"))(a
     children: singletonNodeIdSet("thingo"),
     parents: emptyNodeIdSet,
     subgraphNodes: Foreign_Object.empty
-}))(emptyGraph))));
+})), Data_List_Types.Nil.value)))));
+var lookupNode = function (g) {
+    return function (nodeId) {
+        return Data_Lens_Getter.view(function ($101) {
+            return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($101)));
+        })(g);
+    };
+};
+var lookupNodes = function (g) {
+    return function (nodeIds) {
+        return Data_Array.mapMaybe(lookupNode(g))(Foreign_Object.keys(nodeIds));
+    };
+};
 module.exports = {
     insert: insert,
     "delete": $$delete,
@@ -43893,9 +44373,14 @@ module.exports = {
     AddNode: AddNode,
     RemoveNode: RemoveNode,
     MoveNode: MoveNode,
-    EndMovement: EndMovement,
+    AddParent: AddParent,
+    RemoveParent: RemoveParent,
+    AddChild: AddChild,
+    RemoveChild: RemoveChild,
     AddEdge: AddEdge,
     RemoveEdge: RemoveEdge,
+    UpdateText: UpdateText,
+    UpdateSubgraphNodes: UpdateSubgraphNodes,
     UpdateFocus: UpdateFocus,
     Highlight: Highlight,
     UnHighlight: UnHighlight,
@@ -43907,13 +44392,32 @@ module.exports = {
     "_children": _children,
     "_x": _x,
     "_y": _y,
+    "_text": _text,
+    "_subgraphNodes": _subgraphNodes,
     addParent: addParent,
-    deleteParent: deleteParent,
+    removeParent: removeParent,
     addChild: addChild,
-    deleteChild: deleteChild,
+    removeChild: removeChild,
     moveNode: moveNode,
-    applyOp: applyOp,
-    demo: demo
+    updateText: updateText,
+    updateSubgraphNodes: updateSubgraphNodes,
+    applyGraphOp: applyGraphOp,
+    demo: demo,
+    oppy: oppy,
+    graphLength: graphLength,
+    emptyUndoableGraph: emptyUndoableGraph,
+    Op: Op,
+    Undo: Undo,
+    Redo: Redo,
+    addOp: addOp,
+    doOp: doOp,
+    undo: undo,
+    redo: redo,
+    buildGraph: buildGraph,
+    lookupNode: lookupNode,
+    lookupNodes: lookupNodes,
+    terminalestNode: terminalestNode,
+    fromMaybe: fromMaybe
 };
 
 
@@ -45320,6 +45824,16 @@ var subtract = function(plus, minus) {
 };
 exports.subtract = subtract;
 
+var union = function(s1, s2) {
+    return fromArray(
+        Utils.concatenate(
+            toArray(s1),
+            toArray(s2)
+        )
+    );
+};
+exports.union = union;
+
 
 /***/ }),
 
@@ -45459,6 +45973,7 @@ const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
 
 var graphNodes = {
     "a": {
+        "id": "a",
         "text": "do all the things plz",
         "x": 100,
         "y": 100,
@@ -45469,6 +45984,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "b": {
+        "id": "b",
         "text": "TODO: woohoo!",
         "x": 150,
         "y": 200,
@@ -45477,6 +45993,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "c": {
+        "id": "c",
         "text": "today I frink",
         "x": 100,
         "y": 150,
@@ -45485,6 +46002,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "d": {
+        "id": "d",
         "text": "shopping list: ka-pow!",
         "x": 200,
         "y": 250,
@@ -45510,14 +46028,18 @@ function copyPursGraph(pursGraph) {
 graphUI.update();
 
 // TODO: remove debugging hackz
-var purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
-window.purs = purs;
-window.graph = graph;
+var Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
+window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
-window.graphUI.graph = copyPursGraph(purs.demo);
+window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
+window.graphUI.graph.newNodeBelowFocus();
+window.graphUI.update();
+window.graphUI.graph.usePursGraph();
+window.graphUI.update();
+window.graph = window.graphUI.graph;
 
 
 /***/ })

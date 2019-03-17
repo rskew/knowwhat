@@ -147,7 +147,11 @@ module.exports = function GraphUI(graph) {
                     .text(d => d[1].text)
                     .lower()
                     .on("keydown", function (d) {
-                        d[1].text = this.innerText;
+                        graphUI.graph.updateText(d[0], this.innerText);
+                        graphUI.update();
+                    })
+                    .on("keyup", function (d) {
+                        graphUI.graph.updateText(d[0], this.innerText);
                         graphUI.update();
                     }),
                 update => update
@@ -157,14 +161,13 @@ module.exports = function GraphUI(graph) {
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
-                            d[0] == graphUI.graph.focusedNodeId) {
+                            d[0] == graphUI.graph.focusNode) {
                             d3.select(this).select("div").select("div").node().focus();
                         } else {
                             d3.select(this).select("div").select("div").node().blur();
                         }
                     })
             );
-
     };
 
     graphUI.updateNodes = function () {
@@ -183,13 +186,13 @@ module.exports = function GraphUI(graph) {
                     })
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusedNodeId),
+                    .classed("focused", d => d[0] == graphUI.graph.focusNode),
                 update => update
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusedNodeId)
+                    .classed("focused", d => d[0] == graphUI.graph.focusNode)
             );
     };
 
@@ -276,6 +279,7 @@ module.exports = function GraphUI(graph) {
     };
 
     graphUI.update = function () {
+        graphUI.graph.usePursGraph();
 
         graphUI.updateEdges();
 

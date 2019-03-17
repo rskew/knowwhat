@@ -95,3 +95,13 @@ var subtract = function(plus, minus) {
     );
 };
 exports.subtract = subtract;
+
+var union = function(s1, s2) {
+    return fromArray(
+        Utils.concatenate(
+            toArray(s1),
+            toArray(s2)
+        )
+    );
+};
+exports.union = union;
