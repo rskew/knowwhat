@@ -44,6 +44,17 @@ line {
     stroke-width: 1.5px;
 }
 
+line.focused {
+    stroke: #fc0;
+    stroke-width: 3px;
+}
+
+.edgeBorder {
+    stroke: #0001;
+    stroke-width: 25px;
+    opacity: 0.0;
+}
+
 line.drawing {
     pointer-events: none;
 }

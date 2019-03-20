@@ -22,10 +22,11 @@ module Main where
 -- will require some interplay between the graph and the list of operations
 -- for undo/redo.
 
-import Prelude (Unit, unit, ($), (<<<), map, (-), (+), flip, (==), compare, Ordering, append)
-import Data.Foldable (foldl, maximumBy)
-import Data.Array (mapMaybe, filter)
-import Data.Maybe (Maybe(..))
+import Prelude (Unit, unit, ($), (<<<), map, (-), (+), flip, (==), compare, Ordering, append, (<>), (<), (<=))
+import Data.String (Pattern(..), split)
+import Data.Foldable (foldl, maximumBy, foldMap, all)
+import Data.Array (mapMaybe, filter, sortWith, partition, reverse, (!!))
+import Data.Maybe (Maybe(..), isJust)
 import Data.Maybe as Maybe
 import Foreign.Object as Object
 import Foreign.Object (Object, keys, size)
@@ -54,15 +55,15 @@ emptyNodeIdSet = Object.empty
 
 newtype Graph = Graph
   { nodes :: Object GraphNode
-  , focusNode :: NodeId
-  , highlightedNodes :: NodeIdSet
+  , focus :: Focus
+  , highlighted :: NodeIdSet
   }
 
 emptyGraph :: Graph
 emptyGraph = Graph
   { nodes: Object.empty
-  , focusNode: ""
-  , highlightedNodes: emptyNodeIdSet
+  , focus: NoFocus
+  , highlighted: emptyNodeIdSet
   }
 
 newtype GraphNode = GraphNode
@@ -77,7 +78,17 @@ newtype GraphNode = GraphNode
 
 type Point2D = { x :: Number, y :: Number }
 
-type Edge = { from :: NodeId, to :: NodeId }
+type Edge = { source :: NodeId, target :: NodeId }
+
+type EdgeId = String
+
+computeEdgeId :: Edge -> String
+computeEdgeId edge = edge.source <> "." <> edge.target
+
+data Focus =
+  FocusNode String
+  | FocusEdge String
+  | NoFocus
 
 data GraphOp =
   AddNode GraphNode
@@ -92,7 +103,7 @@ data GraphOp =
   | RemoveEdge Edge
   | UpdateText NodeId String
   | UpdateSubgraphNodes NodeId (Object GraphNode)
-  | UpdateFocus NodeId
+  | UpdateFocus Focus
   | Highlight NodeId
   | UnHighlight NodeId
 
@@ -100,15 +111,15 @@ data GraphOp =
 -- Lens boilerplate
 
 _Graph :: Lens' Graph {nodes :: Object GraphNode,
-                       focusNode :: NodeId,
-                       highlightedNodes :: NodeIdSet}
+                       focus :: Focus,
+                       highlighted :: NodeIdSet}
 _Graph = lens (\(Graph g) -> g) (\_ -> Graph)
 
 _nodes :: forall r. Lens' { nodes :: Object GraphNode | r } (Object GraphNode)
 _nodes = prop (SProxy :: SProxy "nodes")
 
-_highlightedNodes :: forall r. Lens' { highlightedNodes :: NodeIdSet | r } NodeIdSet
-_highlightedNodes = prop (SProxy :: SProxy "highlightedNodes")
+_highlighted :: forall r. Lens' { highlighted :: NodeIdSet | r } NodeIdSet
+_highlighted = prop (SProxy :: SProxy "highlighted")
 
 _GraphNode :: Lens' GraphNode { text :: String
                               , id :: NodeId
@@ -135,12 +146,18 @@ _y = prop (SProxy :: SProxy "y")
 _text :: forall r. Lens' { text :: String | r } String
 _text = prop (SProxy :: SProxy "text")
 
+_id :: forall r. Lens' { id :: String | r } String
+_id = prop (SProxy :: SProxy "id")
+
 _subgraphNodes :: forall r. Lens' { subgraphNodes :: Object GraphNode | r } (Object GraphNode)
 _subgraphNodes = prop (SProxy :: SProxy "subgraphNodes")
 
+_focus :: forall r. Lens' { focus :: Focus | r } Focus
+_focus = prop (SProxy :: SProxy "focus")
+
 
 ------
--- How GraphNode and Graph actually work
+-- Graph logic
 
 addParent :: NodeId -> GraphNode -> GraphNode
 addParent nodeId = over (_GraphNode <<< _parents) $ insert nodeId
@@ -181,30 +198,30 @@ applyGraphOp (AddChild nodeId childId) =
 applyGraphOp (RemoveChild nodeId childId) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ removeChild childId
 applyGraphOp (AddEdge edge) =
-  applyGraphOp (AddParent edge.to edge.from)
+  applyGraphOp (AddParent edge.target edge.source)
   <<<
-  applyGraphOp (AddChild edge.from edge.to)
+  applyGraphOp (AddChild edge.source edge.target)
 applyGraphOp (RemoveEdge edge) =
-  applyGraphOp (RemoveParent edge.to edge.from)
+  applyGraphOp (RemoveParent edge.target edge.source)
   <<<
-  applyGraphOp (RemoveChild edge.from edge.to)
+  applyGraphOp (RemoveChild edge.source edge.target)
 applyGraphOp (UpdateText nodeId newText) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ updateText newText
 applyGraphOp (UpdateSubgraphNodes nodeId newSubgraphNodes) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ updateSubgraphNodes newSubgraphNodes
-applyGraphOp (UpdateFocus nodeId) =
-  over _Graph (_ { focusNode = nodeId})
+applyGraphOp (UpdateFocus newFocus) =
+  over _Graph (_ { focus = newFocus})
 applyGraphOp (Highlight nodeId) =
-  over (_Graph <<< _highlightedNodes) (insert nodeId)
+  over (_Graph <<< _highlighted) (insert nodeId)
 applyGraphOp (UnHighlight nodeId) =
-  over (_Graph <<< _highlightedNodes) (delete nodeId)
+  over (_Graph <<< _highlighted) (delete nodeId)
 
 
 
 
 demo :: Graph
 demo = buildGraph
-       ( Op (UpdateFocus "goofus")
+       ( Op (UpdateFocus (FocusNode "goofus"))
        : Op (Highlight "thingo")
        : Op (AddNode $ GraphNode
            { text: "thingo"
@@ -261,15 +278,18 @@ addOp op ops = case op of
   _ -> op : ops
 
 
+------
+-- Graph Interactions
+
 --| Whereas a GraphOp represents a fundamental graph operation,
---| an UndoableUIOp represents an abstract relation between
+--| an GraphInteraction represents an abstract relation between
 --| the before and after affect of the operation.
---| An UndoableUIOp is used as a record of an UI operation having happened,
+--| An GraphInteraction is used as a record of an UI operation having happened,
 --| rather than a description of an operation which is to be applied.
 --| For example, when grouping a set of nodes, the group node which is
 --| then constructed is an output of the operation, but it is recorded
 --| in the Group data so that the operation can be undone.
---data UndoableUIOp =
+--data GraphInteraction =
   --NewNode GraphNode
   --| AddEdge Edge
   --| RemoveEdge Edge
@@ -280,6 +300,86 @@ addOp op ops = case op of
   --| UnGroup GraphNode (Object GraphNode)
   --| UngroupNode
 
+
+removeFocus :: Graph -> UndoableGraph -> UndoableGraph
+removeFocus g ops = case view (_Graph <<< _focus) g of
+  NoFocus -> ops
+  FocusNode nodeId -> case lookupNode g nodeId of
+    Nothing -> ops
+    Just (GraphNode focusNode) ->
+      let
+        newFocus currentFocus = case size focusNode.parents of
+          0 -> case (keys focusNode.children) !! 0 of
+            Nothing -> NoFocus
+            Just childId -> FocusNode childId
+          otherwise -> case (keys focusNode.parents) !! 0 of
+            Nothing -> NoFocus
+            Just parentId -> FocusNode parentId
+      in doOp
+        (UpdateFocus (newFocus focusNode))
+        $ doOp (RemoveNode (GraphNode focusNode)) ops
+  FocusEdge edgeId -> case lookupEdge g edgeId of
+    Nothing -> ops
+    Just edge -> doOp (UpdateFocus (FocusNode edge.source))
+      $ doOp (RemoveEdge edge) ops
+
+
+------
+-- Traversal
+
+traverseUp :: Graph -> UndoableGraph -> UndoableGraph
+traverseUp g ops = case getFocusNode g of
+  Just (GraphNode node) -> case (keys node.parents) !! 0 of
+    Nothing -> ops
+    Just parentId -> doOp (UpdateFocus (FocusNode parentId)) ops
+  Nothing -> ops
+
+traverseDown :: Graph -> UndoableGraph -> UndoableGraph
+traverseDown g ops = case getFocusNode g of
+  Just (GraphNode node) -> case (keys node.children) !! 0 of
+    Nothing -> ops
+    Just childId -> doOp (UpdateFocus (FocusNode childId)) ops
+  Nothing -> ops
+
+siblings :: Graph -> GraphNode -> NodeIdSet
+siblings g node = foldMap (view (_GraphNode <<< _children)) parents
+  where
+    parents = lookupNodes g parentIds
+    parentIds = view (_GraphNode <<< _parents) node
+
+coparents :: Graph -> GraphNode -> NodeIdSet
+coparents g node = foldMap (view (_GraphNode <<< _parents)) children
+  where
+    children = lookupNodes g childIds
+    childIds = view (_GraphNode <<< _children) node
+
+nodeOnLeft :: Graph -> GraphNode -> GraphNode
+nodeOnLeft g node = fromMaybe node $ toTheLeft !! 0
+  where
+    siblingsAndCoparents = lookupNodes g $ siblings g node <> coparents g node
+    xSortedSibCops = sortWith viewX siblingsAndCoparents
+    viewX = view (_GraphNode <<< _x)
+    splitSortedSibCops = partition (\n -> viewX n < viewX node) xSortedSibCops
+    toTheLeft = reverse $ splitSortedSibCops.no <> splitSortedSibCops.yes
+
+traverseLeft :: Graph -> UndoableGraph -> UndoableGraph
+traverseLeft g ops = case getFocusNode g of
+  Nothing -> ops
+  Just graphNode -> doOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnLeft g graphNode)))) ops
+
+nodeOnRight :: Graph -> GraphNode -> GraphNode
+nodeOnRight g node = fromMaybe node $ toTheRight !! 0
+  where
+    siblingsAndCoparents = lookupNodes g $ siblings g node <> coparents g node
+    xSortedSibCops = sortWith viewX siblingsAndCoparents
+    viewX = view (_GraphNode <<< _x)
+    splitSortedSibCops = partition (\n -> viewX n <= viewX node) xSortedSibCops
+    toTheRight = splitSortedSibCops.no <> splitSortedSibCops.yes
+
+traverseRight :: Graph -> UndoableGraph -> UndoableGraph
+traverseRight g ops = case getFocusNode g of
+  Nothing -> ops
+  Just graphNode -> doOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnRight g graphNode)))) ops
 
 ------
 -- Wrap purs stuff for easy use from JS
@@ -330,6 +430,21 @@ lookupNode g nodeId = view (_Graph <<< _nodes <<< at nodeId) g
 lookupNodes :: Graph -> NodeIdSet -> Array GraphNode
 lookupNodes g nodeIds = mapMaybe (lookupNode g) $ keys nodeIds
 
+getFocusNode :: Graph -> Maybe GraphNode
+getFocusNode g = case view (_Graph <<< _focus) g of
+  FocusNode nodeId -> lookupNode g nodeId
+  otherwise -> Nothing
+
+lookupEdge :: Graph -> EdgeId -> Maybe Edge
+lookupEdge g edgeId =
+  let edgeNodeIds = split (Pattern ".") edgeId
+      sourceId = fromMaybe "" $ edgeNodeIds !! 0
+      targetId = fromMaybe "" $ edgeNodeIds !! 1
+  in
+  case all isJust [lookupNode g sourceId, lookupNode g targetId] of
+    false -> Nothing
+    true -> Just { source : sourceId, target: targetId }
+
 ------
 -- Graph Queries
 
@@ -340,6 +455,7 @@ terminalestNode nodes = case filter isTerminal nodes of
   where
     mostParentsLowest :: GraphNode -> GraphNode -> Ordering
     mostParentsLowest a b = compare (nParents a) (nParents b) `append` lower a b
+    lower :: GraphNode -> GraphNode -> Ordering
     lower a b = compare (getY a) (getY b)
     isTerminal :: GraphNode -> Boolean
     isTerminal node = nChildren node == 0
@@ -349,6 +465,14 @@ terminalestNode nodes = case filter isTerminal nodes of
     getY :: GraphNode -> Number
     getY = view (_GraphNode <<< _y)
 
--- TODO: actually re-export to JS
+-- TODO: re-export to JS using module system properly
 fromMaybe :: forall a. a -> Maybe a -> a
 fromMaybe = Maybe.fromMaybe
+
+maybe :: forall a. a -> Maybe a
+maybe = Just
+
+fromFocus :: Focus -> String
+fromFocus NoFocus = ""
+fromFocus (FocusNode nodeId) = nodeId
+fromFocus (FocusEdge edgeId) = edgeId

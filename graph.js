@@ -12,11 +12,11 @@ function GraphNodeBody(id, text, x, y, parents, children) {
     this.subgraphNodes = {};
 }
 
-function Graph(graphNodes, focusNode, highlightedNodes) {
+function Graph(graphNodes, focus, highlighted) {
     var graph = this;
-    graph.nodes = graphNodes;
-    graph.focusNode = focusNode;
-    graph.highlightedNodes = highlightedNodes;
+    //graph.nodes = graphNodes;
+    //graph.focus = focus;
+    //graph.highlighted= highlighted;
 
     // Create the Purescript graph to play along with the JS one
     graph.pursGraph = Purs.emptyUndoableGraph;
@@ -38,16 +38,16 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         node = Object.values(graphNodes)[i];
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(node)));
     }
-    for (i=0; i<Object.keys(highlightedNodes).length; i++) {
-        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlightedNodes)));
+    for (i=0; i<Object.keys(highlighted).length; i++) {
+        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlighted)));
     }
-    graph.updatePurs(Purs.UpdateFocus.create(focusNode));
+    graph.updatePurs(Purs.UpdateFocus.create(focus));
 
     graph.usePursGraph = function() {
         builtPursGraph = Purs.buildGraph(graph.pursGraph);
         graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
-        graph.focusNode = builtPursGraph.focusNode;
-        graph.highlightedNodes = builtPursGraph.highlightedNodes;
+        graph.focus = builtPursGraph.focus;
+        graph.highlighted = builtPursGraph.highlighted;
         console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
         return graph;
     };
@@ -64,7 +64,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     ///////////////////////////////////
     //////// Graph manipulation
 
-    graph.getEdges = function () {
+    graph.getEdgeNodes = function () {
         return [].concat.apply(
             [], [].concat.apply(
                 [], Object.entries(graph.nodes).map(
@@ -74,11 +74,13 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     };
 
     graph.newNodeBelowFocus = function () {
-        if (graph.focusNode != null) {
-            newNodePos = graph.getNewNodePosition(graph.focusNode);
+        if (Purs.fromFocus(graph.focus) != null) {
+            console.log(graph.focus);
+            console.log(Purs.fromFocus(graph.focus));
+            newNodePos = graph.getNewNodePosition(Purs.fromFocus(graph.focus));
             graph.createNode(newNodePos.x,
                              newNodePos.y,
-                             StringSet.singleton(graph.focusNode),
+                             StringSet.singleton(Purs.fromFocus(graph.focus)),
                              StringSet.empty());
         } else {
             graph.createNode(initNodePos.x,
@@ -104,34 +106,37 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         // New PS graph
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
         for (i=0; i<StringSet.cardinality(parentIds); i++) {
+            console.log(StringSet.lookupIndex(i, parentIds));
+            console.log(newNodeId);
             graph.updatePurs(Purs.AddEdge.create(
-                {"from": StringSet.lookupIndex(i, parentIds), "to":   newNodeId}));
+                {"source": StringSet.lookupIndex(i, parentIds), "target": newNodeId}));
         }
         for (i=0; i<StringSet.cardinality(childIds); i++) {
             graph.updatePurs(Purs.AddEdge.create(
-                {"from": newNodeId, "to":   StringSet.lookupIndex(i, childIds)}));
+                {"source": newNodeId, "target":   StringSet.lookupIndex(i, childIds)}));
         }
 
-        graph.focusOn(newNodeId);
+        graph.focusOnNode(newNodeId);
 
         return newNodeId;
     };
 
-    graph.removeFocusedNode = function () {
-        focusedNode = graph.nodes[graph.focusNode];
-        if (StringSet.cardinality(focusedNode.parents) > 0) {
-            nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
-        } else if (StringSet.cardinality(focusedNode.children) > 0) {
-            nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
-        } else {
-            // Give the focus to the first node in the list, because what else are
-            // you going to do
-            nextFocusId = Utils.arrayWithoutElement(graph.focusNode, Object.keys(graph.nodes))[0];
-        }
-        for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
-        }
-        graph.deleteNode(graph.focusNode);
-        graph.focusOn(nextFocusId);
+    graph.removeFocused = function () {
+        graph.pursGraph = Purs.removeFocus(graph)(graph.pursGraph);
+        //focusedNode = graph.nodes[Purs.fromFocus(graph.focus)];
+        //if (StringSet.cardinality(focusedNode.parents) > 0) {
+        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
+        //} else if (StringSet.cardinality(focusedNode.children) > 0) {
+        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
+        //} else {
+        //    // Give the focus to the first node in the list, because what else are
+        //    // you going to do
+        //    nextFocusId = Utils.arrayWithoutElement(Purs.fromFocus(graph.focus), Object.keys(graph.nodes))[0];
+        //}
+        //for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
+        //}
+        //graph.deleteNode(Purs.fromFocus(graph.focus));
+        //graph.focusOnNode(nextFocusId);
         return graph;
     };
 
@@ -158,7 +163,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         //StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
 
         // New PS graph
-        graph.updatePurs(Purs.AddEdge.create({"from": sourceId, "to": targetId}));
+        graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
 
         return graph;
     };
@@ -169,7 +174,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         //StringSet.deleteInPlace(sourceId, graph.nodes[targetId].parents);
 
         // New PS graph
-        graph.updatePurs(Purs.RemoveEdge.create({"from": sourceId, "to": targetId}));
+        graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
 
         return graph;
     };
@@ -355,23 +360,23 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     //////// Grouping/ungrouping
 
     graph.groupHighlighted = function () {
-        parents = graph.getParentsOfStringSet(graph.highlightedNodes);
-        children = graph.getChildrenOfStringSet(graph.highlightedNodes);
+        parents = graph.getParentsOfStringSet(graph.highlighted);
+        children = graph.getChildrenOfStringSet(graph.highlighted);
         terminalestNode = Purs.fromMaybe(undefined)(
-            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlightedNodes)));
+            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlighted)));
 
         groupNodeId = graph.createNode(terminalestNode.x, terminalestNode.y, parents, children);
         graph.updateText(groupNodeId, terminalestNode.text);
 
-        graph.removeEdgesToFromStringSet(graph.highlightedNodes);
+        graph.removeEdgesToFromStringSet(graph.highlighted);
 
         // Hide the highlighted nodes inside the group node
-        newSubgraphNodes = graph.extractNodes(graph.highlightedNodes);
+        newSubgraphNodes = graph.extractNodes(graph.highlighted);
         //graph.nodes[groupNodeId].subgraphNodes = newSubgraphNodes;
         graph.updatePurs(Purs.UpdateSubgraphNodes.create(groupNodeId)(newSubgraphNodes));
 
         graph.clearHighlights();
-        graph.focusOn(groupNodeId);
+        graph.focusOnNode(groupNodeId);
 
         return graph;
     };
@@ -392,7 +397,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         // Pick the first node of group to have the focus
         // TODO: terminalestNode
         newFocusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
-        graph.focusOn(newFocusedNodeId);
+        graph.focusOnNode(newFocusedNodeId);
 
         // Highlight expanded group
         newHighlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
@@ -405,13 +410,13 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     };
 
     graph.expandGroupInFocus = function () {
-        if (!Utils.isEmptyObject(graph.nodes[graph.focusNode].subgraphNodes)) {
-            graph.expandGroup(graph.focusNode);
+        if (!Utils.isEmptyObject(graph.nodes[Purs.fromFocus(graph.focus)].subgraphNodes)) {
+            graph.expandGroup(Purs.fromFocus(graph.focus));
         }
     };
 
     graph.toggleGroupExpand = function () {
-        if (StringSet.cardinality(graph.highlightedNodes) == 0) {
+        if (StringSet.cardinality(graph.highlighted) == 0) {
             graph.expandGroupInFocus();
         } else {
             graph.groupHighlighted();
@@ -423,120 +428,131 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     //////// Traversal functions
 
     graph.traverseUp = function () {
-        parents = graph.nodes[graph.focusNode].parents;
-        if (StringSet.cardinality(parents) > 0) {
-            newFocus = StringSet.lookupIndex(0, parents);
-            graph.focusOn(newFocus);
-        }
+        graph.pursGraph = Purs.traverseUp(graph)(graph.pursGraph);
+        //parents = graph.nodes[Purs.fromFocus(graph.focus)].parents;
+        //if (StringSet.cardinality(parents) > 0) {
+        //    newFocus = StringSet.lookupIndex(0, parents);
+        //    graph.focusOnNode(newFocus);
+        //}
         return graph;
     };
 
     graph.traverseDown = function () {
-        children = graph.nodes[graph.focusNode].children;
-        if (StringSet.cardinality(children) > 0) {
-            newFocus = StringSet.lookupIndex(0, children);
-            graph.focusOn(newFocus);
-        }
+        graph.pursGraph = Purs.traverseDown(graph)(graph.pursGraph);
+        //children = graph.nodes[Purs.fromFocus(graph.focus)].children;
+        //if (StringSet.cardinality(children) > 0) {
+        //    newFocus = StringSet.lookupIndex(0, children);
+        //    graph.focusOnNode(newFocus);
+        //}
         return graph;
     };
 
     graph.traverseLeft = function () {
-        newFocus = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusNode).left;
-        graph.focusOn(newFocus);
+        graph.pursGraph = Purs.traverseLeft(graph)(graph.pursGraph);
+        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
+        //    Purs.fromFocus(graph.focus)).left;
+        //graph.focusOnNode(newFocus);
         return graph;
     };
 
     graph.traverseRight = function () {
-        newFocus = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusNode).right;
-        graph.focusOn(newFocus);
+        graph.pursGraph = Purs.traverseRight(graph)(graph.pursGraph);
+        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
+        //    Purs.fromFocus(graph.focus)).right;
+        //graph.focusOnNode(newFocus);
         return graph;
     };
 
-    graph.traverseAddGroup = function (traversalFunc) {
-        return function () {
-            graph.focusOn(graph.nodes[traverselFunc]);
-            return graph;
-        };
-    };
+    //graph.traverseAddGroup = function (traversalFunc) {
+    //    return function () {
+    //        graph.focusOnNode(graph.nodes[traverselFunc]);
+    //        return graph;
+    //    };
+    //};
 
-    graph.getNeighboringSiblingOrCoparentIds = function (nodeId) {
-        /*
-          Find the nodes that share a parent or child of the given node.
-          Sort the nodes by their x location, such that left/right movement
-          is spatially coherent.
-          */
-        siblingsAndCoparentsIds = [];
-        StringSet.map(graph.nodes[nodeId].parents,
-            parentId => StringSet.map(graph.nodes[parentId].children,
-                siblingId => siblingsAndCoparentsIds.push(siblingId)
-            )
-        );
-        StringSet.map(graph.nodes[nodeId].children,
-            childId => StringSet.map(graph.nodes[childId].parents,
-                coparentId => siblingsAndCoparentsIds.push(coparentId))
-        );
-        // Sort siblings by x index.
-        // Store graph so that the sorting comparison function can access it,
-        // as it appears to run outside the constructor context.
-        graphNodes = graph.nodes;
-        siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
-        onLeft = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x < graph.nodes[graph.focusNode].x);
-        onRight = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x > graph.nodes[graph.focusNode].x);
-        return {
-            "left": onLeft.length > 0
-                ? onLeft[onLeft.length - 1]
-                : siblingsAndCoparentsIds[siblingsAndCoparentsIds.length-1],
-            "right": onRight.length > 0 ? onRight[0] : siblingsAndCoparentsIds[0],
-        };
-    };
+    //graph.getNeighboringSiblingOrCoparentIds = function (nodeId) {
+    //    /*
+    //      Find the nodes that share a parent or child of the given node.
+    //      Sort the nodes by their x location, such that left/right movement
+    //      is spatially coherent.
+    //      */
+    //    siblingsAndCoparentsIds = [];
+    //    StringSet.map(graph.nodes[nodeId].parents,
+    //        parentId => StringSet.map(graph.nodes[parentId].children,
+    //            siblingId => siblingsAndCoparentsIds.push(siblingId)
+    //        )
+    //    );
+    //    StringSet.map(graph.nodes[nodeId].children,
+    //        childId => StringSet.map(graph.nodes[childId].parents,
+    //            coparentId => siblingsAndCoparentsIds.push(coparentId))
+    //    );
+    //    // Sort siblings by x index.
+    //    // Store graph so that the sorting comparison function can access it,
+    //    // as it appears to run outside the constructor context.
+    //    graphNodes = graph.nodes;
+    //    siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
+    //    onLeft = siblingsAndCoparentsIds.filter(
+    //        nodeId => graph.nodes[nodeId].x < graph.nodes[Purs.fromFocus(graph.focus)].x);
+    //    onRight = siblingsAndCoparentsIds.filter(
+    //        nodeId => graph.nodes[nodeId].x > graph.nodes[Purs.fromFocus(graph.focus)].x);
+    //    return {
+    //        "left": onLeft.length > 0
+    //            ? onLeft[onLeft.length - 1]
+    //            : siblingsAndCoparentsIds[siblingsAndCoparentsIds.length-1],
+    //        "right": onRight.length > 0 ? onRight[0] : siblingsAndCoparentsIds[0],
+    //    };
+    //};
 
     ///////////////////////////////////
     //////// Highlighting a selection/focusing
 
-    graph.focusOn = function (nodeId) {
-        //graph.focusNode = nodeId;
-        graph.updatePurs(Purs.UpdateFocus.create(nodeId));
+    graph.focusOnNode = function (id) {
+        graph.focusOn(Purs.FocusNode.create(id));
+    };
+
+    graph.focusOnEdge = function (id) {
+        graph.focusOn(Purs.FocusEdge.create(id));
+    };
+
+    graph.focusOn = function (focus) {
+        graph.updatePurs(Purs.UpdateFocus.create(focus));
     };
 
     graph.unHighlightNode = function(nodeId) {
         //// Old JS graph
-        //StringSet.deleteInPlace(nodeId, graph.highlightedNodes);
+        //StringSet.deleteInPlace(nodeId, graph.highlighted);
         // New PS graph
         graph.updatePurs(Purs.UnHighlight.create(nodeId));
     };
 
     graph.highlightNode = function(nodeId) {
         //// Old JS graph
-        //StringSet.insertInPlace(nodeId, graph.highlightedNodes);
+        //StringSet.insertInPlace(nodeId, graph.highlighted);
         // New PS graph
         graph.updatePurs(Purs.Highlight.create(nodeId));
     };
 
-    graph.highlightFocusNode = function () {
-        graph.highlightNode(graph.focusNode);
+    graph.highlightFocus = function () {
+        graph.highlightNode(Purs.fromFocus(graph.focus));
         return graph;
     };
 
-    graph.unHighlightFocusNode = function () {
-        graph.unHighlightNode(graph.focusNode);
+    graph.unHighlightFocus = function () {
+        graph.unHighlightNode(Purs.fromFocus(graph.focus));
         return graph;
     };
 
-    graph.toggleHighlightFocusNode = function () {
-        if (!StringSet.isIn(graph.focusNode, graph.highlightedNodes)) {
-            graph.highlightFocusNode();
+    graph.toggleHighlightFocus = function () {
+        if (!StringSet.isIn(Purs.fromFocus(graph.focus), graph.highlighted)) {
+            graph.highlightFocus();
         } else {
-            graph.unHighlightFocusNode();
+            graph.unHighlightFocus();
         }
         return graph;
     };
 
     graph.replaceHighlighted = function(newHighlighted) {
-        oldHighlightedNodes = StringSet.copy(graph.highlightedNodes);
+        oldHighlightedNodes = StringSet.copy(graph.highlighted);
         for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
             graph.unHighlightNode(
                 StringSet.lookupIndex(i, oldHighlightedNodes));

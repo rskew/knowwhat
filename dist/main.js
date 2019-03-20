@@ -18410,11 +18410,11 @@ function GraphNodeBody(id, text, x, y, parents, children) {
     this.subgraphNodes = {};
 }
 
-function Graph(graphNodes, focusNode, highlightedNodes) {
+function Graph(graphNodes, focus, highlighted) {
     var graph = this;
-    graph.nodes = graphNodes;
-    graph.focusNode = focusNode;
-    graph.highlightedNodes = highlightedNodes;
+    //graph.nodes = graphNodes;
+    //graph.focus = focus;
+    //graph.highlighted= highlighted;
 
     // Create the Purescript graph to play along with the JS one
     graph.pursGraph = Purs.emptyUndoableGraph;
@@ -18436,16 +18436,16 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         node = Object.values(graphNodes)[i];
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(node)));
     }
-    for (i=0; i<Object.keys(highlightedNodes).length; i++) {
-        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlightedNodes)));
+    for (i=0; i<Object.keys(highlighted).length; i++) {
+        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlighted)));
     }
-    graph.updatePurs(Purs.UpdateFocus.create(focusNode));
+    graph.updatePurs(Purs.UpdateFocus.create(focus));
 
     graph.usePursGraph = function() {
         builtPursGraph = Purs.buildGraph(graph.pursGraph);
         graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
-        graph.focusNode = builtPursGraph.focusNode;
-        graph.highlightedNodes = builtPursGraph.highlightedNodes;
+        graph.focus = builtPursGraph.focus;
+        graph.highlighted = builtPursGraph.highlighted;
         console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
         return graph;
     };
@@ -18462,7 +18462,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     ///////////////////////////////////
     //////// Graph manipulation
 
-    graph.getEdges = function () {
+    graph.getEdgeNodes = function () {
         return [].concat.apply(
             [], [].concat.apply(
                 [], Object.entries(graph.nodes).map(
@@ -18472,11 +18472,13 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     };
 
     graph.newNodeBelowFocus = function () {
-        if (graph.focusNode != null) {
-            newNodePos = graph.getNewNodePosition(graph.focusNode);
+        if (Purs.fromFocus(graph.focus) != null) {
+            console.log(graph.focus);
+            console.log(Purs.fromFocus(graph.focus));
+            newNodePos = graph.getNewNodePosition(Purs.fromFocus(graph.focus));
             graph.createNode(newNodePos.x,
                              newNodePos.y,
-                             StringSet.singleton(graph.focusNode),
+                             StringSet.singleton(Purs.fromFocus(graph.focus)),
                              StringSet.empty());
         } else {
             graph.createNode(initNodePos.x,
@@ -18502,34 +18504,37 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         // New PS graph
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
         for (i=0; i<StringSet.cardinality(parentIds); i++) {
+            console.log(StringSet.lookupIndex(i, parentIds));
+            console.log(newNodeId);
             graph.updatePurs(Purs.AddEdge.create(
-                {"from": StringSet.lookupIndex(i, parentIds), "to":   newNodeId}));
+                {"source": StringSet.lookupIndex(i, parentIds), "target": newNodeId}));
         }
         for (i=0; i<StringSet.cardinality(childIds); i++) {
             graph.updatePurs(Purs.AddEdge.create(
-                {"from": newNodeId, "to":   StringSet.lookupIndex(i, childIds)}));
+                {"source": newNodeId, "target":   StringSet.lookupIndex(i, childIds)}));
         }
 
-        graph.focusOn(newNodeId);
+        graph.focusOnNode(newNodeId);
 
         return newNodeId;
     };
 
-    graph.removeFocusedNode = function () {
-        focusedNode = graph.nodes[graph.focusNode];
-        if (StringSet.cardinality(focusedNode.parents) > 0) {
-            nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
-        } else if (StringSet.cardinality(focusedNode.children) > 0) {
-            nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
-        } else {
-            // Give the focus to the first node in the list, because what else are
-            // you going to do
-            nextFocusId = Utils.arrayWithoutElement(graph.focusNode, Object.keys(graph.nodes))[0];
-        }
-        for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
-        }
-        graph.deleteNode(graph.focusNode);
-        graph.focusOn(nextFocusId);
+    graph.removeFocused = function () {
+        graph.pursGraph = Purs.removeFocus(graph)(graph.pursGraph);
+        //focusedNode = graph.nodes[Purs.fromFocus(graph.focus)];
+        //if (StringSet.cardinality(focusedNode.parents) > 0) {
+        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
+        //} else if (StringSet.cardinality(focusedNode.children) > 0) {
+        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
+        //} else {
+        //    // Give the focus to the first node in the list, because what else are
+        //    // you going to do
+        //    nextFocusId = Utils.arrayWithoutElement(Purs.fromFocus(graph.focus), Object.keys(graph.nodes))[0];
+        //}
+        //for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
+        //}
+        //graph.deleteNode(Purs.fromFocus(graph.focus));
+        //graph.focusOnNode(nextFocusId);
         return graph;
     };
 
@@ -18556,7 +18561,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         //StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
 
         // New PS graph
-        graph.updatePurs(Purs.AddEdge.create({"from": sourceId, "to": targetId}));
+        graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
 
         return graph;
     };
@@ -18567,7 +18572,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         //StringSet.deleteInPlace(sourceId, graph.nodes[targetId].parents);
 
         // New PS graph
-        graph.updatePurs(Purs.RemoveEdge.create({"from": sourceId, "to": targetId}));
+        graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
 
         return graph;
     };
@@ -18753,23 +18758,23 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     //////// Grouping/ungrouping
 
     graph.groupHighlighted = function () {
-        parents = graph.getParentsOfStringSet(graph.highlightedNodes);
-        children = graph.getChildrenOfStringSet(graph.highlightedNodes);
+        parents = graph.getParentsOfStringSet(graph.highlighted);
+        children = graph.getChildrenOfStringSet(graph.highlighted);
         terminalestNode = Purs.fromMaybe(undefined)(
-            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlightedNodes)));
+            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlighted)));
 
         groupNodeId = graph.createNode(terminalestNode.x, terminalestNode.y, parents, children);
         graph.updateText(groupNodeId, terminalestNode.text);
 
-        graph.removeEdgesToFromStringSet(graph.highlightedNodes);
+        graph.removeEdgesToFromStringSet(graph.highlighted);
 
         // Hide the highlighted nodes inside the group node
-        newSubgraphNodes = graph.extractNodes(graph.highlightedNodes);
+        newSubgraphNodes = graph.extractNodes(graph.highlighted);
         //graph.nodes[groupNodeId].subgraphNodes = newSubgraphNodes;
         graph.updatePurs(Purs.UpdateSubgraphNodes.create(groupNodeId)(newSubgraphNodes));
 
         graph.clearHighlights();
-        graph.focusOn(groupNodeId);
+        graph.focusOnNode(groupNodeId);
 
         return graph;
     };
@@ -18790,7 +18795,7 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
         // Pick the first node of group to have the focus
         // TODO: terminalestNode
         newFocusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
-        graph.focusOn(newFocusedNodeId);
+        graph.focusOnNode(newFocusedNodeId);
 
         // Highlight expanded group
         newHighlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
@@ -18803,13 +18808,13 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     };
 
     graph.expandGroupInFocus = function () {
-        if (!Utils.isEmptyObject(graph.nodes[graph.focusNode].subgraphNodes)) {
-            graph.expandGroup(graph.focusNode);
+        if (!Utils.isEmptyObject(graph.nodes[Purs.fromFocus(graph.focus)].subgraphNodes)) {
+            graph.expandGroup(Purs.fromFocus(graph.focus));
         }
     };
 
     graph.toggleGroupExpand = function () {
-        if (StringSet.cardinality(graph.highlightedNodes) == 0) {
+        if (StringSet.cardinality(graph.highlighted) == 0) {
             graph.expandGroupInFocus();
         } else {
             graph.groupHighlighted();
@@ -18821,120 +18826,131 @@ function Graph(graphNodes, focusNode, highlightedNodes) {
     //////// Traversal functions
 
     graph.traverseUp = function () {
-        parents = graph.nodes[graph.focusNode].parents;
-        if (StringSet.cardinality(parents) > 0) {
-            newFocus = StringSet.lookupIndex(0, parents);
-            graph.focusOn(newFocus);
-        }
+        graph.pursGraph = Purs.traverseUp(graph)(graph.pursGraph);
+        //parents = graph.nodes[Purs.fromFocus(graph.focus)].parents;
+        //if (StringSet.cardinality(parents) > 0) {
+        //    newFocus = StringSet.lookupIndex(0, parents);
+        //    graph.focusOnNode(newFocus);
+        //}
         return graph;
     };
 
     graph.traverseDown = function () {
-        children = graph.nodes[graph.focusNode].children;
-        if (StringSet.cardinality(children) > 0) {
-            newFocus = StringSet.lookupIndex(0, children);
-            graph.focusOn(newFocus);
-        }
+        graph.pursGraph = Purs.traverseDown(graph)(graph.pursGraph);
+        //children = graph.nodes[Purs.fromFocus(graph.focus)].children;
+        //if (StringSet.cardinality(children) > 0) {
+        //    newFocus = StringSet.lookupIndex(0, children);
+        //    graph.focusOnNode(newFocus);
+        //}
         return graph;
     };
 
     graph.traverseLeft = function () {
-        newFocus = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusNode).left;
-        graph.focusOn(newFocus);
+        graph.pursGraph = Purs.traverseLeft(graph)(graph.pursGraph);
+        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
+        //    Purs.fromFocus(graph.focus)).left;
+        //graph.focusOnNode(newFocus);
         return graph;
     };
 
     graph.traverseRight = function () {
-        newFocus = graph.getNeighboringSiblingOrCoparentIds(
-            graph.focusNode).right;
-        graph.focusOn(newFocus);
+        graph.pursGraph = Purs.traverseRight(graph)(graph.pursGraph);
+        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
+        //    Purs.fromFocus(graph.focus)).right;
+        //graph.focusOnNode(newFocus);
         return graph;
     };
 
-    graph.traverseAddGroup = function (traversalFunc) {
-        return function () {
-            graph.focusOn(graph.nodes[traverselFunc]);
-            return graph;
-        };
-    };
+    //graph.traverseAddGroup = function (traversalFunc) {
+    //    return function () {
+    //        graph.focusOnNode(graph.nodes[traverselFunc]);
+    //        return graph;
+    //    };
+    //};
 
-    graph.getNeighboringSiblingOrCoparentIds = function (nodeId) {
-        /*
-          Find the nodes that share a parent or child of the given node.
-          Sort the nodes by their x location, such that left/right movement
-          is spatially coherent.
-          */
-        siblingsAndCoparentsIds = [];
-        StringSet.map(graph.nodes[nodeId].parents,
-            parentId => StringSet.map(graph.nodes[parentId].children,
-                siblingId => siblingsAndCoparentsIds.push(siblingId)
-            )
-        );
-        StringSet.map(graph.nodes[nodeId].children,
-            childId => StringSet.map(graph.nodes[childId].parents,
-                coparentId => siblingsAndCoparentsIds.push(coparentId))
-        );
-        // Sort siblings by x index.
-        // Store graph so that the sorting comparison function can access it,
-        // as it appears to run outside the constructor context.
-        graphNodes = graph.nodes;
-        siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
-        onLeft = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x < graph.nodes[graph.focusNode].x);
-        onRight = siblingsAndCoparentsIds.filter(
-            nodeId => graph.nodes[nodeId].x > graph.nodes[graph.focusNode].x);
-        return {
-            "left": onLeft.length > 0
-                ? onLeft[onLeft.length - 1]
-                : siblingsAndCoparentsIds[siblingsAndCoparentsIds.length-1],
-            "right": onRight.length > 0 ? onRight[0] : siblingsAndCoparentsIds[0],
-        };
-    };
+    //graph.getNeighboringSiblingOrCoparentIds = function (nodeId) {
+    //    /*
+    //      Find the nodes that share a parent or child of the given node.
+    //      Sort the nodes by their x location, such that left/right movement
+    //      is spatially coherent.
+    //      */
+    //    siblingsAndCoparentsIds = [];
+    //    StringSet.map(graph.nodes[nodeId].parents,
+    //        parentId => StringSet.map(graph.nodes[parentId].children,
+    //            siblingId => siblingsAndCoparentsIds.push(siblingId)
+    //        )
+    //    );
+    //    StringSet.map(graph.nodes[nodeId].children,
+    //        childId => StringSet.map(graph.nodes[childId].parents,
+    //            coparentId => siblingsAndCoparentsIds.push(coparentId))
+    //    );
+    //    // Sort siblings by x index.
+    //    // Store graph so that the sorting comparison function can access it,
+    //    // as it appears to run outside the constructor context.
+    //    graphNodes = graph.nodes;
+    //    siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
+    //    onLeft = siblingsAndCoparentsIds.filter(
+    //        nodeId => graph.nodes[nodeId].x < graph.nodes[Purs.fromFocus(graph.focus)].x);
+    //    onRight = siblingsAndCoparentsIds.filter(
+    //        nodeId => graph.nodes[nodeId].x > graph.nodes[Purs.fromFocus(graph.focus)].x);
+    //    return {
+    //        "left": onLeft.length > 0
+    //            ? onLeft[onLeft.length - 1]
+    //            : siblingsAndCoparentsIds[siblingsAndCoparentsIds.length-1],
+    //        "right": onRight.length > 0 ? onRight[0] : siblingsAndCoparentsIds[0],
+    //    };
+    //};
 
     ///////////////////////////////////
     //////// Highlighting a selection/focusing
 
-    graph.focusOn = function (nodeId) {
-        //graph.focusNode = nodeId;
-        graph.updatePurs(Purs.UpdateFocus.create(nodeId));
+    graph.focusOnNode = function (id) {
+        graph.focusOn(Purs.FocusNode.create(id));
+    };
+
+    graph.focusOnEdge = function (id) {
+        graph.focusOn(Purs.FocusEdge.create(id));
+    };
+
+    graph.focusOn = function (focus) {
+        graph.updatePurs(Purs.UpdateFocus.create(focus));
     };
 
     graph.unHighlightNode = function(nodeId) {
         //// Old JS graph
-        //StringSet.deleteInPlace(nodeId, graph.highlightedNodes);
+        //StringSet.deleteInPlace(nodeId, graph.highlighted);
         // New PS graph
         graph.updatePurs(Purs.UnHighlight.create(nodeId));
     };
 
     graph.highlightNode = function(nodeId) {
         //// Old JS graph
-        //StringSet.insertInPlace(nodeId, graph.highlightedNodes);
+        //StringSet.insertInPlace(nodeId, graph.highlighted);
         // New PS graph
         graph.updatePurs(Purs.Highlight.create(nodeId));
     };
 
-    graph.highlightFocusNode = function () {
-        graph.highlightNode(graph.focusNode);
+    graph.highlightFocus = function () {
+        graph.highlightNode(Purs.fromFocus(graph.focus));
         return graph;
     };
 
-    graph.unHighlightFocusNode = function () {
-        graph.unHighlightNode(graph.focusNode);
+    graph.unHighlightFocus = function () {
+        graph.unHighlightNode(Purs.fromFocus(graph.focus));
         return graph;
     };
 
-    graph.toggleHighlightFocusNode = function () {
-        if (!StringSet.isIn(graph.focusNode, graph.highlightedNodes)) {
-            graph.highlightFocusNode();
+    graph.toggleHighlightFocus = function () {
+        if (!StringSet.isIn(Purs.fromFocus(graph.focus), graph.highlighted)) {
+            graph.highlightFocus();
         } else {
-            graph.unHighlightFocusNode();
+            graph.unHighlightFocus();
         }
         return graph;
     };
 
     graph.replaceHighlighted = function(newHighlighted) {
-        oldHighlightedNodes = StringSet.copy(graph.highlightedNodes);
+        oldHighlightedNodes = StringSet.copy(graph.highlighted);
         for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
             graph.unHighlightNode(
                 StringSet.lookupIndex(i, oldHighlightedNodes));
@@ -18999,9 +19015,10 @@ module.exports = Graph;
 /*! no static exports found */
 /***/ (function(module, exports, __webpack_require__) {
 
-var d3 = __webpack_require__(/*! ./d3.js */ "./d3.js");
-var Utils = __webpack_require__(/*! ./utils */ "./utils.js");
-var StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
+const d3 = __webpack_require__(/*! ./d3.js */ "./d3.js");
+const Utils = __webpack_require__(/*! ./utils */ "./utils.js");
+const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
+const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -19037,7 +19054,8 @@ module.exports = function GraphUI(graph) {
     // Define Z axis ordering of elements
     graphUI.svg.append("g").attr("id", "text");
     graphUI.svg.append("g").attr("id", "nodeHalos");
-    graphUI.svg.append("g").attr("id", "links");
+    graphUI.svg.append("g").attr("id", "edges");
+    graphUI.svg.append("g").attr("id", "edgeBorders");
     graphUI.svg.append("g").attr("id", "nodes");
     graphUI.svg.append("g").attr("id", "nodeBorders");
 
@@ -19047,12 +19065,12 @@ module.exports = function GraphUI(graph) {
         .attr("id", "arrow")
         .attr("markerWidth", 10)
         .attr("markerHeight", 10)
-        .attr("refX", 10)
-        .attr("refY", 3)
+        .attr("refX", 15)
+        .attr("refY", 5)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     // For pointing to a group
@@ -19063,9 +19081,9 @@ module.exports = function GraphUI(graph) {
         .attr("refX", 13)
         .attr("refY", 3)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     // For the arrow being drawn (by dragging)
@@ -19076,48 +19094,87 @@ module.exports = function GraphUI(graph) {
         .attr("refX", 3)
         .attr("refY", 3)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     graphUI.updateEdges = function () {
-        graphUI.svg.select("#links").selectAll(".nodeLinks")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0])
-            .join("g")
-            .classed("nodeLinks", true)
-            .selectAll("line")
-            .data(d => StringSet.toArray(d[1].parents).map(
-                parentId => ({"source": parentId, "target": d[0]})),
-                  edge => edge)
+        graphUI.svg.select("#edges").selectAll("line").filter(".edge")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
             .join(
                 enter => enter.append("line")
-                    .attr("x1", edge => graphUI.graph.nodes[edge.source].x)
-                    .attr("y1", edge => graphUI.graph.nodes[edge.source].y)
-                    .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
-                    .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
-                    .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
+                    .classed("edge", true)
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
                         }}),
                 update => update
-                    .attr("x1", edge => graphUI.graph.nodes[edge.source].x)
-                    .attr("y1", edge => graphUI.graph.nodes[edge.source].y)
-                    .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
-                    .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
-                    .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
-                        }}),
+                        }
+                    })
+            );
+    };
+
+    graphUI.updateEdgeBorders = function () {
+        graphUI.svg.select("#edgeBorders").selectAll("line").filter(".edgeBorder")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
+            .join(
+                enter => enter.append("line")
+                    .classed("edgeBorder", true)
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
+                    .attr("stroke-linecap", "butt")
+                    .on("click", function(edgeNodes) {
+                        console.log(edgeNodes);
+                        graphUI.graph.focusOnEdge(Purs.computeEdgeId(
+                            {"source": edgeNodes.source.id, "target": edgeNodes.target.id}));
+                        graphUI.update();
+                    })
+                    .on("mouseover", function (d) {
+                        Utils.fadeIn(this, fadeSpeed);
+                    })
+                    .on("mouseout", function (d) {
+                        if (!d3.select(this).classed("grouped")) {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    }),
+                update => update
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
             );
     };
 
     graphUI.updateDrawingEdge = function () {
-        graphUI.svg.select("#links").selectAll("line").filter(".drawing")
+        graphUI.svg.select("#edges").selectAll("line").filter(".drawing")
             .data(mouseState.drawingEdge)
             .join(
                 enter => enter.append("line")
@@ -19162,7 +19219,7 @@ module.exports = function GraphUI(graph) {
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
-                            d[0] == graphUI.graph.focusNode) {
+                            d[0] == Purs.fromFocus(graphUI.graph.focus)) {
                             d3.select(this).select("div").select("div").node().focus();
                         } else {
                             d3.select(this).select("div").select("div").node().blur();
@@ -19187,13 +19244,13 @@ module.exports = function GraphUI(graph) {
                     })
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusNode),
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus)),
                 update => update
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusNode)
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus))
             );
     };
 
@@ -19206,7 +19263,7 @@ module.exports = function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
@@ -19231,7 +19288,7 @@ module.exports = function GraphUI(graph) {
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
                             Utils.fadeIn(this, fadeSpeed);
@@ -19284,6 +19341,8 @@ module.exports = function GraphUI(graph) {
 
         graphUI.updateEdges();
 
+        graphUI.updateEdgeBorders();
+
         graphUI.updateDrawingEdge();
 
         graphUI.updateText();
@@ -19311,7 +19370,7 @@ module.exports = function GraphUI(graph) {
 
     function dragstarted_node(d) {
         d3.select(this).style("pointer-events", "none");
-        graphUI.graph.focusOn(d[0]);
+        graphUI.graph.focusOnNode(d[0]);
         graphUI.update();
     }
 
@@ -19351,7 +19410,6 @@ module.exports = function GraphUI(graph) {
         graphUI.update();
         mouseState.clickedNode = undefined;
         d3.selectAll("*").classed("ready", false);
-        //d3.selectAll("*").classed("hover", false);
         graphUI.update();
     }
 
@@ -19360,7 +19418,7 @@ module.exports = function GraphUI(graph) {
             mouseState.clickedNode != mouseState.mouseoverNode &&
             mouseState.mouseoverNode != undefined) {
             graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
-            graphUI.graph.focusedNode = mouseState.mouseoverNode;
+            graphUI.graph.focusOnNode(mouseState.mouseoverNode);
             mouseState.clickedNode = undefined;
             mouseState.mouseoverNode = undefined;
         };
@@ -19388,7 +19446,7 @@ module.exports = function GraphUI(graph) {
     }
 
     function visualMode() {
-        graphUI.graph.highlightFocusNode();
+        graphUI.graph.highlightFocus();
         graphUI.keyboardMode = "visual";
     }
 
@@ -19408,9 +19466,9 @@ module.exports = function GraphUI(graph) {
             "h": graph => graph.traverseLeft(),
             "l": graph => graph.traverseRight(),
             "o": graph => graph.newNodeBelowFocus(),
-            "x": graph => graph.removeFocusedNode(),
-            "Delete": graph => graph.removeFocusedNode(),
-            "s": graph => graph.toggleHighlightFocusNode(),
+            "x": graph => graph.removeFocused(),
+            "Delete": graph => graph.removeFocused(),
+            "s": graph => graph.toggleHighlightFocus(),
             "Escape": graph => graph.clearHighlights(),
             "i": insertMode,
             "v": visualMode,
@@ -19420,12 +19478,12 @@ module.exports = function GraphUI(graph) {
             "Escape": normalMode,
         },
         "visual": {
-            "j": graph => graph.traverseDown().highlightFocusNode(),
-            "k": graph => graph.traverseUp().highlightFocusNode(),
-            "h": graph => graph.traverseLeft().highlightFocusNode(),
-            "l": graph => graph.traverseRight().highlightFocusNode(),
-            "s": graph => graph.toggleHighlightFocusNode(),
-            "Delete": graph => graph.removeFocusNodeFromGroup(),
+            "j": graph => graph.traverseDown().highlightFocus(),
+            "k": graph => graph.traverseUp().highlightFocus(),
+            "h": graph => graph.traverseLeft().highlightFocus(),
+            "l": graph => graph.traverseRight().highlightFocus(),
+            "s": graph => graph.toggleHighlightFocus(),
+            "Delete": graph => graph.removeFocusFromGroup(),
             "Escape": normalMode,
             " ": graph => graph.toggleGroupExpand,
         }
@@ -25212,6 +25270,556 @@ module.exports = {
 
 /***/ }),
 
+/***/ "./purescript/output/Data.Enum/foreign.js":
+/*!************************************************!*\
+  !*** ./purescript/output/Data.Enum/foreign.js ***!
+  \************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.toCharCode = function (c) {
+  return c.charCodeAt(0);
+};
+
+exports.fromCharCode = function (c) {
+  return String.fromCharCode(c);
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.Enum/index.js":
+/*!**********************************************!*\
+  !*** ./purescript/output/Data.Enum/index.js ***!
+  \**********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.Enum/foreign.js");
+var Control_Apply = __webpack_require__(/*! ../Control.Apply/index.js */ "./purescript/output/Control.Apply/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_MonadPlus = __webpack_require__(/*! ../Control.MonadPlus/index.js */ "./purescript/output/Control.MonadPlus/index.js");
+var Control_MonadZero = __webpack_require__(/*! ../Control.MonadZero/index.js */ "./purescript/output/Control.MonadZero/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Bounded = __webpack_require__(/*! ../Data.Bounded/index.js */ "./purescript/output/Data.Bounded/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Newtype = __webpack_require__(/*! ../Data.Newtype/index.js */ "./purescript/output/Data.Newtype/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Data_Tuple = __webpack_require__(/*! ../Data.Tuple/index.js */ "./purescript/output/Data.Tuple/index.js");
+var Data_Unfoldable = __webpack_require__(/*! ../Data.Unfoldable/index.js */ "./purescript/output/Data.Unfoldable/index.js");
+var Data_Unfoldable1 = __webpack_require__(/*! ../Data.Unfoldable1/index.js */ "./purescript/output/Data.Unfoldable1/index.js");
+var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
+var Partial_Unsafe = __webpack_require__(/*! ../Partial.Unsafe/index.js */ "./purescript/output/Partial.Unsafe/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Cardinality = function (x) {
+    return x;
+};
+var Enum = function (Ord0, pred, succ) {
+    this.Ord0 = Ord0;
+    this.pred = pred;
+    this.succ = succ;
+};
+var BoundedEnum = function (Bounded0, Enum1, cardinality, fromEnum, toEnum) {
+    this.Bounded0 = Bounded0;
+    this.Enum1 = Enum1;
+    this.cardinality = cardinality;
+    this.fromEnum = fromEnum;
+    this.toEnum = toEnum;
+};
+var toEnum = function (dict) {
+    return dict.toEnum;
+};
+var succ = function (dict) {
+    return dict.succ;
+};
+var upFromIncluding = function (dictEnum) {
+    return function (dictUnfoldable1) {
+        return Data_Unfoldable1.unfoldr1(dictUnfoldable1)(Control_Apply.apply(Control_Apply.applyFn)(Data_Tuple.Tuple.create)(succ(dictEnum)));
+    };
+};
+var showCardinality = new Data_Show.Show(function (v) {
+    return "(Cardinality " + (Data_Show.show(Data_Show.showInt)(v) + ")");
+});
+var pred = function (dict) {
+    return dict.pred;
+};
+var ordCardinality = Data_Ord.ordInt;
+var newtypeCardinality = new Data_Newtype.Newtype(function (n) {
+    return n;
+}, Cardinality);
+var fromEnum = function (dict) {
+    return dict.fromEnum;
+};
+var toEnumWithDefaults = function (dictBoundedEnum) {
+    return function (low) {
+        return function (high) {
+            return function (x) {
+                var v = toEnum(dictBoundedEnum)(x);
+                if (v instanceof Data_Maybe.Just) {
+                    return v.value0;
+                };
+                if (v instanceof Data_Maybe.Nothing) {
+                    var $54 = x < fromEnum(dictBoundedEnum)(Data_Bounded.bottom(dictBoundedEnum.Bounded0()));
+                    if ($54) {
+                        return low;
+                    };
+                    return high;
+                };
+                throw new Error("Failed pattern match at Data.Enum (line 158, column 33 - line 160, column 62): " + [ v.constructor.name ]);
+            };
+        };
+    };
+};
+var eqCardinality = Data_Eq.eqInt;
+var enumUnit = new Enum(function () {
+    return Data_Ord.ordUnit;
+}, Data_Function["const"](Data_Maybe.Nothing.value), Data_Function["const"](Data_Maybe.Nothing.value));
+var enumTuple = function (dictEnum) {
+    return function (dictBoundedEnum) {
+        return new Enum(function () {
+            return Data_Tuple.ordTuple(dictEnum.Ord0())((dictBoundedEnum.Enum1()).Ord0());
+        }, function (v) {
+            return Data_Maybe.maybe(Data_Functor.map(Data_Maybe.functorMaybe)(Data_Function.flip(Data_Tuple.Tuple.create)(Data_Bounded.top(dictBoundedEnum.Bounded0())))(pred(dictEnum)(v.value0)))(function ($96) {
+                return Data_Maybe.Just.create(Data_Tuple.Tuple.create(v.value0)($96));
+            })(pred(dictBoundedEnum.Enum1())(v.value1));
+        }, function (v) {
+            return Data_Maybe.maybe(Data_Functor.map(Data_Maybe.functorMaybe)(Data_Function.flip(Data_Tuple.Tuple.create)(Data_Bounded.bottom(dictBoundedEnum.Bounded0())))(succ(dictEnum)(v.value0)))(function ($97) {
+                return Data_Maybe.Just.create(Data_Tuple.Tuple.create(v.value0)($97));
+            })(succ(dictBoundedEnum.Enum1())(v.value1));
+        });
+    };
+};
+var enumOrdering = new Enum(function () {
+    return Data_Ord.ordOrdering;
+}, function (v) {
+    if (v instanceof Data_Ordering.LT) {
+        return Data_Maybe.Nothing.value;
+    };
+    if (v instanceof Data_Ordering.EQ) {
+        return new Data_Maybe.Just(Data_Ordering.LT.value);
+    };
+    if (v instanceof Data_Ordering.GT) {
+        return new Data_Maybe.Just(Data_Ordering.EQ.value);
+    };
+    throw new Error("Failed pattern match at Data.Enum (line 72, column 1 - line 72, column 39): " + [ v.constructor.name ]);
+}, function (v) {
+    if (v instanceof Data_Ordering.LT) {
+        return new Data_Maybe.Just(Data_Ordering.EQ.value);
+    };
+    if (v instanceof Data_Ordering.EQ) {
+        return new Data_Maybe.Just(Data_Ordering.GT.value);
+    };
+    if (v instanceof Data_Ordering.GT) {
+        return Data_Maybe.Nothing.value;
+    };
+    throw new Error("Failed pattern match at Data.Enum (line 72, column 1 - line 72, column 39): " + [ v.constructor.name ]);
+});
+var enumMaybe = function (dictBoundedEnum) {
+    return new Enum(function () {
+        return Data_Maybe.ordMaybe((dictBoundedEnum.Enum1()).Ord0());
+    }, function (v) {
+        if (v instanceof Data_Maybe.Nothing) {
+            return Data_Maybe.Nothing.value;
+        };
+        if (v instanceof Data_Maybe.Just) {
+            return new Data_Maybe.Just(pred(dictBoundedEnum.Enum1())(v.value0));
+        };
+        throw new Error("Failed pattern match at Data.Enum (line 80, column 1 - line 80, column 54): " + [ v.constructor.name ]);
+    }, function (v) {
+        if (v instanceof Data_Maybe.Nothing) {
+            return new Data_Maybe.Just(new Data_Maybe.Just(Data_Bounded.bottom(dictBoundedEnum.Bounded0())));
+        };
+        if (v instanceof Data_Maybe.Just) {
+            return Data_Functor.map(Data_Maybe.functorMaybe)(Data_Maybe.Just.create)(succ(dictBoundedEnum.Enum1())(v.value0));
+        };
+        throw new Error("Failed pattern match at Data.Enum (line 80, column 1 - line 80, column 54): " + [ v.constructor.name ]);
+    });
+};
+var enumInt = new Enum(function () {
+    return Data_Ord.ordInt;
+}, function (n) {
+    var $67 = n > Data_Bounded.bottom(Data_Bounded.boundedInt);
+    if ($67) {
+        return new Data_Maybe.Just(n - 1 | 0);
+    };
+    return Data_Maybe.Nothing.value;
+}, function (n) {
+    var $68 = n < Data_Bounded.top(Data_Bounded.boundedInt);
+    if ($68) {
+        return new Data_Maybe.Just(n + 1 | 0);
+    };
+    return Data_Maybe.Nothing.value;
+});
+var enumFromTo = function (dictEnum) {
+    return function (dictUnfoldable1) {
+        var go = function (step) {
+            return function (op) {
+                return function (to) {
+                    return function (a) {
+                        return new Data_Tuple.Tuple(a, Control_Bind.bind(Data_Maybe.bindMaybe)(step(a))(function (a$prime) {
+                            return Data_Functor.voidLeft(Data_Maybe.functorMaybe)(Control_MonadZero.guard(Data_Maybe.monadZeroMaybe)(op(a$prime)(to)))(a$prime);
+                        }));
+                    };
+                };
+            };
+        };
+        return function (v) {
+            return function (v1) {
+                if (Data_Eq.eq((dictEnum.Ord0()).Eq0())(v)(v1)) {
+                    return Data_Unfoldable1.singleton(dictUnfoldable1)(v);
+                };
+                if (Data_Ord.lessThan(dictEnum.Ord0())(v)(v1)) {
+                    return Data_Unfoldable1.unfoldr1(dictUnfoldable1)(go(succ(dictEnum))(Data_Ord.lessThanOrEq(dictEnum.Ord0()))(v1))(v);
+                };
+                if (Data_Boolean.otherwise) {
+                    return Data_Unfoldable1.unfoldr1(dictUnfoldable1)(go(pred(dictEnum))(Data_Ord.greaterThanOrEq(dictEnum.Ord0()))(v1))(v);
+                };
+                throw new Error("Failed pattern match at Data.Enum (line 183, column 14 - line 187, column 51): " + [ v.constructor.name, v1.constructor.name ]);
+            };
+        };
+    };
+};
+var enumFromThenTo = function (dictUnfoldable) {
+    return function (dictFunctor) {
+        return function (dictBoundedEnum) {
+            var go = function (step) {
+                return function (to) {
+                    return function (e) {
+                        if (e <= to) {
+                            return new Data_Maybe.Just(new Data_Tuple.Tuple(e, e + step | 0));
+                        };
+                        if (Data_Boolean.otherwise) {
+                            return Data_Maybe.Nothing.value;
+                        };
+                        throw new Error("Failed pattern match at Data.Enum (line 214, column 5 - line 216, column 28): " + [ step.constructor.name, to.constructor.name, e.constructor.name ]);
+                    };
+                };
+            };
+            return function (a) {
+                return function (b) {
+                    return function (c) {
+                        var c$prime = fromEnum(dictBoundedEnum)(c);
+                        var b$prime = fromEnum(dictBoundedEnum)(b);
+                        var a$prime = fromEnum(dictBoundedEnum)(a);
+                        return Data_Functor.map(dictFunctor)(function ($98) {
+                            return Data_Maybe.fromJust()(toEnum(dictBoundedEnum)($98));
+                        })(Data_Unfoldable.unfoldr(dictUnfoldable)(go(b$prime - a$prime | 0)(c$prime))(a$prime));
+                    };
+                };
+            };
+        };
+    };
+};
+var enumEither = function (dictBoundedEnum) {
+    return function (dictBoundedEnum1) {
+        return new Enum(function () {
+            return Data_Either.ordEither((dictBoundedEnum.Enum1()).Ord0())((dictBoundedEnum1.Enum1()).Ord0());
+        }, function (v) {
+            if (v instanceof Data_Either.Left) {
+                return Data_Maybe.maybe(Data_Maybe.Nothing.value)(function ($99) {
+                    return Data_Maybe.Just.create(Data_Either.Left.create($99));
+                })(pred(dictBoundedEnum.Enum1())(v.value0));
+            };
+            if (v instanceof Data_Either.Right) {
+                return Data_Maybe.maybe(new Data_Maybe.Just(new Data_Either.Left(Data_Bounded.top(dictBoundedEnum.Bounded0()))))(function ($100) {
+                    return Data_Maybe.Just.create(Data_Either.Right.create($100));
+                })(pred(dictBoundedEnum1.Enum1())(v.value0));
+            };
+            throw new Error("Failed pattern match at Data.Enum (line 86, column 1 - line 86, column 75): " + [ v.constructor.name ]);
+        }, function (v) {
+            if (v instanceof Data_Either.Left) {
+                return Data_Maybe.maybe(new Data_Maybe.Just(new Data_Either.Right(Data_Bounded.bottom(dictBoundedEnum1.Bounded0()))))(function ($101) {
+                    return Data_Maybe.Just.create(Data_Either.Left.create($101));
+                })(succ(dictBoundedEnum.Enum1())(v.value0));
+            };
+            if (v instanceof Data_Either.Right) {
+                return Data_Maybe.maybe(Data_Maybe.Nothing.value)(function ($102) {
+                    return Data_Maybe.Just.create(Data_Either.Right.create($102));
+                })(succ(dictBoundedEnum1.Enum1())(v.value0));
+            };
+            throw new Error("Failed pattern match at Data.Enum (line 86, column 1 - line 86, column 75): " + [ v.constructor.name ]);
+        });
+    };
+};
+var enumBoolean = new Enum(function () {
+    return Data_Ord.ordBoolean;
+}, function (v) {
+    if (v) {
+        return new Data_Maybe.Just(false);
+    };
+    return Data_Maybe.Nothing.value;
+}, function (v) {
+    if (!v) {
+        return new Data_Maybe.Just(true);
+    };
+    return Data_Maybe.Nothing.value;
+});
+var downFromIncluding = function (dictEnum) {
+    return function (dictUnfoldable1) {
+        return Data_Unfoldable1.unfoldr1(dictUnfoldable1)(Control_Apply.apply(Control_Apply.applyFn)(Data_Tuple.Tuple.create)(pred(dictEnum)));
+    };
+};
+var diag = function (a) {
+    return new Data_Tuple.Tuple(a, a);
+};
+var downFrom = function (dictEnum) {
+    return function (dictUnfoldable) {
+        return Data_Unfoldable.unfoldr(dictUnfoldable)(function ($103) {
+            return Data_Functor.map(Data_Maybe.functorMaybe)(diag)(pred(dictEnum)($103));
+        });
+    };
+};
+var upFrom = function (dictEnum) {
+    return function (dictUnfoldable) {
+        return Data_Unfoldable.unfoldr(dictUnfoldable)(function ($104) {
+            return Data_Functor.map(Data_Maybe.functorMaybe)(diag)(succ(dictEnum)($104));
+        });
+    };
+};
+var defaultToEnum = function (dictBounded) {
+    return function (dictEnum) {
+        return function (i$prime) {
+            var go = function ($copy_i) {
+                return function ($copy_x) {
+                    var $tco_var_i = $copy_i;
+                    var $tco_done = false;
+                    var $tco_result;
+                    function $tco_loop(i, x) {
+                        var $82 = i === 0;
+                        if ($82) {
+                            $tco_done = true;
+                            return new Data_Maybe.Just(x);
+                        };
+                        var v = succ(dictEnum)(x);
+                        if (v instanceof Data_Maybe.Just) {
+                            $tco_var_i = i - 1 | 0;
+                            $copy_x = v.value0;
+                            return;
+                        };
+                        if (v instanceof Data_Maybe.Nothing) {
+                            $tco_done = true;
+                            return Data_Maybe.Nothing.value;
+                        };
+                        throw new Error("Failed pattern match at Data.Enum (line 293, column 12 - line 295, column 33): " + [ v.constructor.name ]);
+                    };
+                    while (!$tco_done) {
+                        $tco_result = $tco_loop($tco_var_i, $copy_x);
+                    };
+                    return $tco_result;
+                };
+            };
+            var $85 = i$prime < 0;
+            if ($85) {
+                return Data_Maybe.Nothing.value;
+            };
+            return go(i$prime)(Data_Bounded.bottom(dictBounded));
+        };
+    };
+};
+var defaultSucc = function (toEnum$prime) {
+    return function (fromEnum$prime) {
+        return function (a) {
+            return toEnum$prime(fromEnum$prime(a) + 1 | 0);
+        };
+    };
+};
+var defaultPred = function (toEnum$prime) {
+    return function (fromEnum$prime) {
+        return function (a) {
+            return toEnum$prime(fromEnum$prime(a) - 1 | 0);
+        };
+    };
+};
+var defaultFromEnum = function (dictEnum) {
+    var go = function ($copy_i) {
+        return function ($copy_x) {
+            var $tco_var_i = $copy_i;
+            var $tco_done = false;
+            var $tco_result;
+            function $tco_loop(i, x) {
+                var v = pred(dictEnum)(x);
+                if (v instanceof Data_Maybe.Just) {
+                    $tco_var_i = i + 1 | 0;
+                    $copy_x = v.value0;
+                    return;
+                };
+                if (v instanceof Data_Maybe.Nothing) {
+                    $tco_done = true;
+                    return i;
+                };
+                throw new Error("Failed pattern match at Data.Enum (line 306, column 5 - line 308, column 19): " + [ v.constructor.name ]);
+            };
+            while (!$tco_done) {
+                $tco_result = $tco_loop($tco_var_i, $copy_x);
+            };
+            return $tco_result;
+        };
+    };
+    return go(0);
+};
+var defaultCardinality = function (dictBounded) {
+    return function (dictEnum) {
+        var go = function ($copy_i) {
+            return function ($copy_x) {
+                var $tco_var_i = $copy_i;
+                var $tco_done = false;
+                var $tco_result;
+                function $tco_loop(i, x) {
+                    var v = succ(dictEnum)(x);
+                    if (v instanceof Data_Maybe.Just) {
+                        $tco_var_i = i + 1 | 0;
+                        $copy_x = v.value0;
+                        return;
+                    };
+                    if (v instanceof Data_Maybe.Nothing) {
+                        $tco_done = true;
+                        return i;
+                    };
+                    throw new Error("Failed pattern match at Data.Enum (line 273, column 5 - line 275, column 19): " + [ v.constructor.name ]);
+                };
+                while (!$tco_done) {
+                    $tco_result = $tco_loop($tco_var_i, $copy_x);
+                };
+                return $tco_result;
+            };
+        };
+        return Cardinality(go(1)(Data_Bounded.bottom(dictBounded)));
+    };
+};
+var charToEnum = function (v) {
+    if (v >= Data_Bounded.bottom(Data_Bounded.boundedInt) && v <= Data_Bounded.top(Data_Bounded.boundedInt)) {
+        return new Data_Maybe.Just($foreign.fromCharCode(v));
+    };
+    return Data_Maybe.Nothing.value;
+};
+var enumChar = new Enum(function () {
+    return Data_Ord.ordChar;
+}, defaultPred(charToEnum)($foreign.toCharCode), defaultSucc(charToEnum)($foreign.toCharCode));
+var cardinality = function (dict) {
+    return dict.cardinality;
+};
+var boundedEnumUnit = new BoundedEnum(function () {
+    return Data_Bounded.boundedUnit;
+}, function () {
+    return enumUnit;
+}, 1, Data_Function["const"](0), function (v) {
+    if (v === 0) {
+        return new Data_Maybe.Just(Data_Unit.unit);
+    };
+    return Data_Maybe.Nothing.value;
+});
+var boundedEnumOrdering = new BoundedEnum(function () {
+    return Data_Bounded.boundedOrdering;
+}, function () {
+    return enumOrdering;
+}, 3, function (v) {
+    if (v instanceof Data_Ordering.LT) {
+        return 0;
+    };
+    if (v instanceof Data_Ordering.EQ) {
+        return 1;
+    };
+    if (v instanceof Data_Ordering.GT) {
+        return 2;
+    };
+    throw new Error("Failed pattern match at Data.Enum (line 137, column 1 - line 137, column 53): " + [ v.constructor.name ]);
+}, function (v) {
+    if (v === 0) {
+        return new Data_Maybe.Just(Data_Ordering.LT.value);
+    };
+    if (v === 1) {
+        return new Data_Maybe.Just(Data_Ordering.EQ.value);
+    };
+    if (v === 2) {
+        return new Data_Maybe.Just(Data_Ordering.GT.value);
+    };
+    return Data_Maybe.Nothing.value;
+});
+var boundedEnumChar = new BoundedEnum(function () {
+    return Data_Bounded.boundedChar;
+}, function () {
+    return enumChar;
+}, $foreign.toCharCode(Data_Bounded.top(Data_Bounded.boundedChar)) - $foreign.toCharCode(Data_Bounded.bottom(Data_Bounded.boundedChar)) | 0, $foreign.toCharCode, charToEnum);
+var boundedEnumBoolean = new BoundedEnum(function () {
+    return Data_Bounded.boundedBoolean;
+}, function () {
+    return enumBoolean;
+}, 2, function (v) {
+    if (!v) {
+        return 0;
+    };
+    if (v) {
+        return 1;
+    };
+    throw new Error("Failed pattern match at Data.Enum (line 118, column 1 - line 118, column 51): " + [ v.constructor.name ]);
+}, function (v) {
+    if (v === 0) {
+        return new Data_Maybe.Just(false);
+    };
+    if (v === 1) {
+        return new Data_Maybe.Just(true);
+    };
+    return Data_Maybe.Nothing.value;
+});
+module.exports = {
+    Enum: Enum,
+    succ: succ,
+    pred: pred,
+    BoundedEnum: BoundedEnum,
+    cardinality: cardinality,
+    toEnum: toEnum,
+    fromEnum: fromEnum,
+    toEnumWithDefaults: toEnumWithDefaults,
+    Cardinality: Cardinality,
+    enumFromTo: enumFromTo,
+    enumFromThenTo: enumFromThenTo,
+    upFrom: upFrom,
+    upFromIncluding: upFromIncluding,
+    downFrom: downFrom,
+    downFromIncluding: downFromIncluding,
+    defaultSucc: defaultSucc,
+    defaultPred: defaultPred,
+    defaultCardinality: defaultCardinality,
+    defaultToEnum: defaultToEnum,
+    defaultFromEnum: defaultFromEnum,
+    enumBoolean: enumBoolean,
+    enumInt: enumInt,
+    enumChar: enumChar,
+    enumUnit: enumUnit,
+    enumOrdering: enumOrdering,
+    enumMaybe: enumMaybe,
+    enumEither: enumEither,
+    enumTuple: enumTuple,
+    boundedEnumBoolean: boundedEnumBoolean,
+    boundedEnumChar: boundedEnumChar,
+    boundedEnumUnit: boundedEnumUnit,
+    boundedEnumOrdering: boundedEnumOrdering,
+    newtypeCardinality: newtypeCardinality,
+    eqCardinality: eqCardinality,
+    ordCardinality: ordCardinality,
+    showCardinality: showCardinality
+};
+
+
+/***/ }),
+
 /***/ "./purescript/output/Data.Eq/foreign.js":
 /*!**********************************************!*\
   !*** ./purescript/output/Data.Eq/foreign.js ***!
@@ -28313,6 +28921,398 @@ module.exports = {
     traversableIdentity: traversableIdentity,
     traversable1Identity: traversable1Identity,
     traversableWithIndexIdentity: traversableWithIndexIdentity
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.Int.Bits/foreign.js":
+/*!****************************************************!*\
+  !*** ./purescript/output/Data.Int.Bits/foreign.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+// module Data.Int.Bits
+
+exports.and = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 & n2;
+  };
+};
+
+exports.or = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 | n2;
+  };
+};
+
+exports.xor = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 ^ n2;
+  };
+};
+
+exports.shl = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 << n2;
+  };
+};
+
+exports.shr = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 >> n2;
+  };
+};
+
+exports.zshr = function (n1) {
+  return function (n2) {
+    /* jshint bitwise: false */
+    return n1 >>> n2;
+  };
+};
+
+exports.complement = function (n) {
+  /* jshint bitwise: false */
+  return ~n;
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.Int.Bits/index.js":
+/*!**************************************************!*\
+  !*** ./purescript/output/Data.Int.Bits/index.js ***!
+  \**************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.Int.Bits/foreign.js");
+module.exports = {
+    and: $foreign.and,
+    or: $foreign.or,
+    xor: $foreign.xor,
+    shl: $foreign.shl,
+    shr: $foreign.shr,
+    zshr: $foreign.zshr,
+    complement: $foreign.complement
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.Int/foreign.js":
+/*!***********************************************!*\
+  !*** ./purescript/output/Data.Int/foreign.js ***!
+  \***********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.fromNumberImpl = function (just) {
+  return function (nothing) {
+    return function (n) {
+      /* jshint bitwise: false */
+      return (n | 0) === n ? just(n) : nothing;
+    };
+  };
+};
+
+exports.toNumber = function (n) {
+  return n;
+};
+
+exports.fromStringAsImpl = function (just) {
+  return function (nothing) {
+    return function (radix) {
+      var digits;
+      if (radix < 11) {
+        digits = "[0-" + (radix - 1).toString() + "]";
+      } else if (radix === 11) {
+        digits = "[0-9a]";
+      } else {
+        digits = "[0-9a-" + String.fromCharCode(86 + radix) + "]";
+      }
+      var pattern = new RegExp("^[\\+\\-]?" + digits + "+$", "i");
+
+      return function (s) {
+        /* jshint bitwise: false */
+        if (pattern.test(s)) {
+          var i = parseInt(s, radix);
+          return (i | 0) === i ? just(i) : nothing;
+        } else {
+          return nothing;
+        }
+      };
+    };
+  };
+};
+
+exports.toStringAs = function (radix) {
+  return function (i) {
+    return i.toString(radix);
+  };
+};
+
+
+exports.quot = function (x) {
+  return function (y) {
+    /* jshint bitwise: false */
+    return x / y | 0;
+  };
+};
+
+exports.rem = function (x) {
+  return function (y) {
+    return x % y;
+  };
+};
+
+exports.pow = function (x) {
+  return function (y) {
+    /* jshint bitwise: false */
+    return Math.pow(x,y) | 0;
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.Int/index.js":
+/*!*********************************************!*\
+  !*** ./purescript/output/Data.Int/index.js ***!
+  \*********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.Int/foreign.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Bounded = __webpack_require__(/*! ../Data.Bounded/index.js */ "./purescript/output/Data.Bounded/index.js");
+var Data_CommutativeRing = __webpack_require__(/*! ../Data.CommutativeRing/index.js */ "./purescript/output/Data.CommutativeRing/index.js");
+var Data_DivisionRing = __webpack_require__(/*! ../Data.DivisionRing/index.js */ "./purescript/output/Data.DivisionRing/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_EuclideanRing = __webpack_require__(/*! ../Data.EuclideanRing/index.js */ "./purescript/output/Data.EuclideanRing/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Int_Bits = __webpack_require__(/*! ../Data.Int.Bits/index.js */ "./purescript/output/Data.Int.Bits/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Global = __webpack_require__(/*! ../Global/index.js */ "./purescript/output/Global/index.js");
+var $$Math = __webpack_require__(/*! ../Math/index.js */ "./purescript/output/Math/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Radix = function (x) {
+    return x;
+};
+var Even = (function () {
+    function Even() {
+
+    };
+    Even.value = new Even();
+    return Even;
+})();
+var Odd = (function () {
+    function Odd() {
+
+    };
+    Odd.value = new Odd();
+    return Odd;
+})();
+var showParity = new Data_Show.Show(function (v) {
+    if (v instanceof Even) {
+        return "Even";
+    };
+    if (v instanceof Odd) {
+        return "Odd";
+    };
+    throw new Error("Failed pattern match at Data.Int (line 112, column 1 - line 112, column 35): " + [ v.constructor.name ]);
+});
+var radix = function (n) {
+    if (n >= 2 && n <= 36) {
+        return new Data_Maybe.Just(n);
+    };
+    if (Data_Boolean.otherwise) {
+        return Data_Maybe.Nothing.value;
+    };
+    throw new Error("Failed pattern match at Data.Int (line 193, column 1 - line 193, column 28): " + [ n.constructor.name ]);
+};
+var odd = function (x) {
+    return (x & 1) !== 0;
+};
+var octal = 8;
+var hexadecimal = 16;
+var fromStringAs = $foreign.fromStringAsImpl(Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var fromString = fromStringAs(10);
+var fromNumber = $foreign.fromNumberImpl(Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var unsafeClamp = function (x) {
+    if (x === Global.infinity) {
+        return 0;
+    };
+    if (x === -Global.infinity) {
+        return 0;
+    };
+    if (x >= $foreign.toNumber(Data_Bounded.top(Data_Bounded.boundedInt))) {
+        return Data_Bounded.top(Data_Bounded.boundedInt);
+    };
+    if (x <= $foreign.toNumber(Data_Bounded.bottom(Data_Bounded.boundedInt))) {
+        return Data_Bounded.bottom(Data_Bounded.boundedInt);
+    };
+    if (Data_Boolean.otherwise) {
+        return Data_Maybe.fromMaybe(0)(fromNumber(x));
+    };
+    throw new Error("Failed pattern match at Data.Int (line 66, column 1 - line 66, column 29): " + [ x.constructor.name ]);
+};
+var round = function ($23) {
+    return unsafeClamp($$Math.round($23));
+};
+var floor = function ($24) {
+    return unsafeClamp($$Math.floor($24));
+};
+var even = function (x) {
+    return (x & 1) === 0;
+};
+var parity = function (n) {
+    var $14 = even(n);
+    if ($14) {
+        return Even.value;
+    };
+    return Odd.value;
+};
+var eqParity = new Data_Eq.Eq(function (x) {
+    return function (y) {
+        if (x instanceof Even && y instanceof Even) {
+            return true;
+        };
+        if (x instanceof Odd && y instanceof Odd) {
+            return true;
+        };
+        return false;
+    };
+});
+var ordParity = new Data_Ord.Ord(function () {
+    return eqParity;
+}, function (x) {
+    return function (y) {
+        if (x instanceof Even && y instanceof Even) {
+            return Data_Ordering.EQ.value;
+        };
+        if (x instanceof Even) {
+            return Data_Ordering.LT.value;
+        };
+        if (y instanceof Even) {
+            return Data_Ordering.GT.value;
+        };
+        if (x instanceof Odd && y instanceof Odd) {
+            return Data_Ordering.EQ.value;
+        };
+        throw new Error("Failed pattern match at Data.Int (line 110, column 8 - line 110, column 40): " + [ x.constructor.name, y.constructor.name ]);
+    };
+});
+var semiringParity = new Data_Semiring.Semiring(function (x) {
+    return function (y) {
+        var $19 = Data_Eq.eq(eqParity)(x)(y);
+        if ($19) {
+            return Even.value;
+        };
+        return Odd.value;
+    };
+}, function (v) {
+    return function (v1) {
+        if (v instanceof Odd && v1 instanceof Odd) {
+            return Odd.value;
+        };
+        return Even.value;
+    };
+}, Odd.value, Even.value);
+var ringParity = new Data_Ring.Ring(function () {
+    return semiringParity;
+}, Data_Semiring.add(semiringParity));
+var divisionRingParity = new Data_DivisionRing.DivisionRing(function () {
+    return ringParity;
+}, Control_Category.identity(Control_Category.categoryFn));
+var decimal = 10;
+var commutativeRingParity = new Data_CommutativeRing.CommutativeRing(function () {
+    return ringParity;
+});
+var euclideanRingParity = new Data_EuclideanRing.EuclideanRing(function () {
+    return commutativeRingParity;
+}, function (v) {
+    if (v instanceof Even) {
+        return 0;
+    };
+    if (v instanceof Odd) {
+        return 1;
+    };
+    throw new Error("Failed pattern match at Data.Int (line 132, column 1 - line 132, column 53): " + [ v.constructor.name ]);
+}, function (x) {
+    return function (v) {
+        return x;
+    };
+}, function (v) {
+    return function (v1) {
+        return Even.value;
+    };
+});
+var ceil = function ($25) {
+    return unsafeClamp($$Math.ceil($25));
+};
+var boundedParity = new Data_Bounded.Bounded(function () {
+    return ordParity;
+}, Even.value, Odd.value);
+var binary = 2;
+var base36 = 36;
+module.exports = {
+    fromNumber: fromNumber,
+    ceil: ceil,
+    floor: floor,
+    round: round,
+    fromString: fromString,
+    radix: radix,
+    binary: binary,
+    octal: octal,
+    decimal: decimal,
+    hexadecimal: hexadecimal,
+    base36: base36,
+    fromStringAs: fromStringAs,
+    Even: Even,
+    Odd: Odd,
+    parity: parity,
+    even: even,
+    odd: odd,
+    eqParity: eqParity,
+    ordParity: ordParity,
+    showParity: showParity,
+    boundedParity: boundedParity,
+    semiringParity: semiringParity,
+    ringParity: ringParity,
+    commutativeRingParity: commutativeRingParity,
+    euclideanRingParity: euclideanRingParity,
+    divisionRingParity: divisionRingParity,
+    toNumber: $foreign.toNumber,
+    toStringAs: $foreign.toStringAs,
+    quot: $foreign.quot,
+    rem: $foreign.rem,
+    pow: $foreign.pow
 };
 
 
@@ -41223,6 +42223,953 @@ module.exports = {
 
 /***/ }),
 
+/***/ "./purescript/output/Data.String.CodePoints/foreign.js":
+/*!*************************************************************!*\
+  !*** ./purescript/output/Data.String.CodePoints/foreign.js ***!
+  \*************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+/* global Symbol */
+
+var hasArrayFrom = typeof Array.from === "function";
+var hasStringIterator =
+  typeof Symbol !== "undefined" &&
+  Symbol != null &&
+  typeof Symbol.iterator !== "undefined" &&
+  typeof String.prototype[Symbol.iterator] === "function";
+var hasFromCodePoint = typeof String.prototype.fromCodePoint === "function";
+var hasCodePointAt = typeof String.prototype.codePointAt === "function";
+
+exports._unsafeCodePointAt0 = function (fallback) {
+  return hasCodePointAt
+    ? function (str) { return str.codePointAt(0); }
+    : fallback;
+};
+
+exports._codePointAt = function (fallback) {
+  return function (Just) {
+    return function (Nothing) {
+      return function (unsafeCodePointAt0) {
+        return function (index) {
+          return function (str) {
+            var length = str.length;
+            if (index < 0 || index >= length) return Nothing;
+            if (hasStringIterator) {
+              var iter = str[Symbol.iterator]();
+              for (var i = index;; --i) {
+                var o = iter.next();
+                if (o.done) return Nothing;
+                if (i === 0) return Just(unsafeCodePointAt0(o.value));
+              }
+            }
+            return fallback(index)(str);
+          };
+        };
+      };
+    };
+  };
+};
+
+exports._countPrefix = function (fallback) {
+  return function (unsafeCodePointAt0) {
+    if (hasStringIterator) {
+      return function (pred) {
+        return function (str) {
+          var iter = str[Symbol.iterator]();
+          for (var cpCount = 0; ; ++cpCount) {
+            var o = iter.next();
+            if (o.done) return cpCount;
+            var cp = unsafeCodePointAt0(o.value);
+            if (!pred(cp)) return cpCount;
+          }
+        };
+      };
+    }
+    return fallback;
+  };
+};
+
+exports._fromCodePointArray = function (singleton) {
+  return hasFromCodePoint
+    ? function (cps) {
+      // Function.prototype.apply will fail for very large second parameters,
+      // so we don't use it for arrays with 10,000 or more entries.
+      if (cps.length < 10e3) {
+        return String.fromCodePoint.apply(String, cps);
+      }
+      return cps.map(singleton).join("");
+    }
+    : function (cps) {
+      return cps.map(singleton).join("");
+    };
+};
+
+exports._singleton = function (fallback) {
+  return hasFromCodePoint ? String.fromCodePoint : fallback;
+};
+
+exports._take = function (fallback) {
+  return function (n) {
+    if (hasStringIterator) {
+      return function (str) {
+        var accum = "";
+        var iter = str[Symbol.iterator]();
+        for (var i = 0; i < n; ++i) {
+          var o = iter.next();
+          if (o.done) return accum;
+          accum += o.value;
+        }
+        return accum;
+      };
+    }
+    return fallback(n);
+  };
+};
+
+exports._toCodePointArray = function (fallback) {
+  return function (unsafeCodePointAt0) {
+    if (hasArrayFrom) {
+      return function (str) {
+        return Array.from(str, unsafeCodePointAt0);
+      };
+    }
+    return fallback;
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.CodePoints/index.js":
+/*!***********************************************************!*\
+  !*** ./purescript/output/Data.String.CodePoints/index.js ***!
+  \***********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.String.CodePoints/foreign.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Array = __webpack_require__(/*! ../Data.Array/index.js */ "./purescript/output/Data.Array/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Bounded = __webpack_require__(/*! ../Data.Bounded/index.js */ "./purescript/output/Data.Bounded/index.js");
+var Data_Enum = __webpack_require__(/*! ../Data.Enum/index.js */ "./purescript/output/Data.Enum/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_EuclideanRing = __webpack_require__(/*! ../Data.EuclideanRing/index.js */ "./purescript/output/Data.EuclideanRing/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Int = __webpack_require__(/*! ../Data.Int/index.js */ "./purescript/output/Data.Int/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Data_String_CodeUnits = __webpack_require__(/*! ../Data.String.CodeUnits/index.js */ "./purescript/output/Data.String.CodeUnits/index.js");
+var Data_String_Common = __webpack_require__(/*! ../Data.String.Common/index.js */ "./purescript/output/Data.String.Common/index.js");
+var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
+var Data_String_Unsafe = __webpack_require__(/*! ../Data.String.Unsafe/index.js */ "./purescript/output/Data.String.Unsafe/index.js");
+var Data_Tuple = __webpack_require__(/*! ../Data.Tuple/index.js */ "./purescript/output/Data.Tuple/index.js");
+var Data_Unfoldable = __webpack_require__(/*! ../Data.Unfoldable/index.js */ "./purescript/output/Data.Unfoldable/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var CodePoint = function (x) {
+    return x;
+};
+var unsurrogate = function (lead) {
+    return function (trail) {
+        return (((lead - 55296 | 0) * 1024 | 0) + (trail - 56320 | 0) | 0) + 65536 | 0;
+    };
+};
+var showCodePoint = new Data_Show.Show(function (v) {
+    return "(CodePoint 0x" + (Data_String_Common.toUpper(Data_Int.toStringAs(Data_Int.hexadecimal)(v)) + ")");
+});
+var isTrail = function (cu) {
+    return 56320 <= cu && cu <= 57343;
+};
+var isLead = function (cu) {
+    return 55296 <= cu && cu <= 56319;
+};
+var uncons = function (s) {
+    var v = Data_String_CodeUnits.length(s);
+    if (v === 0) {
+        return Data_Maybe.Nothing.value;
+    };
+    if (v === 1) {
+        return new Data_Maybe.Just({
+            head: Data_Enum.fromEnum(Data_Enum.boundedEnumChar)(Data_String_Unsafe.charAt(0)(s)),
+            tail: ""
+        });
+    };
+    var cu1 = Data_Enum.fromEnum(Data_Enum.boundedEnumChar)(Data_String_Unsafe.charAt(1)(s));
+    var cu0 = Data_Enum.fromEnum(Data_Enum.boundedEnumChar)(Data_String_Unsafe.charAt(0)(s));
+    var $21 = isLead(cu0) && isTrail(cu1);
+    if ($21) {
+        return new Data_Maybe.Just({
+            head: unsurrogate(cu0)(cu1),
+            tail: Data_String_CodeUnits.drop(2)(s)
+        });
+    };
+    return new Data_Maybe.Just({
+        head: cu0,
+        tail: Data_String_CodeUnits.drop(1)(s)
+    });
+};
+var unconsButWithTuple = function (s) {
+    return Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+        return new Data_Tuple.Tuple(v.head, v.tail);
+    })(uncons(s));
+};
+var toCodePointArrayFallback = function (s) {
+    return Data_Unfoldable.unfoldr(Data_Unfoldable.unfoldableArray)(unconsButWithTuple)(s);
+};
+var unsafeCodePointAt0Fallback = function (s) {
+    var cu0 = Data_Enum.fromEnum(Data_Enum.boundedEnumChar)(Data_String_Unsafe.charAt(0)(s));
+    var $25 = isLead(cu0) && Data_String_CodeUnits.length(s) > 1;
+    if ($25) {
+        var cu1 = Data_Enum.fromEnum(Data_Enum.boundedEnumChar)(Data_String_Unsafe.charAt(1)(s));
+        var $26 = isTrail(cu1);
+        if ($26) {
+            return unsurrogate(cu0)(cu1);
+        };
+        return cu0;
+    };
+    return cu0;
+};
+var unsafeCodePointAt0 = $foreign["_unsafeCodePointAt0"](unsafeCodePointAt0Fallback);
+var toCodePointArray = $foreign["_toCodePointArray"](toCodePointArrayFallback)(unsafeCodePointAt0);
+var length = function ($52) {
+    return Data_Array.length(toCodePointArray($52));
+};
+var lastIndexOf = function (p) {
+    return function (s) {
+        return Data_Functor.map(Data_Maybe.functorMaybe)(function (i) {
+            return length(Data_String_CodeUnits.take(i)(s));
+        })(Data_String_CodeUnits.lastIndexOf(p)(s));
+    };
+};
+var indexOf = function (p) {
+    return function (s) {
+        return Data_Functor.map(Data_Maybe.functorMaybe)(function (i) {
+            return length(Data_String_CodeUnits.take(i)(s));
+        })(Data_String_CodeUnits.indexOf(p)(s));
+    };
+};
+var fromCharCode = function ($53) {
+    return Data_String_CodeUnits.singleton(Data_Enum.toEnumWithDefaults(Data_Enum.boundedEnumChar)(Data_Bounded.bottom(Data_Bounded.boundedChar))(Data_Bounded.top(Data_Bounded.boundedChar))($53));
+};
+var singletonFallback = function (v) {
+    if (v <= 65535) {
+        return fromCharCode(v);
+    };
+    var lead = Data_EuclideanRing.div(Data_EuclideanRing.euclideanRingInt)(v - 65536 | 0)(1024) + 55296 | 0;
+    var trail = Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(v - 65536 | 0)(1024) + 56320 | 0;
+    return fromCharCode(lead) + fromCharCode(trail);
+};
+var fromCodePointArray = $foreign["_fromCodePointArray"](singletonFallback);
+var singleton = $foreign["_singleton"](singletonFallback);
+var takeFallback = function (n) {
+    return function (v) {
+        if (n < 1) {
+            return "";
+        };
+        var v1 = uncons(v);
+        if (v1 instanceof Data_Maybe.Just) {
+            return singleton(v1.value0.head) + takeFallback(n - 1 | 0)(v1.value0.tail);
+        };
+        return v;
+    };
+};
+var take = $foreign["_take"](takeFallback);
+var lastIndexOf$prime = function (p) {
+    return function (i) {
+        return function (s) {
+            var i$prime = Data_String_CodeUnits.length(take(i)(s));
+            return Data_Functor.map(Data_Maybe.functorMaybe)(function (k) {
+                return length(Data_String_CodeUnits.take(k)(s));
+            })(Data_String_CodeUnits["lastIndexOf'"](p)(i$prime)(s));
+        };
+    };
+};
+var splitAt = function (i) {
+    return function (s) {
+        var before = take(i)(s);
+        return {
+            before: before,
+            after: Data_String_CodeUnits.drop(Data_String_CodeUnits.length(before))(s)
+        };
+    };
+};
+var eqCodePoint = new Data_Eq.Eq(function (x) {
+    return function (y) {
+        return x === y;
+    };
+});
+var ordCodePoint = new Data_Ord.Ord(function () {
+    return eqCodePoint;
+}, function (x) {
+    return function (y) {
+        return Data_Ord.compare(Data_Ord.ordInt)(x)(y);
+    };
+});
+var drop = function (n) {
+    return function (s) {
+        return Data_String_CodeUnits.drop(Data_String_CodeUnits.length(take(n)(s)))(s);
+    };
+};
+var indexOf$prime = function (p) {
+    return function (i) {
+        return function (s) {
+            var s$prime = drop(i)(s);
+            return Data_Functor.map(Data_Maybe.functorMaybe)(function (k) {
+                return i + length(Data_String_CodeUnits.take(k)(s$prime)) | 0;
+            })(Data_String_CodeUnits.indexOf(p)(s$prime));
+        };
+    };
+};
+var countTail = function ($copy_p) {
+    return function ($copy_s) {
+        return function ($copy_accum) {
+            var $tco_var_p = $copy_p;
+            var $tco_var_s = $copy_s;
+            var $tco_done = false;
+            var $tco_result;
+            function $tco_loop(p, s, accum) {
+                var v = uncons(s);
+                if (v instanceof Data_Maybe.Just) {
+                    var $39 = p(v.value0.head);
+                    if ($39) {
+                        $tco_var_p = p;
+                        $tco_var_s = v.value0.tail;
+                        $copy_accum = accum + 1 | 0;
+                        return;
+                    };
+                    $tco_done = true;
+                    return accum;
+                };
+                $tco_done = true;
+                return accum;
+            };
+            while (!$tco_done) {
+                $tco_result = $tco_loop($tco_var_p, $tco_var_s, $copy_accum);
+            };
+            return $tco_result;
+        };
+    };
+};
+var countFallback = function (p) {
+    return function (s) {
+        return countTail(p)(s)(0);
+    };
+};
+var countPrefix = $foreign["_countPrefix"](countFallback)(unsafeCodePointAt0);
+var dropWhile = function (p) {
+    return function (s) {
+        return drop(countPrefix(p)(s))(s);
+    };
+};
+var takeWhile = function (p) {
+    return function (s) {
+        return take(countPrefix(p)(s))(s);
+    };
+};
+var codePointFromChar = function ($54) {
+    return CodePoint(Data_Enum.fromEnum(Data_Enum.boundedEnumChar)($54));
+};
+var codePointAtFallback = function ($copy_n) {
+    return function ($copy_s) {
+        var $tco_var_n = $copy_n;
+        var $tco_done = false;
+        var $tco_result;
+        function $tco_loop(n, s) {
+            var v = uncons(s);
+            if (v instanceof Data_Maybe.Just) {
+                var $44 = n === 0;
+                if ($44) {
+                    $tco_done = true;
+                    return new Data_Maybe.Just(v.value0.head);
+                };
+                $tco_var_n = n - 1 | 0;
+                $copy_s = v.value0.tail;
+                return;
+            };
+            $tco_done = true;
+            return Data_Maybe.Nothing.value;
+        };
+        while (!$tco_done) {
+            $tco_result = $tco_loop($tco_var_n, $copy_s);
+        };
+        return $tco_result;
+    };
+};
+var codePointAt = function (v) {
+    return function (v1) {
+        if (v < 0) {
+            return Data_Maybe.Nothing.value;
+        };
+        if (v === 0 && v1 === "") {
+            return Data_Maybe.Nothing.value;
+        };
+        if (v === 0) {
+            return new Data_Maybe.Just(unsafeCodePointAt0(v1));
+        };
+        return $foreign["_codePointAt"](codePointAtFallback)(Data_Maybe.Just.create)(Data_Maybe.Nothing.value)(unsafeCodePointAt0)(v)(v1);
+    };
+};
+var boundedCodePoint = new Data_Bounded.Bounded(function () {
+    return ordCodePoint;
+}, 0, 1114111);
+var boundedEnumCodePoint = new Data_Enum.BoundedEnum(function () {
+    return boundedCodePoint;
+}, function () {
+    return enumCodePoint;
+}, 1114111 + 1 | 0, function (v) {
+    return v;
+}, function (n) {
+    if (n >= 0 && n <= 1114111) {
+        return new Data_Maybe.Just(n);
+    };
+    if (Data_Boolean.otherwise) {
+        return Data_Maybe.Nothing.value;
+    };
+    throw new Error("Failed pattern match at Data.String.CodePoints (line 63, column 1 - line 63, column 55): " + [ n.constructor.name ]);
+});
+var enumCodePoint = new Data_Enum.Enum(function () {
+    return ordCodePoint;
+}, Data_Enum.defaultPred(Data_Enum.toEnum(boundedEnumCodePoint))(Data_Enum.fromEnum(boundedEnumCodePoint)), Data_Enum.defaultSucc(Data_Enum.toEnum(boundedEnumCodePoint))(Data_Enum.fromEnum(boundedEnumCodePoint)));
+module.exports = {
+    codePointFromChar: codePointFromChar,
+    singleton: singleton,
+    fromCodePointArray: fromCodePointArray,
+    toCodePointArray: toCodePointArray,
+    codePointAt: codePointAt,
+    uncons: uncons,
+    length: length,
+    countPrefix: countPrefix,
+    indexOf: indexOf,
+    "indexOf'": indexOf$prime,
+    lastIndexOf: lastIndexOf,
+    "lastIndexOf'": lastIndexOf$prime,
+    take: take,
+    takeWhile: takeWhile,
+    drop: drop,
+    dropWhile: dropWhile,
+    splitAt: splitAt,
+    eqCodePoint: eqCodePoint,
+    ordCodePoint: ordCodePoint,
+    showCodePoint: showCodePoint,
+    boundedCodePoint: boundedCodePoint,
+    enumCodePoint: enumCodePoint,
+    boundedEnumCodePoint: boundedEnumCodePoint
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.CodeUnits/foreign.js":
+/*!************************************************************!*\
+  !*** ./purescript/output/Data.String.CodeUnits/foreign.js ***!
+  \************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.fromCharArray = function (a) {
+  return a.join("");
+};
+
+exports.toCharArray = function (s) {
+  return s.split("");
+};
+
+exports.singleton = function (c) {
+  return c;
+};
+
+exports._charAt = function (just) {
+  return function (nothing) {
+    return function (i) {
+      return function (s) {
+        return i >= 0 && i < s.length ? just(s.charAt(i)) : nothing;
+      };
+    };
+  };
+};
+
+exports._toChar = function (just) {
+  return function (nothing) {
+    return function (s) {
+      return s.length === 1 ? just(s) : nothing;
+    };
+  };
+};
+
+exports.length = function (s) {
+  return s.length;
+};
+
+exports.countPrefix = function (p) {
+  return function (s) {
+    var i = 0;
+    while (i < s.length && p(s.charAt(i))) i++;
+    return i;
+  };
+};
+
+exports._indexOf = function (just) {
+  return function (nothing) {
+    return function (x) {
+      return function (s) {
+        var i = s.indexOf(x);
+        return i === -1 ? nothing : just(i);
+      };
+    };
+  };
+};
+
+exports["_indexOf'"] = function (just) {
+  return function (nothing) {
+    return function (x) {
+      return function (startAt) {
+        return function (s) {
+          if (startAt < 0 || startAt > s.length) return nothing;
+          var i = s.indexOf(x, startAt);
+          return i === -1 ? nothing : just(i);
+        };
+      };
+    };
+  };
+};
+
+exports._lastIndexOf = function (just) {
+  return function (nothing) {
+    return function (x) {
+      return function (s) {
+        var i = s.lastIndexOf(x);
+        return i === -1 ? nothing : just(i);
+      };
+    };
+  };
+};
+
+exports["_lastIndexOf'"] = function (just) {
+  return function (nothing) {
+    return function (x) {
+      return function (startAt) {
+        return function (s) {
+          if (startAt < 0 || startAt > s.length) return nothing;
+          var i = s.lastIndexOf(x, startAt);
+          return i === -1 ? nothing : just(i);
+        };
+      };
+    };
+  };
+};
+
+exports.take = function (n) {
+  return function (s) {
+    return s.substr(0, n);
+  };
+};
+
+exports.drop = function (n) {
+  return function (s) {
+    return s.substring(n);
+  };
+};
+
+exports._slice = function (b) {
+  return function (e) {
+    return function (s) {
+      return s.slice(b,e);
+    };
+  };
+};
+
+exports.splitAt = function (i) {
+  return function (s) {
+    return { before: s.substring(0, i), after: s.substring(i) };
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.CodeUnits/index.js":
+/*!**********************************************************!*\
+  !*** ./purescript/output/Data.String.CodeUnits/index.js ***!
+  \**********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.String.CodeUnits/foreign.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
+var Data_String_Unsafe = __webpack_require__(/*! ../Data.String.Unsafe/index.js */ "./purescript/output/Data.String.Unsafe/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var uncons = function (v) {
+    if (v === "") {
+        return Data_Maybe.Nothing.value;
+    };
+    return new Data_Maybe.Just({
+        head: Data_String_Unsafe.charAt(0)(v),
+        tail: $foreign.drop(1)(v)
+    });
+};
+var toChar = $foreign["_toChar"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var takeWhile = function (p) {
+    return function (s) {
+        return $foreign.take($foreign.countPrefix(p)(s))(s);
+    };
+};
+var takeRight = function (i) {
+    return function (s) {
+        return $foreign.drop($foreign.length(s) - i | 0)(s);
+    };
+};
+var slice = function (b) {
+    return function (e) {
+        return function (s) {
+            var l = $foreign.length(s);
+            var norm = function (x) {
+                if (x < 0) {
+                    return l + x | 0;
+                };
+                if (Data_Boolean.otherwise) {
+                    return x;
+                };
+                throw new Error("Failed pattern match at Data.String.CodeUnits (line 314, column 5 - line 315, column 27): " + [ x.constructor.name ]);
+            };
+            var e$prime = norm(e);
+            var b$prime = norm(b);
+            var $7 = b$prime < 0 || (b$prime >= l || (e$prime < 0 || (e$prime > l || b$prime > e$prime)));
+            if ($7) {
+                return Data_Maybe.Nothing.value;
+            };
+            return new Data_Maybe.Just($foreign["_slice"](b)(e)(s));
+        };
+    };
+};
+var lastIndexOf$prime = $foreign["_lastIndexOf'"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var lastIndexOf = $foreign["_lastIndexOf"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var stripSuffix = function (v) {
+    return function (str) {
+        var v1 = lastIndexOf(v)(str);
+        if (v1 instanceof Data_Maybe.Just && v1.value0 === ($foreign.length(str) - $foreign.length(v) | 0)) {
+            return Data_Maybe.Just.create($foreign.take(v1.value0)(str));
+        };
+        return Data_Maybe.Nothing.value;
+    };
+};
+var indexOf$prime = $foreign["_indexOf'"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var indexOf = $foreign["_indexOf"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+var stripPrefix = function (v) {
+    return function (str) {
+        var v1 = indexOf(v)(str);
+        if (v1 instanceof Data_Maybe.Just && v1.value0 === 0) {
+            return Data_Maybe.Just.create($foreign.drop($foreign.length(v))(str));
+        };
+        return Data_Maybe.Nothing.value;
+    };
+};
+var dropWhile = function (p) {
+    return function (s) {
+        return $foreign.drop($foreign.countPrefix(p)(s))(s);
+    };
+};
+var dropRight = function (i) {
+    return function (s) {
+        return $foreign.take($foreign.length(s) - i | 0)(s);
+    };
+};
+var contains = function (pat) {
+    return function ($16) {
+        return Data_Maybe.isJust(indexOf(pat)($16));
+    };
+};
+var charAt = $foreign["_charAt"](Data_Maybe.Just.create)(Data_Maybe.Nothing.value);
+module.exports = {
+    stripPrefix: stripPrefix,
+    stripSuffix: stripSuffix,
+    contains: contains,
+    charAt: charAt,
+    toChar: toChar,
+    uncons: uncons,
+    indexOf: indexOf,
+    "indexOf'": indexOf$prime,
+    lastIndexOf: lastIndexOf,
+    "lastIndexOf'": lastIndexOf$prime,
+    takeRight: takeRight,
+    takeWhile: takeWhile,
+    dropRight: dropRight,
+    dropWhile: dropWhile,
+    slice: slice,
+    singleton: $foreign.singleton,
+    fromCharArray: $foreign.fromCharArray,
+    toCharArray: $foreign.toCharArray,
+    length: $foreign.length,
+    countPrefix: $foreign.countPrefix,
+    take: $foreign.take,
+    drop: $foreign.drop,
+    splitAt: $foreign.splitAt
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.Common/foreign.js":
+/*!*********************************************************!*\
+  !*** ./purescript/output/Data.String.Common/foreign.js ***!
+  \*********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports._localeCompare = function (lt) {
+  return function (eq) {
+    return function (gt) {
+      return function (s1) {
+        return function (s2) {
+          var result = s1.localeCompare(s2);
+          return result < 0 ? lt : result > 0 ? gt : eq;
+        };
+      };
+    };
+  };
+};
+
+exports.replace = function (s1) {
+  return function (s2) {
+    return function (s3) {
+      return s3.replace(s1, s2);
+    };
+  };
+};
+
+exports.replaceAll = function (s1) {
+  return function (s2) {
+    return function (s3) {
+      return s3.replace(new RegExp(s1.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"), "g"), s2); // eslint-disable-line no-useless-escape
+    };
+  };
+};
+
+exports.split = function (sep) {
+  return function (s) {
+    return s.split(sep);
+  };
+};
+
+exports.toLower = function (s) {
+  return s.toLowerCase();
+};
+
+exports.toUpper = function (s) {
+  return s.toUpperCase();
+};
+
+exports.trim = function (s) {
+  return s.trim();
+};
+
+exports.joinWith = function (s) {
+  return function (xs) {
+    return xs.join(s);
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.Common/index.js":
+/*!*******************************************************!*\
+  !*** ./purescript/output/Data.String.Common/index.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.String.Common/foreign.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
+var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var $$null = function (s) {
+    return s === "";
+};
+var localeCompare = $foreign["_localeCompare"](Data_Ordering.LT.value)(Data_Ordering.EQ.value)(Data_Ordering.GT.value);
+module.exports = {
+    "null": $$null,
+    localeCompare: localeCompare,
+    replace: $foreign.replace,
+    replaceAll: $foreign.replaceAll,
+    split: $foreign.split,
+    toLower: $foreign.toLower,
+    toUpper: $foreign.toUpper,
+    trim: $foreign.trim,
+    joinWith: $foreign.joinWith
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.Pattern/index.js":
+/*!********************************************************!*\
+  !*** ./purescript/output/Data.String.Pattern/index.js ***!
+  \********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Newtype = __webpack_require__(/*! ../Data.Newtype/index.js */ "./purescript/output/Data.Newtype/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Replacement = function (x) {
+    return x;
+};
+var Pattern = function (x) {
+    return x;
+};
+var showReplacement = new Data_Show.Show(function (v) {
+    return "(Replacement " + (Data_Show.show(Data_Show.showString)(v) + ")");
+});
+var showPattern = new Data_Show.Show(function (v) {
+    return "(Pattern " + (Data_Show.show(Data_Show.showString)(v) + ")");
+});
+var newtypeReplacement = new Data_Newtype.Newtype(function (n) {
+    return n;
+}, Replacement);
+var newtypePattern = new Data_Newtype.Newtype(function (n) {
+    return n;
+}, Pattern);
+var eqReplacement = new Data_Eq.Eq(function (x) {
+    return function (y) {
+        return x === y;
+    };
+});
+var ordReplacement = new Data_Ord.Ord(function () {
+    return eqReplacement;
+}, function (x) {
+    return function (y) {
+        return Data_Ord.compare(Data_Ord.ordString)(x)(y);
+    };
+});
+var eqPattern = new Data_Eq.Eq(function (x) {
+    return function (y) {
+        return x === y;
+    };
+});
+var ordPattern = new Data_Ord.Ord(function () {
+    return eqPattern;
+}, function (x) {
+    return function (y) {
+        return Data_Ord.compare(Data_Ord.ordString)(x)(y);
+    };
+});
+module.exports = {
+    Pattern: Pattern,
+    Replacement: Replacement,
+    eqPattern: eqPattern,
+    ordPattern: ordPattern,
+    newtypePattern: newtypePattern,
+    showPattern: showPattern,
+    eqReplacement: eqReplacement,
+    ordReplacement: ordReplacement,
+    newtypeReplacement: newtypeReplacement,
+    showReplacement: showReplacement
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.Unsafe/foreign.js":
+/*!*********************************************************!*\
+  !*** ./purescript/output/Data.String.Unsafe/foreign.js ***!
+  \*********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.charAt = function (i) {
+  return function (s) {
+    if (i >= 0 && i < s.length) return s.charAt(i);
+    throw new Error("Data.String.Unsafe.charAt: Invalid index.");
+  };
+};
+
+exports.char = function (s) {
+  if (s.length === 1) return s.charAt(0);
+  throw new Error("Data.String.Unsafe.char: Expected string of length 1.");
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String.Unsafe/index.js":
+/*!*******************************************************!*\
+  !*** ./purescript/output/Data.String.Unsafe/index.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Data.String.Unsafe/foreign.js");
+module.exports = {
+    "char": $foreign["char"],
+    charAt: $foreign.charAt
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.String/index.js":
+/*!************************************************!*\
+  !*** ./purescript/output/Data.String/index.js ***!
+  \************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Data_String_CodePoints = __webpack_require__(/*! ../Data.String.CodePoints/index.js */ "./purescript/output/Data.String.CodePoints/index.js");
+var Data_String_Common = __webpack_require__(/*! ../Data.String.Common/index.js */ "./purescript/output/Data.String.Common/index.js");
+var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
+module.exports = {};
+
+
+/***/ }),
+
 /***/ "./purescript/output/Data.Symbol/foreign.js":
 /*!**************************************************!*\
   !*** ./purescript/output/Data.Symbol/foreign.js ***!
@@ -43800,6 +45747,59 @@ module.exports = {
 
 /***/ }),
 
+/***/ "./purescript/output/Global/foreign.js":
+/*!*********************************************!*\
+  !*** ./purescript/output/Global/foreign.js ***!
+  \*********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/* globals exports */
+
+
+exports.nan = NaN;
+
+exports.isNaN = isNaN;
+
+exports.infinity = Infinity;
+
+exports.isFinite = isFinite;
+
+exports.readInt = function (radix) {
+  return function (n) {
+    return parseInt(n, radix);
+  };
+};
+
+exports.readFloat = parseFloat;
+
+
+/***/ }),
+
+/***/ "./purescript/output/Global/index.js":
+/*!*******************************************!*\
+  !*** ./purescript/output/Global/index.js ***!
+  \*******************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Global/foreign.js");
+module.exports = {
+    nan: $foreign.nan,
+    "isNaN": $foreign["isNaN"],
+    infinity: $foreign.infinity,
+    "isFinite": $foreign["isFinite"],
+    readInt: $foreign.readInt,
+    readFloat: $foreign.readFloat
+};
+
+
+/***/ }),
+
 /***/ "./purescript/output/Main/index.js":
 /*!*****************************************!*\
   !*** ./purescript/output/Main/index.js ***!
@@ -43816,6 +45816,7 @@ var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/outpu
 var Data_Foldable = __webpack_require__(/*! ../Data.Foldable/index.js */ "./purescript/output/Data.Foldable/index.js");
 var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
 var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
 var Data_Lens = __webpack_require__(/*! ../Data.Lens/index.js */ "./purescript/output/Data.Lens/index.js");
 var Data_Lens_At = __webpack_require__(/*! ../Data.Lens.At/index.js */ "./purescript/output/Data.Lens.At/index.js");
 var Data_Lens_Getter = __webpack_require__(/*! ../Data.Lens.Getter/index.js */ "./purescript/output/Data.Lens.Getter/index.js");
@@ -43832,6 +45833,9 @@ var Data_Profunctor_Strong = __webpack_require__(/*! ../Data.Profunctor.Strong/i
 var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
 var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
 var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_String = __webpack_require__(/*! ../Data.String/index.js */ "./purescript/output/Data.String/index.js");
+var Data_String_Common = __webpack_require__(/*! ../Data.String.Common/index.js */ "./purescript/output/Data.String.Common/index.js");
+var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
 var Data_Symbol = __webpack_require__(/*! ../Data.Symbol/index.js */ "./purescript/output/Data.Symbol/index.js");
 var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
 var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
@@ -43862,6 +45866,31 @@ var Redo = (function () {
 var GraphNode = function (x) {
     return x;
 };
+var FocusNode = (function () {
+    function FocusNode(value0) {
+        this.value0 = value0;
+    };
+    FocusNode.create = function (value0) {
+        return new FocusNode(value0);
+    };
+    return FocusNode;
+})();
+var FocusEdge = (function () {
+    function FocusEdge(value0) {
+        this.value0 = value0;
+    };
+    FocusEdge.create = function (value0) {
+        return new FocusEdge(value0);
+    };
+    return FocusEdge;
+})();
+var NoFocus = (function () {
+    function NoFocus() {
+
+    };
+    NoFocus.value = new NoFocus();
+    return NoFocus;
+})();
 var Graph = function (x) {
     return x;
 };
@@ -44015,6 +46044,7 @@ var UnHighlight = (function () {
 var singletonNodeIdSet = function (nodeId) {
     return Foreign_Object.singleton(nodeId)(Data_Unit.unit);
 };
+var maybe = Data_Maybe.Just.create;
 var insert = function (nodeId) {
     return Foreign_Object.insert(nodeId)(Data_Unit.unit);
 };
@@ -44022,6 +46052,18 @@ var graphLength = function (graph) {
     return Data_List.length(graph);
 };
 var fromMaybe = Data_Maybe.fromMaybe;
+var fromFocus = function (v) {
+    if (v instanceof NoFocus) {
+        return "";
+    };
+    if (v instanceof FocusNode) {
+        return v.value0;
+    };
+    if (v instanceof FocusEdge) {
+        return v.value0;
+    };
+    throw new Error("Failed pattern match at Main (line 475, column 1 - line 475, column 29): " + [ v.constructor.name ]);
+};
 var emptyUndoableGraph = Data_List_Types.Nil.value;
 var emptyNodeIdSet = Foreign_Object.empty;
 var oppy = AddNode.create({
@@ -44035,16 +46077,19 @@ var oppy = AddNode.create({
 });
 var emptyGraph = {
     nodes: Foreign_Object.empty,
-    focusNode: "",
-    highlightedNodes: emptyNodeIdSet
+    focus: NoFocus.value,
+    highlighted: emptyNodeIdSet
 };
 var $$delete = Foreign_Object["delete"];
+var computeEdgeId = function (edge) {
+    return edge.source + ("." + edge.target);
+};
 var addOp = function (op) {
     return function (ops) {
         if (op instanceof Op && op.value0 instanceof MoveNode) {
             if (ops instanceof Data_List_Types.Cons && (ops.value0 instanceof Op && ops.value0.value0 instanceof MoveNode)) {
-                var $22 = op.value0.value0 === ops.value0.value0.value0;
-                if ($22) {
+                var $42 = op.value0.value0 === ops.value0.value0.value0;
+                if ($42) {
                     return new Data_List_Types.Cons(op, ops.value1);
                 };
                 return new Data_List_Types.Cons(op, ops);
@@ -44095,9 +46140,19 @@ var _nodes = function (dictStrong) {
         return "nodes";
     }))()()(Data_Symbol.SProxy.value)(dictStrong);
 };
-var _highlightedNodes = function (dictStrong) {
+var _id = function (dictStrong) {
     return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
-        return "highlightedNodes";
+        return "id";
+    }))()()(Data_Symbol.SProxy.value)(dictStrong);
+};
+var _highlighted = function (dictStrong) {
+    return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
+        return "highlighted";
+    }))()()(Data_Symbol.SProxy.value)(dictStrong);
+};
+var _focus = function (dictStrong) {
+    return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
+        return "focus";
     }))()()(Data_Symbol.SProxy.value)(dictStrong);
 };
 var _children = function (dictStrong) {
@@ -44113,50 +46168,50 @@ var _GraphNode = function (dictStrong) {
     })(dictStrong);
 };
 var addChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($74) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($74));
+    return Data_Lens_Setter.over(function ($121) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($121));
     })(insert(nodeId));
 };
 var addParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($75) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($75));
+    return Data_Lens_Setter.over(function ($122) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($122));
     })(insert(nodeId));
 };
 var moveNode = function (pos) {
-    return function ($76) {
-        return Data_Lens_Setter.set(function ($77) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($77));
-        })(pos.x)(Data_Lens_Setter.set(function ($78) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($78));
-        })(pos.y)($76));
+    return function ($123) {
+        return Data_Lens_Setter.set(function ($124) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($124));
+        })(pos.x)(Data_Lens_Setter.set(function ($125) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($125));
+        })(pos.y)($123));
     };
 };
 var removeChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($79) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($79));
+    return Data_Lens_Setter.over(function ($126) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($126));
     })($$delete(nodeId));
 };
 var removeParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($80) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($80));
+    return Data_Lens_Setter.over(function ($127) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($127));
     })($$delete(nodeId));
 };
 var terminalestNode = function (nodes) {
-    var nParents = function ($81) {
-        return Foreign_Object.size(Data_Lens_Getter.view(function ($82) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($82));
-        })($81));
+    var nParents = function ($128) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($129) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($129));
+        })($128));
     };
-    var nChildren = function ($83) {
-        return Foreign_Object.size(Data_Lens_Getter.view(function ($84) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($84));
-        })($83));
+    var nChildren = function ($130) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($131) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($131));
+        })($130));
     };
     var isTerminal = function (node) {
         return nChildren(node) === 0;
     };
-    var getY = Data_Lens_Getter.view(function ($85) {
-        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($85));
+    var getY = Data_Lens_Getter.view(function ($132) {
+        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($132));
     });
     var lower = function (a) {
         return function (b) {
@@ -44174,11 +46229,11 @@ var terminalestNode = function (nodes) {
     };
     return Data_Foldable.maximumBy(Data_Foldable.foldableArray)(mostParentsLowest)(v);
 };
-var updateSubgraphNodes = Data_Lens_Setter.set(function ($86) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($86));
+var updateSubgraphNodes = Data_Lens_Setter.set(function ($133) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($133));
 });
-var updateText = Data_Lens_Setter.set(function ($87) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($87));
+var updateText = Data_Lens_Setter.set(function ($134) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($134));
 });
 var _Graph = function (dictStrong) {
     return Data_Lens_Lens.lens(function (v) {
@@ -44189,80 +46244,80 @@ var _Graph = function (dictStrong) {
 };
 var applyGraphOp = function (v) {
     if (v instanceof AddNode) {
-        return Data_Lens_Setter.setJust(function ($88) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($88)));
+        return Data_Lens_Setter.setJust(function ($135) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($135)));
         })(v.value0);
     };
     if (v instanceof RemoveNode) {
-        return Data_Lens_Setter.set(function ($89) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($89)));
+        return Data_Lens_Setter.set(function ($136) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($136)));
         })(Data_Maybe.Nothing.value);
     };
     if (v instanceof MoveNode) {
-        return Data_Lens_Setter.over(function ($90) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($90)));
+        return Data_Lens_Setter.over(function ($137) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($137)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(moveNode(v.value1)));
     };
     if (v instanceof AddParent) {
-        return Data_Lens_Setter.over(function ($91) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($91)));
+        return Data_Lens_Setter.over(function ($138) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($138)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(addParent(v.value1)));
     };
     if (v instanceof RemoveParent) {
-        return Data_Lens_Setter.over(function ($92) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($92)));
+        return Data_Lens_Setter.over(function ($139) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($139)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(removeParent(v.value1)));
     };
     if (v instanceof AddChild) {
-        return Data_Lens_Setter.over(function ($93) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($93)));
+        return Data_Lens_Setter.over(function ($140) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($140)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(addChild(v.value1)));
     };
     if (v instanceof RemoveChild) {
-        return Data_Lens_Setter.over(function ($94) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($94)));
+        return Data_Lens_Setter.over(function ($141) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($141)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(removeChild(v.value1)));
     };
     if (v instanceof AddEdge) {
-        return function ($95) {
-            return applyGraphOp(new AddParent(v.value0.to, v.value0.from))(applyGraphOp(new AddChild(v.value0.from, v.value0.to))($95));
+        return function ($142) {
+            return applyGraphOp(new AddParent(v.value0.target, v.value0.source))(applyGraphOp(new AddChild(v.value0.source, v.value0.target))($142));
         };
     };
     if (v instanceof RemoveEdge) {
-        return function ($96) {
-            return applyGraphOp(new RemoveParent(v.value0.to, v.value0.from))(applyGraphOp(new RemoveChild(v.value0.from, v.value0.to))($96));
+        return function ($143) {
+            return applyGraphOp(new RemoveParent(v.value0.target, v.value0.source))(applyGraphOp(new RemoveChild(v.value0.source, v.value0.target))($143));
         };
     };
     if (v instanceof UpdateText) {
-        return Data_Lens_Setter.over(function ($97) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($97)));
+        return Data_Lens_Setter.over(function ($144) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($144)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(updateText(v.value1)));
     };
     if (v instanceof UpdateSubgraphNodes) {
-        return Data_Lens_Setter.over(function ($98) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($98)));
+        return Data_Lens_Setter.over(function ($145) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($145)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(updateSubgraphNodes(v.value1)));
     };
     if (v instanceof UpdateFocus) {
         return Data_Lens_Setter.over(_Graph(Data_Profunctor_Strong.strongFn))(function (v1) {
             return {
                 nodes: v1.nodes,
-                focusNode: v.value0,
-                highlightedNodes: v1.highlightedNodes
+                focus: v.value0,
+                highlighted: v1.highlighted
             };
         });
     };
     if (v instanceof Highlight) {
-        return Data_Lens_Setter.over(function ($99) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($99));
+        return Data_Lens_Setter.over(function ($146) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($146));
         })(insert(v.value0));
     };
     if (v instanceof UnHighlight) {
-        return Data_Lens_Setter.over(function ($100) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlightedNodes(Data_Profunctor_Strong.strongFn)($100));
+        return Data_Lens_Setter.over(function ($147) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($147));
         })($$delete(v.value0));
     };
-    throw new Error("Failed pattern match at Main (line 168, column 1 - line 168, column 42): " + [ v.constructor.name ]);
+    throw new Error("Failed pattern match at Main (line 185, column 1 - line 185, column 42): " + [ v.constructor.name ]);
 };
 var buildGraph = function (ops) {
     var urr = function ($copy_v) {
@@ -44333,7 +46388,7 @@ var buildGraph = function (ops) {
     };
     return Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(emptyGraph)(undoRedoReverse(ops));
 };
-var demo = buildGraph(new Data_List_Types.Cons(new Op(new UpdateFocus("goofus")), new Data_List_Types.Cons(new Op(new Highlight("thingo")), new Data_List_Types.Cons(new Op(AddNode.create({
+var demo = buildGraph(new Data_List_Types.Cons(new Op(new UpdateFocus(new FocusNode("goofus"))), new Data_List_Types.Cons(new Op(new Highlight("thingo")), new Data_List_Types.Cons(new Op(AddNode.create({
     text: "thingo",
     id: "thingo",
     x: 205.0,
@@ -44352,14 +46407,209 @@ var demo = buildGraph(new Data_List_Types.Cons(new Op(new UpdateFocus("goofus"))
 })), Data_List_Types.Nil.value)))));
 var lookupNode = function (g) {
     return function (nodeId) {
-        return Data_Lens_Getter.view(function ($101) {
-            return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($101)));
+        return Data_Lens_Getter.view(function ($148) {
+            return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($148)));
         })(g);
+    };
+};
+var getFocusNode = function (g) {
+    var v = Data_Lens_Getter.view(function ($149) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($149));
+    })(g);
+    if (v instanceof FocusNode) {
+        return lookupNode(g)(v.value0);
+    };
+    return Data_Maybe.Nothing.value;
+};
+var traverseDown = function (g) {
+    return function (ops) {
+        var v = getFocusNode(g);
+        if (v instanceof Data_Maybe.Just) {
+            var v1 = Data_Array.index(Foreign_Object.keys(v.value0.children))(0);
+            if (v1 instanceof Data_Maybe.Nothing) {
+                return ops;
+            };
+            if (v1 instanceof Data_Maybe.Just) {
+                return doOp(new UpdateFocus(new FocusNode(v1.value0)))(ops);
+            };
+            throw new Error("Failed pattern match at Main (line 339, column 28 - line 341, column 63): " + [ v1.constructor.name ]);
+        };
+        if (v instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        throw new Error("Failed pattern match at Main (line 338, column 22 - line 342, column 17): " + [ v.constructor.name ]);
+    };
+};
+var traverseUp = function (g) {
+    return function (ops) {
+        var v = getFocusNode(g);
+        if (v instanceof Data_Maybe.Just) {
+            var v1 = Data_Array.index(Foreign_Object.keys(v.value0.parents))(0);
+            if (v1 instanceof Data_Maybe.Nothing) {
+                return ops;
+            };
+            if (v1 instanceof Data_Maybe.Just) {
+                return doOp(new UpdateFocus(new FocusNode(v1.value0)))(ops);
+            };
+            throw new Error("Failed pattern match at Main (line 332, column 28 - line 334, column 65): " + [ v1.constructor.name ]);
+        };
+        if (v instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        throw new Error("Failed pattern match at Main (line 331, column 20 - line 335, column 17): " + [ v.constructor.name ]);
+    };
+};
+var lookupEdge = function (g) {
+    return function (edgeId) {
+        var edgeNodeIds = Data_String_Common.split(".")(edgeId);
+        var sourceId = fromMaybe("")(Data_Array.index(edgeNodeIds)(0));
+        var targetId = fromMaybe("")(Data_Array.index(edgeNodeIds)(1));
+        var v = Data_Foldable.all(Data_Foldable.foldableArray)(Data_HeytingAlgebra.heytingAlgebraBoolean)(Data_Maybe.isJust)([ lookupNode(g)(sourceId), lookupNode(g)(targetId) ]);
+        if (!v) {
+            return Data_Maybe.Nothing.value;
+        };
+        if (v) {
+            return new Data_Maybe.Just({
+                source: sourceId,
+                target: targetId
+            });
+        };
+        throw new Error("Failed pattern match at Main (line 444, column 3 - line 446, column 57): " + [ v.constructor.name ]);
     };
 };
 var lookupNodes = function (g) {
     return function (nodeIds) {
         return Data_Array.mapMaybe(lookupNode(g))(Foreign_Object.keys(nodeIds));
+    };
+};
+var coparents = function (g) {
+    return function (node) {
+        var childIds = Data_Lens_Getter.view(function ($150) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($150));
+        })(node);
+        var children = lookupNodes(g)(childIds);
+        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($151) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($151));
+        }))(children);
+    };
+};
+var siblings = function (g) {
+    return function (node) {
+        var parentIds = Data_Lens_Getter.view(function ($152) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($152));
+        })(node);
+        var parents = lookupNodes(g)(parentIds);
+        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($153) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($153));
+        }))(parents);
+    };
+};
+var nodeOnLeft = function (g) {
+    return function (node) {
+        var viewX = Data_Lens_Getter.view(function ($154) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($154));
+        });
+        var siblingsAndCoparents = lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
+        var xSortedSibCops = Data_Array.sortWith(Data_Ord.ordNumber)(viewX)(siblingsAndCoparents);
+        var splitSortedSibCops = Data_Array.partition(function (n) {
+            return viewX(n) < viewX(node);
+        })(xSortedSibCops);
+        var toTheLeft = Data_Array.reverse(Data_Semigroup.append(Data_Semigroup.semigroupArray)(splitSortedSibCops.no)(splitSortedSibCops.yes));
+        return fromMaybe(node)(Data_Array.index(toTheLeft)(0));
+    };
+};
+var traverseLeft = function (g) {
+    return function (ops) {
+        var v = getFocusNode(g);
+        if (v instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        if (v instanceof Data_Maybe.Just) {
+            return doOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($155) {
+                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($155));
+            })(nodeOnLeft(g)(v.value0)))))(ops);
+        };
+        throw new Error("Failed pattern match at Main (line 366, column 22 - line 368, column 108): " + [ v.constructor.name ]);
+    };
+};
+var nodeOnRight = function (g) {
+    return function (node) {
+        var viewX = Data_Lens_Getter.view(function ($156) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($156));
+        });
+        var siblingsAndCoparents = lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
+        var xSortedSibCops = Data_Array.sortWith(Data_Ord.ordNumber)(viewX)(siblingsAndCoparents);
+        var splitSortedSibCops = Data_Array.partition(function (n) {
+            return viewX(n) <= viewX(node);
+        })(xSortedSibCops);
+        var toTheRight = Data_Semigroup.append(Data_Semigroup.semigroupArray)(splitSortedSibCops.no)(splitSortedSibCops.yes);
+        return fromMaybe(node)(Data_Array.index(toTheRight)(0));
+    };
+};
+var traverseRight = function (g) {
+    return function (ops) {
+        var v = getFocusNode(g);
+        if (v instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        if (v instanceof Data_Maybe.Just) {
+            return doOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($157) {
+                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($157));
+            })(nodeOnRight(g)(v.value0)))))(ops);
+        };
+        throw new Error("Failed pattern match at Main (line 380, column 23 - line 382, column 109): " + [ v.constructor.name ]);
+    };
+};
+var removeFocus = function (g) {
+    return function (ops) {
+        var v = Data_Lens_Getter.view(function ($158) {
+            return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($158));
+        })(g);
+        if (v instanceof NoFocus) {
+            return ops;
+        };
+        if (v instanceof FocusNode) {
+            var v1 = lookupNode(g)(v.value0);
+            if (v1 instanceof Data_Maybe.Nothing) {
+                return ops;
+            };
+            if (v1 instanceof Data_Maybe.Just) {
+                var newFocus = function (currentFocus) {
+                    var v2 = Foreign_Object.size(v1.value0.parents);
+                    if (v2 === 0) {
+                        var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.children))(0);
+                        if (v3 instanceof Data_Maybe.Nothing) {
+                            return NoFocus.value;
+                        };
+                        if (v3 instanceof Data_Maybe.Just) {
+                            return new FocusNode(v3.value0);
+                        };
+                        throw new Error("Failed pattern match at Main (line 312, column 16 - line 314, column 46): " + [ v3.constructor.name ]);
+                    };
+                    var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.parents))(0);
+                    if (v3 instanceof Data_Maybe.Nothing) {
+                        return NoFocus.value;
+                    };
+                    if (v3 instanceof Data_Maybe.Just) {
+                        return new FocusNode(v3.value0);
+                    };
+                    throw new Error("Failed pattern match at Main (line 315, column 24 - line 317, column 48): " + [ v3.constructor.name ]);
+                };
+                return doOp(new UpdateFocus(newFocus(v1.value0)))(doOp(new RemoveNode(v1.value0))(ops));
+            };
+            throw new Error("Failed pattern match at Main (line 307, column 23 - line 320, column 54): " + [ v1.constructor.name ]);
+        };
+        if (v instanceof FocusEdge) {
+            var v1 = lookupEdge(g)(v.value0);
+            if (v1 instanceof Data_Maybe.Nothing) {
+                return ops;
+            };
+            if (v1 instanceof Data_Maybe.Just) {
+                return doOp(new UpdateFocus(new FocusNode(v1.value0.source)))(doOp(new RemoveEdge(v1.value0))(ops));
+            };
+            throw new Error("Failed pattern match at Main (line 321, column 23 - line 324, column 35): " + [ v1.constructor.name ]);
+        };
+        throw new Error("Failed pattern match at Main (line 305, column 21 - line 324, column 35): " + [ v.constructor.name ]);
     };
 };
 module.exports = {
@@ -44370,6 +46620,10 @@ module.exports = {
     Graph: Graph,
     emptyGraph: emptyGraph,
     GraphNode: GraphNode,
+    computeEdgeId: computeEdgeId,
+    FocusNode: FocusNode,
+    FocusEdge: FocusEdge,
+    NoFocus: NoFocus,
     AddNode: AddNode,
     RemoveNode: RemoveNode,
     MoveNode: MoveNode,
@@ -44386,14 +46640,16 @@ module.exports = {
     UnHighlight: UnHighlight,
     "_Graph": _Graph,
     "_nodes": _nodes,
-    "_highlightedNodes": _highlightedNodes,
+    "_highlighted": _highlighted,
     "_GraphNode": _GraphNode,
     "_parents": _parents,
     "_children": _children,
     "_x": _x,
     "_y": _y,
     "_text": _text,
+    "_id": _id,
     "_subgraphNodes": _subgraphNodes,
+    "_focus": _focus,
     addParent: addParent,
     removeParent: removeParent,
     addChild: addChild,
@@ -44410,14 +46666,165 @@ module.exports = {
     Undo: Undo,
     Redo: Redo,
     addOp: addOp,
+    removeFocus: removeFocus,
+    traverseUp: traverseUp,
+    traverseDown: traverseDown,
+    siblings: siblings,
+    coparents: coparents,
+    nodeOnLeft: nodeOnLeft,
+    traverseLeft: traverseLeft,
+    nodeOnRight: nodeOnRight,
+    traverseRight: traverseRight,
     doOp: doOp,
     undo: undo,
     redo: redo,
     buildGraph: buildGraph,
     lookupNode: lookupNode,
     lookupNodes: lookupNodes,
+    getFocusNode: getFocusNode,
+    lookupEdge: lookupEdge,
     terminalestNode: terminalestNode,
-    fromMaybe: fromMaybe
+    fromMaybe: fromMaybe,
+    maybe: maybe,
+    fromFocus: fromFocus
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Math/foreign.js":
+/*!*******************************************!*\
+  !*** ./purescript/output/Math/foreign.js ***!
+  \*******************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+// module Math
+
+exports.abs = Math.abs;
+
+exports.acos = Math.acos;
+
+exports.asin = Math.asin;
+
+exports.atan = Math.atan;
+
+exports.atan2 = function (y) {
+  return function (x) {
+    return Math.atan2(y, x);
+  };
+};
+
+exports.ceil = Math.ceil;
+
+exports.cos = Math.cos;
+
+exports.exp = Math.exp;
+
+exports.floor = Math.floor;
+
+exports.trunc = Math.trunc || function (n) {
+  return n < 0 ? Math.ceil(n) : Math.floor(n);
+};
+
+exports.log = Math.log;
+
+exports.max = function (n1) {
+  return function (n2) {
+    return Math.max(n1, n2);
+  };
+};
+
+exports.min = function (n1) {
+  return function (n2) {
+    return Math.min(n1, n2);
+  };
+};
+
+exports.pow = function (n) {
+  return function (p) {
+    return Math.pow(n, p);
+  };
+};
+
+exports.remainder = function (n) {
+  return function (m) {
+    return n % m;
+  };
+};
+
+exports.round = Math.round;
+
+exports.sin = Math.sin;
+
+exports.sqrt = Math.sqrt;
+
+exports.tan = Math.tan;
+
+exports.e = Math.E;
+
+exports.ln2 = Math.LN2;
+
+exports.ln10 = Math.LN10;
+
+exports.log2e = Math.LOG2E;
+
+exports.log10e = Math.LOG10E;
+
+exports.pi = Math.PI;
+
+exports.tau = 2 * Math.PI;
+
+exports.sqrt1_2 = Math.SQRT1_2;
+
+exports.sqrt2 = Math.SQRT2;
+
+
+/***/ }),
+
+/***/ "./purescript/output/Math/index.js":
+/*!*****************************************!*\
+  !*** ./purescript/output/Math/index.js ***!
+  \*****************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Math/foreign.js");
+module.exports = {
+    abs: $foreign.abs,
+    acos: $foreign.acos,
+    asin: $foreign.asin,
+    atan: $foreign.atan,
+    atan2: $foreign.atan2,
+    ceil: $foreign.ceil,
+    cos: $foreign.cos,
+    exp: $foreign.exp,
+    floor: $foreign.floor,
+    log: $foreign.log,
+    max: $foreign.max,
+    min: $foreign.min,
+    pow: $foreign.pow,
+    round: $foreign.round,
+    sin: $foreign.sin,
+    sqrt: $foreign.sqrt,
+    tan: $foreign.tan,
+    trunc: $foreign.trunc,
+    remainder: $foreign.remainder,
+    e: $foreign.e,
+    ln2: $foreign.ln2,
+    ln10: $foreign.ln10,
+    log2e: $foreign.log2e,
+    log10e: $foreign.log10e,
+    pi: $foreign.pi,
+    tau: $foreign.tau,
+    sqrt1_2: $foreign.sqrt1_2,
+    sqrt2: $foreign.sqrt2
 };
 
 
@@ -45967,6 +48374,7 @@ const Graph = __webpack_require__(/*! ./graph.js */ "./graph.js");
 const GraphUI = __webpack_require__(/*! ./graphUI.js */ "./graphUI.js");
 const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
 const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
+var Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
 
 ///////////////////////////////////
 //////// Data
@@ -46012,13 +48420,13 @@ var graphNodes = {
     },
 };
 
-var graph = new Graph(graphNodes, "a", StringSet.fromArray(["b"]));
+var graph = new Graph(graphNodes, Purs.FocusNode.create("a"), StringSet.fromArray(["b"]));
 var graphUI = new GraphUI(graph);
 
 function copyPursGraph(pursGraph) {
     return new Graph(Utils.deepCopyObject(pursGraph.nodes),
-                     pursGraph.focusNode,
-                     pursGraph.highlightedNodes);
+                     pursGraph.focus,
+                     pursGraph.highlighted);
 };
 
 
@@ -46028,7 +48436,6 @@ function copyPursGraph(pursGraph) {
 graphUI.update();
 
 // TODO: remove debugging hackz
-var Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
 window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;

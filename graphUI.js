@@ -1,6 +1,7 @@
-var d3 = require("./d3.js");
-var Utils = require("./utils");
-var StringSet = require("./stringSet.js");
+const d3 = require("./d3.js");
+const Utils = require("./utils");
+const StringSet = require("./stringSet.js");
+const Purs = require('./purescript/output/Main/index.js');
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -36,7 +37,8 @@ module.exports = function GraphUI(graph) {
     // Define Z axis ordering of elements
     graphUI.svg.append("g").attr("id", "text");
     graphUI.svg.append("g").attr("id", "nodeHalos");
-    graphUI.svg.append("g").attr("id", "links");
+    graphUI.svg.append("g").attr("id", "edges");
+    graphUI.svg.append("g").attr("id", "edgeBorders");
     graphUI.svg.append("g").attr("id", "nodes");
     graphUI.svg.append("g").attr("id", "nodeBorders");
 
@@ -46,12 +48,12 @@ module.exports = function GraphUI(graph) {
         .attr("id", "arrow")
         .attr("markerWidth", 10)
         .attr("markerHeight", 10)
-        .attr("refX", 10)
-        .attr("refY", 3)
+        .attr("refX", 15)
+        .attr("refY", 5)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     // For pointing to a group
@@ -62,9 +64,9 @@ module.exports = function GraphUI(graph) {
         .attr("refX", 13)
         .attr("refY", 3)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     // For the arrow being drawn (by dragging)
@@ -75,48 +77,87 @@ module.exports = function GraphUI(graph) {
         .attr("refX", 3)
         .attr("refY", 3)
         .attr("orient", "auto")
-        .attr("marketUnits", "strokeWidth")
+        .attr("markerUnits", "userSpaceOnUse")
         .append("path")
-        .attr("d", "M0,0 L0,6 L6,3 z")
+        .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
     graphUI.updateEdges = function () {
-        graphUI.svg.select("#links").selectAll(".nodeLinks")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0])
-            .join("g")
-            .classed("nodeLinks", true)
-            .selectAll("line")
-            .data(d => StringSet.toArray(d[1].parents).map(
-                parentId => ({"source": parentId, "target": d[0]})),
-                  edge => edge)
+        graphUI.svg.select("#edges").selectAll("line").filter(".edge")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
             .join(
                 enter => enter.append("line")
-                    .attr("x1", edge => graphUI.graph.nodes[edge.source].x)
-                    .attr("y1", edge => graphUI.graph.nodes[edge.source].y)
-                    .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
-                    .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
-                    .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
+                    .classed("edge", true)
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
                         }}),
                 update => update
-                    .attr("x1", edge => graphUI.graph.nodes[edge.source].x)
-                    .attr("y1", edge => graphUI.graph.nodes[edge.source].y)
-                    .attr("x2", edge => graphUI.graph.nodes[edge.target].x)
-                    .attr("y2", edge => graphUI.graph.nodes[edge.target].y)
-                    .attr("marker-end", edge => {
-                        if (Utils.isEmptyObject(graphUI.graph.nodes[edge.target].subgraphNodes)) {
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
                             return "url(#arrow)";
                         } else {
                             return "url(#arrow-to-group)";
-                        }}),
+                        }
+                    })
+            );
+    };
+
+    graphUI.updateEdgeBorders = function () {
+        graphUI.svg.select("#edgeBorders").selectAll("line").filter(".edgeBorder")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
+            .join(
+                enter => enter.append("line")
+                    .classed("edgeBorder", true)
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
+                    .attr("stroke-linecap", "butt")
+                    .on("click", function(edgeNodes) {
+                        console.log(edgeNodes);
+                        graphUI.graph.focusOnEdge(Purs.computeEdgeId(
+                            {"source": edgeNodes.source.id, "target": edgeNodes.target.id}));
+                        graphUI.update();
+                    })
+                    .on("mouseover", function (d) {
+                        Utils.fadeIn(this, fadeSpeed);
+                    })
+                    .on("mouseout", function (d) {
+                        if (!d3.select(this).classed("grouped")) {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    }),
+                update => update
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
             );
     };
 
     graphUI.updateDrawingEdge = function () {
-        graphUI.svg.select("#links").selectAll("line").filter(".drawing")
+        graphUI.svg.select("#edges").selectAll("line").filter(".drawing")
             .data(mouseState.drawingEdge)
             .join(
                 enter => enter.append("line")
@@ -161,7 +202,7 @@ module.exports = function GraphUI(graph) {
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
-                            d[0] == graphUI.graph.focusNode) {
+                            d[0] == Purs.fromFocus(graphUI.graph.focus)) {
                             d3.select(this).select("div").select("div").node().focus();
                         } else {
                             d3.select(this).select("div").select("div").node().blur();
@@ -186,13 +227,13 @@ module.exports = function GraphUI(graph) {
                     })
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusNode),
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus)),
                 update => update
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == graphUI.graph.focusNode)
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus))
             );
     };
 
@@ -205,7 +246,7 @@ module.exports = function GraphUI(graph) {
                     .attr("r", 28)
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
@@ -230,7 +271,7 @@ module.exports = function GraphUI(graph) {
                 update => update
                     .attr("cx", d => d[1].x)
                     .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlightedNodes))
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
                             Utils.fadeIn(this, fadeSpeed);
@@ -283,6 +324,8 @@ module.exports = function GraphUI(graph) {
 
         graphUI.updateEdges();
 
+        graphUI.updateEdgeBorders();
+
         graphUI.updateDrawingEdge();
 
         graphUI.updateText();
@@ -310,7 +353,7 @@ module.exports = function GraphUI(graph) {
 
     function dragstarted_node(d) {
         d3.select(this).style("pointer-events", "none");
-        graphUI.graph.focusOn(d[0]);
+        graphUI.graph.focusOnNode(d[0]);
         graphUI.update();
     }
 
@@ -350,7 +393,6 @@ module.exports = function GraphUI(graph) {
         graphUI.update();
         mouseState.clickedNode = undefined;
         d3.selectAll("*").classed("ready", false);
-        //d3.selectAll("*").classed("hover", false);
         graphUI.update();
     }
 
@@ -359,7 +401,7 @@ module.exports = function GraphUI(graph) {
             mouseState.clickedNode != mouseState.mouseoverNode &&
             mouseState.mouseoverNode != undefined) {
             graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
-            graphUI.graph.focusedNode = mouseState.mouseoverNode;
+            graphUI.graph.focusOnNode(mouseState.mouseoverNode);
             mouseState.clickedNode = undefined;
             mouseState.mouseoverNode = undefined;
         };
@@ -387,7 +429,7 @@ module.exports = function GraphUI(graph) {
     }
 
     function visualMode() {
-        graphUI.graph.highlightFocusNode();
+        graphUI.graph.highlightFocus();
         graphUI.keyboardMode = "visual";
     }
 
@@ -407,9 +449,9 @@ module.exports = function GraphUI(graph) {
             "h": graph => graph.traverseLeft(),
             "l": graph => graph.traverseRight(),
             "o": graph => graph.newNodeBelowFocus(),
-            "x": graph => graph.removeFocusedNode(),
-            "Delete": graph => graph.removeFocusedNode(),
-            "s": graph => graph.toggleHighlightFocusNode(),
+            "x": graph => graph.removeFocused(),
+            "Delete": graph => graph.removeFocused(),
+            "s": graph => graph.toggleHighlightFocus(),
             "Escape": graph => graph.clearHighlights(),
             "i": insertMode,
             "v": visualMode,
@@ -419,12 +461,12 @@ module.exports = function GraphUI(graph) {
             "Escape": normalMode,
         },
         "visual": {
-            "j": graph => graph.traverseDown().highlightFocusNode(),
-            "k": graph => graph.traverseUp().highlightFocusNode(),
-            "h": graph => graph.traverseLeft().highlightFocusNode(),
-            "l": graph => graph.traverseRight().highlightFocusNode(),
-            "s": graph => graph.toggleHighlightFocusNode(),
-            "Delete": graph => graph.removeFocusNodeFromGroup(),
+            "j": graph => graph.traverseDown().highlightFocus(),
+            "k": graph => graph.traverseUp().highlightFocus(),
+            "h": graph => graph.traverseLeft().highlightFocus(),
+            "l": graph => graph.traverseRight().highlightFocus(),
+            "s": graph => graph.toggleHighlightFocus(),
+            "Delete": graph => graph.removeFocusFromGroup(),
             "Escape": normalMode,
             " ": graph => graph.toggleGroupExpand,
         }

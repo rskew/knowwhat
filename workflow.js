@@ -2,6 +2,7 @@ const Graph = require('./graph.js');
 const GraphUI = require('./graphUI.js');
 const StringSet = require('./stringSet.js');
 const Utils = require('./utils.js');
+var Purs = require('./purescript/output/Main/index.js');
 
 ///////////////////////////////////
 //////// Data
@@ -47,13 +48,13 @@ var graphNodes = {
     },
 };
 
-var graph = new Graph(graphNodes, "a", StringSet.fromArray(["b"]));
+var graph = new Graph(graphNodes, Purs.FocusNode.create("a"), StringSet.fromArray(["b"]));
 var graphUI = new GraphUI(graph);
 
 function copyPursGraph(pursGraph) {
     return new Graph(Utils.deepCopyObject(pursGraph.nodes),
-                     pursGraph.focusNode,
-                     pursGraph.highlightedNodes);
+                     pursGraph.focus,
+                     pursGraph.highlighted);
 };
 
 
@@ -63,7 +64,6 @@ function copyPursGraph(pursGraph) {
 graphUI.update();
 
 // TODO: remove debugging hackz
-var Purs = require('./purescript/output/Main/index.js');
 window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
