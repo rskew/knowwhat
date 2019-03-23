@@ -86,10 +86,1116 @@
 /************************************************************************/
 /******/ ({
 
-/***/ "./d3.js":
-/*!***************!*\
-  !*** ./d3.js ***!
-  \***************/
+/***/ "../../../../../../usr/lib/node_modules/webpack/buildin/global.js":
+/*!***********************************!*\
+  !*** (webpack)/buildin/global.js ***!
+  \***********************************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+var g;
+
+// This works in non-strict mode
+g = (function() {
+	return this;
+})();
+
+try {
+	// This works if eval is allowed (see CSP)
+	g = g || new Function("return this")();
+} catch (e) {
+	// This works if the window reference is available
+	if (typeof window === "object") g = window;
+}
+
+// g can still be undefined, but nothing to do about it...
+// We return undefined, instead of nothing here, so it's
+// easier to handle this case. if(!global) { ...}
+
+module.exports = g;
+
+
+/***/ }),
+
+/***/ "./graph.js":
+/*!******************!*\
+  !*** ./graph.js ***!
+  \******************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
+const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
+const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
+
+function GraphNodeBody(id, text, x, y, parents, children) {
+    this.id = id;
+    this.text = text;
+    this.x = x;
+    this.y = y;
+    this.parents = parents;
+    this.children = children;
+    this.subgraphNodes = {};
+}
+
+function Graph(graphNodes, focus, highlighted) {
+    var graph = this;
+
+    // Create the Purescript graph to play along with the JS one
+    graph.pursGraph = Purs.emptyListGraphOp;
+    graph.updatePurs = function(graphOp) {
+        graph.pursGraph = Purs.addOp(graphOp)(graph.pursGraph);
+    };
+
+    graph.copyNode = function (node) {
+        newNodeBody = new GraphNodeBody(node.id,
+                                        node.text,
+                                        node.x,
+                                        node.y,
+                                        node.parents,
+                                        node.children);
+        newNodeBody.subgraphNodes = node.subgraphNodes;
+        return newNodeBody;
+    };
+    for (i=0; i<Object.keys(graphNodes).length; i++) {
+        node = Object.values(graphNodes)[i];
+        graph.updatePurs(Purs.AddNode.create(graph.copyNode(node)));
+    }
+    for (i=0; i<Object.keys(highlighted).length; i++) {
+        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlighted)));
+    }
+    graph.updatePurs(Purs.UpdateFocus.create(focus));
+
+    graph.usePursGraph = function() {
+        builtPursGraph = Purs.buildGraph(graph.pursGraph);
+        graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
+        graph.focus = builtPursGraph.focus;
+        graph.highlighted = builtPursGraph.highlighted;
+
+        console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
+        return graph;
+    };
+
+    ///////////////////////////////////
+    //////// Constants
+
+    // TODO: should go with layout logic
+    var initNodePos = {"x": 100, "y": 100},
+        newNodeOffset = {"x": 100, "y": 100},
+        newNodeClearenceThreshold = 80;
+
+
+    ///////////////////////////////////
+    //////// Graph manipulation
+
+    graph.getEdgeNodes = function () {
+        return [].concat.apply(
+            [], [].concat.apply(
+                [], Object.entries(graph.nodes).map(
+                    node => StringSet.toArray(node[1].children).map(
+                        target => ({"source": graph.nodes[node[0]],
+                                    "target": graph.nodes[target]})))));
+    };
+
+    graph.newNodeBelowFocus = function () {
+        if (Purs.fromFocus(graph.focus) != null) {
+            newNodePos = graph.getNewNodePosition(Purs.fromFocus(graph.focus));
+            graph.createNode(newNodePos.x,
+                             newNodePos.y,
+                             StringSet.singleton(Purs.fromFocus(graph.focus)),
+                             StringSet.empty());
+        } else {
+            graph.createNode(initNodePos.x,
+                             initNodePos.y,
+                             StringSet.empty(),
+                             StringSet.empty());
+        }
+        return graph;
+    };
+
+    graph.createNode = function (x, y, parentIds, childIds) {
+        newNodeId = Utils.uuidv4();
+        newNodeBody = new GraphNodeBody(
+            newNodeId, " ", x, y, parentIds, childIds);
+
+        graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
+        for (i=0; i<StringSet.cardinality(parentIds); i++) {
+            graph.updatePurs(Purs.AddEdge.create(
+                {"source": StringSet.lookupIndex(i, parentIds), "target": newNodeId}));
+        }
+        for (i=0; i<StringSet.cardinality(childIds); i++) {
+            graph.updatePurs(Purs.AddEdge.create(
+                {"source": newNodeId, "target":   StringSet.lookupIndex(i, childIds)}));
+        }
+
+        graph.focusOnNode(newNodeId);
+
+        return newNodeId;
+    };
+
+    graph.removeFocused = function () {
+        graph.pursGraph = Purs.removeFocus(graph.pursGraph);
+        return graph;
+    };
+
+    //graph.deleteNode = function (nodeToRemoveId) {
+    //    // Remove edges to/from the node in other node objects
+    //    for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
+    //        parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
+    //        graph.deleteEdge(parentId, nodeToRemoveId);
+    //    }
+    //    for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
+    //        childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
+    //        graph.deleteEdge(nodeToRemoveId, childId);
+    //    }
+    //    // Remove the node
+    //    graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeToRemoveId]));
+    //    return graph;
+    //};
+
+    graph.addEdge = function(sourceId, targetId) {
+        graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
+
+        return graph;
+    };
+
+    graph.deleteEdge = function(sourceId, targetId) {
+        graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
+
+        return graph;
+    };
+
+    graph.updateText = function(nodeId, text) {
+        graph.updatePurs(Purs.UpdateText.create(nodeId)(text));
+
+        return graph;
+    };
+
+    graph.moveNode = function (nodeId, newPos) {
+        graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
+        return graph;
+    };
+
+    graph.removeEdgesToFromStringSet = function (selection) {
+        for (i=0; i<StringSet.cardinality(selection); i++) {
+            currentNodeId = StringSet.lookupIndex(i, selection);
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].parents);
+                if (!StringSet.isIn(parentId, selection)) {
+                    graph.updatePurs(Purs.RemoveChild.create(parentId)(currentNodeId));
+                }
+            }
+            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].children);
+                if (!StringSet.isIn(childId, selection)) {
+                    graph.updatePurs(Purs.RemoveParent.create(childId)(currentNodeId));
+                }
+            }
+        }
+        return graph;
+    };
+
+    graph.restoreEdgesToFromSubgraph = function (subgraphNodes) {
+        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
+            subgraphNodeId = Object.keys(subgraphNodes)[i];
+            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].parents); j++) {
+                parentId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].parents);
+                graph.addEdge(parentId, subgraphNodeId);
+            }
+            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].children); j++) {
+                childId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].children);
+                graph.addEdge(subgraphNodeId, childId);
+            }
+        }
+        return graph;
+    };
+
+    graph.getParentsOfStringSet = function (nodeIdStringSet) {
+        return graph.getParentsOfNodes(
+            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
+        );
+    };
+
+    graph.getParentsOfNodes = function (nodeArr) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                nodeArr.map(
+                    node => StringSet.toArray(node.parents)
+                )
+            ).filter(
+                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
+            )
+        );
+    };
+
+    graph.getChildrenOfStringSet = function (nodeIdStringSet) {
+        return graph.getChildrenOfNodes(
+            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
+        );
+    };
+
+    graph.getChildrenOfNodes = function (nodeArr) {
+        return StringSet.fromArray(
+            Utils.concatenate(
+                nodeArr.map(
+                    node => StringSet.toArray(node.children)
+                )
+            ).filter(
+                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
+            )
+        );
+    };
+
+    graph.extractNodes = function (nodeIdStringSet) {
+        extractedNodes = {};
+        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
+            nodeId = StringSet.lookupIndex(i, nodeIdStringSet);
+            extractedNodes[nodeId] =
+                graph.nodes[nodeId];
+            graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeId]));
+        }
+        return extractedNodes;
+    };
+
+    graph.restoreSubgraphNodes = function (newCenterPoint, subgraphNodes, groupText) {
+        // Make up for motion of the group node by applying the change in
+        // position of the group node to all subgraphNodes.
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(Object.values(subgraphNodes))
+        );
+        groupMovementVector = {
+            "x": newCenterPoint.x - terminalestNode.x,
+            "y": newCenterPoint.y - terminalestNode.y,
+        };
+        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
+            subgraphNode = graph.copyNode(Object.values(subgraphNodes)[i]);
+            subgraphNode.x += groupMovementVector.x;
+            subgraphNode.y += groupMovementVector.y;
+            // Add nodes to graph top level
+            graph.updatePurs(Purs.AddNode.create(subgraphNode));
+        }
+        graph.updatePurs(Purs.UpdateText.create(terminalestNode.id)(groupText));
+
+        return graph;
+    };
+
+    // Adds changes to gorup node edges to the terminal node of the subgraph.
+    // Adding edges only makes sense after subgraph nodes are restored.
+    graph.copyEdgeModsToTerminalestNode = function (groupNode) {
+        groupNodesStringSet = StringSet.fromArray(Object.keys(groupNode.subgraphNodes));
+        groupNodes = Object.values(groupNode.subgraphNodes);
+
+        groupParents = graph.getParentsOfNodes(groupNodes);
+        groupChildren = graph.getChildrenOfNodes(groupNodes);
+
+        groupNodeParents = graph.getParentsOfNodes([groupNode]);
+        groupNodeChildren = graph.getChildrenOfNodes([groupNode]);
+
+        newParents = StringSet.subtract(groupNodeParents, groupParents);
+        deletedParents = StringSet.subtract(groupParents, groupNodeParents);
+
+        newChildren = StringSet.subtract(groupNodeChildren, groupChildren);
+        deletedChildren = StringSet.subtract(groupChildren, groupNodeChildren);
+
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(groupNodes));
+
+        for (i=0; i<StringSet.cardinality(newParents); i++) {
+            graph.addEdge(StringSet.lookupIndex(i, newParents),
+                          terminalestNode.id);
+        };
+        for (i=0; i<StringSet.cardinality(deletedParents); i++) {
+            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
+                graph.deleteEdge(
+                    StringSet.lookupIndex(i, deletedParents),
+                    StringSet.lookupIndex(j, groupNodesStringSet));
+            };
+        };
+        for (i=0; i<StringSet.cardinality(newChildren); i++) {
+            graph.addEdge(terminalestNode.id,
+                          StringSet.lookupIndex(i, newChildren));
+        };
+        for (i=0; i<StringSet.cardinality(deletedChildren); i++) {
+            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
+                graph.deleteEdge(
+                    StringSet.lookupIndex(j, groupNodesStringSet),
+                    StringSet.lookupIndex(i, deletedChildren));
+            };
+        };
+
+        return graph;
+    };
+
+
+    ///////////////////////////////////
+    //////// Grouping/ungrouping
+
+    graph.groupHighlighted = function () {
+        parents = graph.getParentsOfStringSet(graph.highlighted);
+        children = graph.getChildrenOfStringSet(graph.highlighted);
+        terminalestNode = Purs.fromMaybe(undefined)(
+            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlighted)));
+
+        groupNodeId = graph.createNode(terminalestNode.x, terminalestNode.y, parents, children);
+        graph.updateText(groupNodeId, terminalestNode.text);
+
+        graph.removeEdgesToFromStringSet(graph.highlighted);
+
+        // Hide the highlighted nodes inside the group node
+        newSubgraphNodes = graph.extractNodes(graph.highlighted);
+        graph.updatePurs(Purs.UpdateSubgraphNodes.create(groupNodeId)(newSubgraphNodes));
+
+        graph.clearHighlights();
+        graph.focusOnNode(groupNodeId);
+
+        return graph;
+    };
+
+    graph.expandGroup = function (groupNodeId) {
+        groupNode = graph.nodes[groupNodeId];
+
+        graph.restoreSubgraphNodes(groupNode,
+                                   groupNode.subgraphNodes,
+                                   groupNode.text);
+
+        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraphNodes);
+
+        graph.copyEdgeModsToTerminalestNode(groupNode);
+
+        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
+
+        // Pick the first node of group to have the focus
+        // TODO: terminalestNode
+        newFocusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
+        graph.focusOnNode(newFocusedNodeId);
+
+        // Highlight expanded group
+        newHighlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
+        graph.replaceHighlighted(newHighlightedNodes);
+
+        // Remove group node
+        graph.pursGraph = Purs.deleteNode(groupNode)(graph.pursGraph);
+        //graph.deleteNode(groupNodeId);
+
+        return graph;
+    };
+
+    graph.expandGroupInFocus = function () {
+        if (!Utils.isEmptyObject(graph.nodes[Purs.fromFocus(graph.focus)].subgraphNodes)) {
+            graph.expandGroup(Purs.fromFocus(graph.focus));
+        }
+    };
+
+    graph.toggleGroupExpand = function () {
+        if (StringSet.cardinality(graph.highlighted) == 0) {
+            graph.expandGroupInFocus();
+        } else {
+            graph.groupHighlighted();
+        }
+    };
+
+
+    ///////////////////////////////////
+    //////// Traversal functions
+
+    graph.traverseUp = function () {
+        graph.pursGraph = Purs.traverseUp(graph.pursGraph);
+        return graph;
+    };
+
+    graph.traverseDown = function () {
+        graph.pursGraph = Purs.traverseDown(graph.pursGraph);
+        return graph;
+    };
+
+    graph.traverseLeft = function () {
+        graph.pursGraph = Purs.traverseLeft(graph.pursGraph);
+        return graph;
+    };
+
+    graph.traverseRight = function () {
+        graph.pursGraph = Purs.traverseRight(graph.pursGraph);
+        return graph;
+    };
+
+
+    ///////////////////////////////////
+    //////// Highlighting a selection/focusing
+
+    graph.focusOnNode = function (id) {
+        graph.focusOn(Purs.FocusNode.create(id));
+    };
+
+    graph.focusOnEdge = function (edge) {
+        graph.focusOn(Purs.FocusEdge.create(edge));
+    };
+
+    graph.focusOn = function (focus) {
+        graph.updatePurs(Purs.UpdateFocus.create(focus));
+    };
+
+    graph.unHighlightNode = function(nodeId) {
+        graph.updatePurs(Purs.UnHighlight.create(nodeId));
+    };
+
+    graph.highlightNode = function(nodeId) {
+        graph.updatePurs(Purs.Highlight.create(nodeId));
+    };
+
+    //graph.highlightFocus = function () {
+    //    graph.updatePurs(Purs.highlightFocus(graph.pursGraph));
+    //    //graph.highlightNode(Purs.fromFocus(graph.focus));
+    //    return graph;
+    //};
+
+    //graph.unHighlightFocus = function () {
+    //    graph.updatePurs(Purs.unHighlightFocus(graph.pursGraph));
+    //    //graph.unHighlightNode(Purs.fromFocus(graph.focus));
+    //    return graph;
+    //};
+
+    graph.toggleHighlightFocus = function () {
+        graph.pursGraph = Purs.toggleHighlightFocus(graph.pursGraph);
+        //if (!StringSet.isIn(Purs.fromFocus(graph.focus), graph.highlighted)) {
+        //    graph.highlightFocus();
+        //} else {
+        //    graph.unHighlightFocus();
+        //}
+        return graph;
+    };
+
+    graph.replaceHighlighted = function(newHighlighted) {
+        oldHighlightedNodes = StringSet.copy(graph.highlighted);
+        for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
+            graph.unHighlightNode(
+                StringSet.lookupIndex(i, oldHighlightedNodes));
+        };
+        for (i=0; i<StringSet.cardinality(newHighlighted); i++) {
+            graph.highlightNode(
+                StringSet.lookupIndex(i, newHighlighted));
+        };
+    };
+
+    graph.clearHighlights = function () {
+        graph.replaceHighlighted(StringSet.empty());
+        return graph;
+    };
+
+    ///////////////////////////////////
+    //////// Node Spatial Arrangement
+
+    graph.getNewNodePosition = function (parentId) {
+        // Find right-most child
+        children = graph.nodes[parentId].children;
+        if (StringSet.cardinality(children) > 0) {
+            rightmostChildId = StringSet.lookupIndex(
+                Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
+                children);
+            return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
+        } else {
+            return graph.getNewPositionBelowOf(graph.nodes[parentId]);
+
+        }
+    };
+
+    graph.getNewPositionRightOf = function (nodeObject) {
+        attempt = {"x": nodeObject.x + newNodeOffset.x,
+                   "y": nodeObject.y};
+        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
+            return graph.getNewPositionRightOf(attempt);
+        } else {
+            return attempt;
+        }
+    };
+
+    graph.getNewPositionBelowOf = function (nodeObject) {
+        attempt = {"x": nodeObject.x,
+                   "y": nodeObject.y + newNodeOffset.y};
+        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
+            return graph.getNewPositionRightOf(attempt);
+        } else {
+            return attempt;
+        }
+    };
+};
+module.exports = Graph;
+
+
+/***/ }),
+
+/***/ "./graphUI.js":
+/*!********************!*\
+  !*** ./graphUI.js ***!
+  \********************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+const d3 = __webpack_require__(/*! ./libs/d3.js */ "./libs/d3.js");
+const Utils = __webpack_require__(/*! ./utils */ "./utils.js");
+const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
+const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
+var FileSaver = __webpack_require__(/*! ./libs/FileSaver.min.js */ "./libs/FileSaver.min.js");
+
+
+module.exports = function GraphUI(graph) {
+    ///////////////////////////////////
+    //////// Explicit state
+
+    var graphUI = this;
+    graphUI.graph = graph;
+
+    var mouseState = {
+        "clickedNode": undefined,
+        "drawingEdge": [],
+        "mouseoverNode": undefined,
+    };
+
+    // Keyboard modes: normal, insert, visual
+    graphUI.keyboardMode = "normal";
+
+
+    ///////////////////////////////////
+    //////// Constants
+    var fadeSpeed = 150,
+        width = 500,
+        height = 500;
+
+
+    ///////////////////////////////////
+    //////// D3
+
+    graphUI.svg = d3.select("body").append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    // Define Z axis ordering of elements
+    graphUI.svg.append("g").attr("id", "text");
+    graphUI.svg.append("g").attr("id", "nodeHalos");
+    graphUI.svg.append("g").attr("id", "edges");
+    graphUI.svg.append("g").attr("id", "edgeBorders");
+    graphUI.svg.append("g").attr("id", "nodes");
+    graphUI.svg.append("g").attr("id", "nodeBorders");
+
+    // Markers for arrowheads
+    // Normal arrow
+    graphUI.svg.append("defs").append("marker")
+        .attr("id", "arrow")
+        .attr("markerWidth", 10)
+        .attr("markerHeight", 10)
+        .attr("refX", 15)
+        .attr("refY", 5)
+        .attr("orient", "auto")
+        .attr("markerUnits", "userSpaceOnUse")
+        .append("path")
+        .attr("d", "M0,0 L0,10 L8,5 z")
+        .attr("fill", "#000");
+
+    // For pointing to a group
+    graphUI.svg.append("defs").append("marker")
+        .attr("id", "arrow-to-group")
+        .attr("markerWidth", 10)
+        .attr("markerHeight", 10)
+        .attr("refX", 13)
+        .attr("refY", 3)
+        .attr("orient", "auto")
+        .attr("markerUnits", "userSpaceOnUse")
+        .append("path")
+        .attr("d", "M0,0 L0,10 L8,5 z")
+        .attr("fill", "#000");
+
+    // For the arrow being drawn (by dragging)
+    graphUI.svg.append("defs").append("marker")
+        .attr("id", "drawing-arrow")
+        .attr("markerWidth", 10)
+        .attr("markerHeight", 10)
+        .attr("refX", 3)
+        .attr("refY", 3)
+        .attr("orient", "auto")
+        .attr("markerUnits", "userSpaceOnUse")
+        .append("path")
+        .attr("d", "M0,0 L0,10 L8,5 z")
+        .attr("fill", "#000");
+
+    // Hidden file browse button for uploading files
+    d3.select("body").append("input")
+        .attr("type", "file")
+        .on("change", function () {
+            graphUI.processFile();
+        })
+        .style("display", "none");
+
+    graphUI.updateEdges = function () {
+        graphUI.svg.select("#edges").selectAll("line").filter(".edge")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
+            .join(
+                enter => enter.append("line")
+                    .classed("edge", true)
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
+                            return "url(#arrow)";
+                        } else {
+                            return "url(#arrow-to-group)";
+                        }}),
+                update => update
+                    .attr("x1", edgeNode => edgeNode.source.x)
+                    .attr("y1", edgeNode => edgeNode.source.y)
+                    .attr("x2", edgeNode => edgeNode.target.x)
+                    .attr("y2", edgeNode => edgeNode.target.y)
+                    .classed("focused", edgeNode => Purs.computeEdgeId(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
+                            == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("marker-end", edgeNode => {
+                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
+                            return "url(#arrow)";
+                        } else {
+                            return "url(#arrow-to-group)";
+                        }
+                    })
+            );
+    };
+
+    graphUI.updateEdgeBorders = function () {
+        graphUI.svg.select("#edgeBorders").selectAll("line").filter(".edgeBorder")
+            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
+            })
+            .join(
+                enter => enter.append("line")
+                    .classed("edgeBorder", true)
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
+                    .attr("stroke-linecap", "butt")
+                    .on("click", function(edgeNodes) {
+                        graphUI.graph.focusOnEdge({"source": edgeNodes.source.id, "target": edgeNodes.target.id});
+                        graphUI.update();
+                    })
+                    .on("mouseover", function (d) {
+                        Utils.fadeIn(this, fadeSpeed);
+                    })
+                    .on("mouseout", function (d) {
+                        if (!d3.select(this).classed("grouped")) {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    }),
+                update => update
+                    .attr("x1", edgeNodes => edgeNodes.source.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.y)
+            );
+    };
+
+    graphUI.updateDrawingEdge = function () {
+        graphUI.svg.select("#edges").selectAll("line").filter(".drawing")
+            .data(mouseState.drawingEdge)
+            .join(
+                enter => enter.append("line")
+                    .classed("drawing", true)
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y)
+                    .attr("marker-end", "url(#drawing-arrow)"),
+                update => update
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y)
+            );
+    };
+
+    graphUI.updateText = function () {
+        graphUI.svg.select("#text").selectAll("foreignObject")
+            .data(Object.entries(graphUI.graph.nodes), d => d[0])
+            .join(
+                enter => enter.append("foreignObject")
+                    .attr("x", d => d[1].x + 20)
+                    .attr("y", d => d[1].y - 10)
+                    .attr("width", d => d[1].text.length * 12 + 12)
+                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
+                    .append('xhtml:div')
+                    .append('div')
+                    .attr("contentEditable", true)
+                    .text(d => d[1].text)
+                    .lower()
+                    .on("keydown", function (d) {
+                        graphUI.graph.updateText(d[0], this.innerText);
+                        graphUI.update();
+                    })
+                    .on("keyup", function (d) {
+                        graphUI.graph.updateText(d[0], this.innerText);
+                        graphUI.update();
+                    }),
+                update => update
+                    .attr("x", d => d[1].x + 20)
+                    .attr("y", d => d[1].y - 10)
+                    .attr("width", d => d[1].text.length * 20 + 20)
+                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
+                    .each(function (d) {
+                        if (graphUI.keyboardMode == "insert" &&
+                            d[0] == Purs.fromFocus(graphUI.graph.focus)) {
+                            d3.select(this).select("div").select("div").node().focus();
+                        } else {
+                            d3.select(this).select("div").select("div").node().blur();
+                        }
+                    })
+            );
+    };
+
+    graphUI.updateNodes = function () {
+        graphUI.svg.select("#nodes").selectAll("circle").filter(".node")
+            .data(Object.entries(graphUI.graph.nodes), d => d[0])
+            .join(
+                enter => enter.append("circle")
+                    .attr("class", graphUI.keyboardMode)
+                    .classed("node", true)
+                    .attr("r", d => {
+                        if (Object.keys(d[1].subgraphNodes).length > 0) {
+                            return 12;
+                        } else {
+                            return 7;
+                        }
+                    })
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus)),
+                update => update
+                    .attr("class", graphUI.keyboardMode)
+                    .classed("node", true)
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus))
+            );
+    };
+
+    graphUI.updateNodeBorders = function () {
+        borders = graphUI.svg.select("#nodeBorders").selectAll("circle").filter(".nodeBorder")
+            .data(Object.entries(graphUI.graph.nodes), d => d[0] + d[1].x + d[1].y)
+            .join(
+                enter => enter.append("circle")
+                    .classed("nodeBorder", true)
+                    .attr("r", 28)
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
+                    .call(d3.drag()
+                          .on("start", dragstarted_node)
+                          .on("drag", dragged_node)
+                          .on("end", dragended_node))
+                    .on("mouseover", function (d) {
+                        mouseState.mouseoverNode = d[0];
+                        Utils.fadeIn(this, fadeSpeed);
+                    })
+                    .on("mouseout", function (d) {
+                        mouseState.mouseoverNode = undefined;
+                        if (!d3.select(this).classed("grouped")) {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    })
+                    .each(function () {
+                        if (d3.select(this).classed("grouped")) {
+                            Utils.fadeIn(this, fadeSpeed);
+                        } else {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    }),
+                update => update
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
+                    .each(function () {
+                        if (d3.select(this).classed("grouped")) {
+                            Utils.fadeIn(this, fadeSpeed);
+                        } else {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    })
+            );
+    };
+
+    graphUI.updateNodeHalos = function () {
+        graphUI.svg.select("#nodeHalos").selectAll("circle").filter(".halo")
+            .data(Object.entries(graphUI.graph.nodes), d => d[0])
+            .join(
+                enter => enter.append("circle")
+                    .classed("halo", true)
+                    .attr("r", "40")
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+                    .on("mousedown", function (d) {
+                        mouseState.clickedNode = d[0];
+                    })
+                    .on("mouseover", function (d) {
+                        mouseState.mouseoverNode = d[0];
+                        d3.select(this).classed("ready", false);
+                        if (mouseState.clickedNode != undefined &&
+                            mouseState.clickedNode != mouseState.mouseoverNode &&
+                            !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
+                            d3.select(this).classed("ready", true);
+                        }
+                        Utils.fadeIn(this, fadeSpeed);
+                        graphUI.update();
+                    })
+                    .on("mouseout", function () {
+                        mouseState.mouseoverNode = undefined;
+                        Utils.fadeOut(this, fadeSpeed);
+                    })
+                    .call(d3.drag()
+                          .on("start", dragstarted_halo)
+                          .on("drag", dragged_halo)
+                          .on("end", dragended_halo)),
+                update => update
+                    .attr("cx", d => d[1].x)
+                    .attr("cy", d => d[1].y)
+            );
+    };
+
+    graphUI.resizeWindow = function () {
+        xMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(
+            node => node.x));
+        yMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(
+            node => node.y));
+        graphUI.svg
+            .attr("width", xMax + screen.width)
+            .attr("height", yMax + screen.height);
+    };
+
+    graphUI.update = function () {
+        graphUI.graph.usePursGraph();
+
+        graphUI.updateEdges();
+
+        graphUI.updateEdgeBorders();
+
+        graphUI.updateDrawingEdge();
+
+        graphUI.updateText();
+
+        graphUI.updateNodes();
+
+        graphUI.updateNodeBorders();
+
+        graphUI.updateNodeHalos();
+
+        // Reset states
+        graphUI.svg.on("mouseup", function () {
+            mouseState.clickedNode = undefined;
+            graphUI.update();
+        });
+
+        graphUI.resizeWindow();
+    };
+
+    // Ctrl+click to create new unconnected node
+    graphUI.svg.on("mousedown", function () {
+        if (d3.event.ctrlKey) {
+            graphUI.graph.createNode(d3.event.x, d3.event.y, StringSet.empty(), StringSet.empty());
+            graphUI.update();
+        }
+    });
+
+    function dragstarted_node(d) {
+        d3.select(this).style("pointer-events", "none");
+        graphUI.graph.focusOnNode(d[0]);
+        graphUI.update();
+    }
+
+    function dragged_node(d) {
+        graphUI.graph.moveNode(d[0], {
+            "x": d3.event.x,
+            "y": d3.event.y,
+        });
+        graphUI.update();
+    }
+
+    function dragended_node(d) {
+        d3.select(this).style("pointer-events", "all");
+        create_edge_if_possible();
+        graphUI.update();
+    }
+
+    function dragstarted_halo(d) {
+        d3.select(this).style("pointer-events", "none");
+        mouseState.drawingEdge = [{"source": d[1],
+                                   "target": {"x": d3.event.x,
+                                              "y": d3.event.y}}];
+        graphUI.update();
+    }
+
+    function dragged_halo(d) {
+        mouseState.drawingEdge = [{"source": d[1],
+                              "target": {"x": d3.event.x,
+                                         "y": d3.event.y}}];
+        graphUI.update();
+    }
+
+    function dragended_halo(d) {
+        d3.select(this).style("pointer-events", "all");
+        create_edge_if_possible();
+        mouseState.drawingEdge = [];
+        graphUI.update();
+        mouseState.clickedNode = undefined;
+        d3.selectAll("*").classed("ready", false);
+        graphUI.update();
+    }
+
+    function create_edge_if_possible() {
+        if (mouseState.clickedNode != undefined &&
+            mouseState.clickedNode != mouseState.mouseoverNode &&
+            mouseState.mouseoverNode != undefined) {
+            graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
+            graphUI.graph.focusOnNode(mouseState.mouseoverNode);
+            mouseState.clickedNode = undefined;
+            mouseState.mouseoverNode = undefined;
+        };
+    }
+
+
+    ///////////////////////////////////
+    //////// Save/loading graph
+
+    graphUI.saveGraph = function (graph) {
+        title = Purs.fromMaybe("notitle")(Purs.graphTitle(graph.pursGraph));
+        var blob = new Blob([Purs.graphToJSON(graph.pursGraph)], {type: "application/JSON;charset=utf-8"});
+        FileSaver.saveAs(blob, title + ".workflow-graph_v" + Purs.version + "_" + new Date().toISOString() + ".json");
+    };
+
+    graphUI.loadGraph = function (graphJSON) {
+        // TODO: fix types n stuff to remove ".value0"
+        newGraph = Purs.graphFromJSON(graphJSON).value0;
+        console.log('newgraph: ', newGraph);
+        graphUI.graph.nodes = Utils.deepCopyObject(newGraph.nodes);
+        graphUI.graph.focus = newGraph.focus;
+        graphUI.graph.highlighted = newGraph.highlighted;
+        graphUI.graph.pursGraph = Purs.listOpsFromGraph(newGraph);
+    };
+
+    graphUI.loadFile = function() {
+        Utils.simulateClickOn(document.querySelector('input[type=file]'));
+    };
+
+    graphUI.processFile = function () {
+        var file    = document.querySelector('input[type=file]').files[0];
+        var reader  = new FileReader();
+
+        reader.addEventListener("load", function () {
+            graphUI.loadGraph(reader.result);
+            graphUI.update();
+            console.log('after update nodes: ', graphUI.graph.nodes);
+        }, false);
+
+        if (file) {
+            reader.readAsText(file);
+        }
+    };
+
+    ///////////////////////////////////
+    //////// Keyboard input
+
+    d3.select("body").on("keydown", function () {
+        //console.log(d3.event);
+        //console.log(d3.event.key);
+        if (d3.event.key in keybindings[graphUI.keyboardMode]) {
+            keybindings[graphUI.keyboardMode][d3.event.key](graphUI.graph, d3.event);
+            graphUI.update();
+        }
+    });
+
+    function normalMode() {
+        graphUI.keyboardMode = "normal";
+    }
+
+    function visualMode() {
+        graphUI.graph.highlightFocus();
+        graphUI.keyboardMode = "visual";
+    }
+
+    function insertMode() {
+        d3.event.preventDefault();
+        graphUI.keyboardMode = "insert";
+    }
+
+    var keybindings = {
+        "normal": {
+            "j": graph => graph.traverseDown(),
+            "k": graph => graph.traverseUp(),
+            "h": graph => graph.traverseLeft(),
+            "l": graph => graph.traverseRight(),
+            "o": graph => graph.newNodeBelowFocus(),
+            "x": graph => graph.removeFocused(),
+            "Delete": graph => graph.removeFocused(),
+            "s": function (graph, event) {
+                if (d3.event.ctrlKey) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    graphUI.saveGraph(graph);
+                } else {
+                    graph.toggleHighlightFocus();
+                };
+            },
+            "l": function (graph) {
+                if (d3.event.ctrlKey) {
+                    graphUI.loadFile();
+                };
+            },
+            "Escape": graph => graph.clearHighlights(),
+            "i": insertMode,
+            "v": visualMode,
+            " ": function (graph, event) {
+                event.preventDefault();
+                event.stopPropagation();
+                graph.toggleGroupExpand();
+            },
+        },
+        "insert": {
+            "Escape": normalMode,
+        },
+        "visual": {
+            "j": graph => graph.traverseDown().highlightFocus(),
+            "k": graph => graph.traverseUp().highlightFocus(),
+            "h": graph => graph.traverseLeft().highlightFocus(),
+            "l": graph => graph.traverseRight().highlightFocus(),
+            "s": graph => graph.toggleHighlightFocus(),
+            "Delete": graph => graph.removeFocusFromGroup(),
+            "Escape": normalMode,
+            " ": graph => graph.toggleGroupExpand,
+        }
+    };
+};
+
+
+/***/ }),
+
+/***/ "./libs/FileSaver.min.js":
+/*!*******************************!*\
+  !*** ./libs/FileSaver.min.js ***!
+  \*******************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+/* WEBPACK VAR INJECTION */(function(global) {var __WEBPACK_AMD_DEFINE_FACTORY__, __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;(function(a,b){if(true)!(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_FACTORY__ = (b),
+				__WEBPACK_AMD_DEFINE_RESULT__ = (typeof __WEBPACK_AMD_DEFINE_FACTORY__ === 'function' ?
+				(__WEBPACK_AMD_DEFINE_FACTORY__.apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__)) : __WEBPACK_AMD_DEFINE_FACTORY__),
+				__WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));else {}})(this,function(){"use strict";function b(a,b){return"undefined"==typeof b?b={autoBom:!1}:"object"!=typeof b&&(console.warn("Depricated: Expected third argument to be a object"),b={autoBom:!b}),b.autoBom&&/^\s*(?:text\/\S*|application\/xml|\S*\/\S*\+xml)\s*;.*charset\s*=\s*utf-8/i.test(a.type)?new Blob(["\uFEFF",a],{type:a.type}):a}function c(b,c,d){var e=new XMLHttpRequest;e.open("GET",b),e.responseType="blob",e.onload=function(){a(e.response,c,d)},e.onerror=function(){console.error("could not download file")},e.send()}function d(a){var b=new XMLHttpRequest;return b.open("HEAD",a,!1),b.send(),200<=b.status&&299>=b.status}function e(a){try{a.dispatchEvent(new MouseEvent("click"))}catch(c){var b=document.createEvent("MouseEvents");b.initMouseEvent("click",!0,!0,window,0,0,0,80,20,!1,!1,!1,!1,0,null),a.dispatchEvent(b)}}var f="object"==typeof window&&window.window===window?window:"object"==typeof self&&self.self===self?self:"object"==typeof global&&global.global===global?global:void 0,a=f.saveAs||("object"!=typeof window||window!==f?function(){}:"download"in HTMLAnchorElement.prototype?function(b,g,h){var i=f.URL||f.webkitURL,j=document.createElement("a");g=g||b.name||"download",j.download=g,j.rel="noopener","string"==typeof b?(j.href=b,j.origin===location.origin?e(j):d(j.href)?c(b,g,h):e(j,j.target="_blank")):(j.href=i.createObjectURL(b),setTimeout(function(){i.revokeObjectURL(j.href)},4E4),setTimeout(function(){e(j)},0))}:"msSaveOrOpenBlob"in navigator?function(f,g,h){if(g=g||f.name||"download","string"!=typeof f)navigator.msSaveOrOpenBlob(b(f,h),g);else if(d(f))c(f,g,h);else{var i=document.createElement("a");i.href=f,i.target="_blank",setTimeout(function(){e(i)})}}:function(a,b,d,e){if(e=e||open("","_blank"),e&&(e.document.title=e.document.body.innerText="downloading..."),"string"==typeof a)return c(a,b,d);var g="application/octet-stream"===a.type,h=/constructor/i.test(f.HTMLElement)||f.safari,i=/CriOS\/[\d]+/.test(navigator.userAgent);if((i||g&&h)&&"object"==typeof FileReader){var j=new FileReader;j.onloadend=function(){var a=j.result;a=i?a:a.replace(/^data:[^;]*;/,"data:attachment/file;"),e?e.location.href=a:location=a,e=null},j.readAsDataURL(a)}else{var k=f.URL||f.webkitURL,l=k.createObjectURL(a);e?e.location=l:location.href=l,e=null,setTimeout(function(){k.revokeObjectURL(l)},4E4)}});f.saveAs=a.saveAs=a, true&&(module.exports=a)});
+
+//# sourceMappingURL=FileSaver.min.js.map
+/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../../../../../../usr/lib/node_modules/webpack/buildin/global.js */ "../../../../../../usr/lib/node_modules/webpack/buildin/global.js")))
+
+/***/ }),
+
+/***/ "./libs/d3.js":
+/*!********************!*\
+  !*** ./libs/d3.js ***!
+  \********************/
 /*! no static exports found */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -18389,1110 +19495,6 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
 /***/ }),
 
-/***/ "./graph.js":
-/*!******************!*\
-  !*** ./graph.js ***!
-  \******************/
-/*! no static exports found */
-/***/ (function(module, exports, __webpack_require__) {
-
-const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
-const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
-const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
-
-function GraphNodeBody(id, text, x, y, parents, children) {
-    this.id = id;
-    this.text = text;
-    this.x = x;
-    this.y = y;
-    this.parents = parents;
-    this.children = children;
-    this.subgraphNodes = {};
-}
-
-function Graph(graphNodes, focus, highlighted) {
-    var graph = this;
-    //graph.nodes = graphNodes;
-    //graph.focus = focus;
-    //graph.highlighted= highlighted;
-
-    // Create the Purescript graph to play along with the JS one
-    graph.pursGraph = Purs.emptyUndoableGraph;
-    graph.updatePurs = function(graphOp) {
-        graph.pursGraph = Purs.doOp(graphOp)(graph.pursGraph);
-    };
-
-    graph.copyNode = function (node) {
-        newNodeBody = new GraphNodeBody(node.id,
-                                        node.text,
-                                        node.x,
-                                        node.y,
-                                        node.parents,
-                                        node.children);
-        newNodeBody.subgraphNodes = node.subgraphNodes;
-        return newNodeBody;
-    };
-    for (i=0; i<Object.keys(graphNodes).length; i++) {
-        node = Object.values(graphNodes)[i];
-        graph.updatePurs(Purs.AddNode.create(graph.copyNode(node)));
-    }
-    for (i=0; i<Object.keys(highlighted).length; i++) {
-        graph.updatePurs(Purs.Highlight.create(StringSet.lookupIndex(i, highlighted)));
-    }
-    graph.updatePurs(Purs.UpdateFocus.create(focus));
-
-    graph.usePursGraph = function() {
-        builtPursGraph = Purs.buildGraph(graph.pursGraph);
-        graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
-        graph.focus = builtPursGraph.focus;
-        graph.highlighted = builtPursGraph.highlighted;
-        console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
-        return graph;
-    };
-
-    ///////////////////////////////////
-    //////// Constants
-
-    // TODO: should go with layout logic
-    var initNodePos = {"x": 100, "y": 100},
-        newNodeOffset = {"x": 100, "y": 100},
-        newNodeClearenceThreshold = 80;
-
-
-    ///////////////////////////////////
-    //////// Graph manipulation
-
-    graph.getEdgeNodes = function () {
-        return [].concat.apply(
-            [], [].concat.apply(
-                [], Object.entries(graph.nodes).map(
-                    node => StringSet.toArray(node[1].children).map(
-                        target => ({"source": graph.nodes[node[0]],
-                                    "target": graph.nodes[target]})))));
-    };
-
-    graph.newNodeBelowFocus = function () {
-        if (Purs.fromFocus(graph.focus) != null) {
-            console.log(graph.focus);
-            console.log(Purs.fromFocus(graph.focus));
-            newNodePos = graph.getNewNodePosition(Purs.fromFocus(graph.focus));
-            graph.createNode(newNodePos.x,
-                             newNodePos.y,
-                             StringSet.singleton(Purs.fromFocus(graph.focus)),
-                             StringSet.empty());
-        } else {
-            graph.createNode(initNodePos.x,
-                             initNodePos.y,
-                             StringSet.empty(),
-                             StringSet.empty());
-        }
-        return graph;
-    };
-
-    graph.createNode = function (x, y, parentIds, childIds) {
-        newNodeId = Utils.uuidv4();
-        newNodeBody = new GraphNodeBody(
-            newNodeId, " ", x, y, parentIds, childIds);
-
-        //// Old JS graph
-        //graph.nodes[newNodeId] = newNodeBody;
-        //StringSet.map(parentIds, parentId => StringSet.insertInPlace(
-        //    newNodeId, graph.nodes[parentId].children));
-        //StringSet.map(childIds, childId => StringSet.insertInPlace(
-        //    newNodeId, graph.nodes[childId].parents));
-
-        // New PS graph
-        graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
-        for (i=0; i<StringSet.cardinality(parentIds); i++) {
-            console.log(StringSet.lookupIndex(i, parentIds));
-            console.log(newNodeId);
-            graph.updatePurs(Purs.AddEdge.create(
-                {"source": StringSet.lookupIndex(i, parentIds), "target": newNodeId}));
-        }
-        for (i=0; i<StringSet.cardinality(childIds); i++) {
-            graph.updatePurs(Purs.AddEdge.create(
-                {"source": newNodeId, "target":   StringSet.lookupIndex(i, childIds)}));
-        }
-
-        graph.focusOnNode(newNodeId);
-
-        return newNodeId;
-    };
-
-    graph.removeFocused = function () {
-        graph.pursGraph = Purs.removeFocus(graph)(graph.pursGraph);
-        //focusedNode = graph.nodes[Purs.fromFocus(graph.focus)];
-        //if (StringSet.cardinality(focusedNode.parents) > 0) {
-        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.parents);
-        //} else if (StringSet.cardinality(focusedNode.children) > 0) {
-        //    nextFocusId = StringSet.lookupIndex(0, focusedNode.children);
-        //} else {
-        //    // Give the focus to the first node in the list, because what else are
-        //    // you going to do
-        //    nextFocusId = Utils.arrayWithoutElement(Purs.fromFocus(graph.focus), Object.keys(graph.nodes))[0];
-        //}
-        //for(i=0; i<Object.values(focusedNode.subgraphNodes).length; i++) {
-        //}
-        //graph.deleteNode(Purs.fromFocus(graph.focus));
-        //graph.focusOnNode(nextFocusId);
-        return graph;
-    };
-
-    graph.deleteNode = function (nodeToRemoveId) {
-        // Remove edges to/from the node in other
-        // node objects
-        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
-            parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
-            graph.deleteEdge(parentId, nodeToRemoveId);
-        }
-        for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
-            childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
-            graph.deleteEdge(nodeToRemoveId, childId);
-        }
-        // Remove the node
-        //delete graph.nodes[nodeToRemoveId];
-        graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeToRemoveId]));
-        return graph;
-    };
-
-    graph.addEdge = function(sourceId, targetId) {
-        //// Old JS graph
-        //StringSet.insertInPlace(targetId, graph.nodes[sourceId].children);
-        //StringSet.insertInPlace(sourceId, graph.nodes[targetId].parents);
-
-        // New PS graph
-        graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
-
-        return graph;
-    };
-
-    graph.deleteEdge = function(sourceId, targetId) {
-        //// Old JS graph
-        //StringSet.deleteInPlace(targetId, graph.nodes[sourceId].children);
-        //StringSet.deleteInPlace(sourceId, graph.nodes[targetId].parents);
-
-        // New PS graph
-        graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
-
-        return graph;
-    };
-
-    graph.updateText = function(nodeId, text) {
-        //graph.nodes[nodeId].text = text;
-        graph.updatePurs(Purs.UpdateText.create(nodeId)(text));
-
-        return graph;
-    };
-
-    graph.moveNode = function (nodeId, newPos) {
-        //graph.nodes[nodeId].x = newPos.x;
-        //graph.nodes[nodeId].y = newPos.y;
-        graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
-        return graph;
-    };
-
-    graph.removeEdgesToFromStringSet = function (selection) {
-        for (i=0; i<StringSet.cardinality(selection); i++) {
-            currentNodeId = StringSet.lookupIndex(i, selection);
-            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].parents); j++) {
-                parentId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].parents);
-                if (!StringSet.isIn(parentId, selection)) {
-                    //// Old JS graph
-                    //StringSet.deleteInPlace(
-                    //    currentNodeId,
-                    //    graph.nodes[parentId].children);
-                    // New PS graph
-                    graph.updatePurs(Purs.RemoveChild.create(parentId)(currentNodeId));
-                }
-            }
-            for (j=0; j<StringSet.cardinality(graph.nodes[currentNodeId].children); j++) {
-                childId = StringSet.lookupIndex(j, graph.nodes[currentNodeId].children);
-                if (!StringSet.isIn(childId, selection)) {
-                    //// Old JS graph
-                    //StringSet.deleteInPlace(
-                    //    currentNodeId,
-                    //    graph.nodes[childId].parents);
-                    // New PS graph
-                    graph.updatePurs(Purs.RemoveParent.create(childId)(currentNodeId));
-                }
-            }
-        }
-        return graph;
-    };
-
-    graph.restoreEdgesToFromSubgraph = function (subgraphNodes) {
-        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
-            subgraphNodeId = Object.keys(subgraphNodes)[i];
-            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].parents); j++) {
-                parentId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].parents);
-                graph.addEdge(parentId, subgraphNodeId);
-            }
-            for (j=0; j<StringSet.cardinality(subgraphNodes[subgraphNodeId].children); j++) {
-                childId = StringSet.lookupIndex(j, subgraphNodes[subgraphNodeId].children);
-                graph.addEdge(subgraphNodeId, childId);
-            }
-        }
-        return graph;
-    };
-
-    graph.getParentsOfStringSet = function (nodeIdStringSet) {
-        return graph.getParentsOfNodes(
-            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
-        );
-    };
-
-    graph.getParentsOfNodes = function (nodeArr) {
-        return StringSet.fromArray(
-            Utils.concatenate(
-                nodeArr.map(
-                    node => StringSet.toArray(node.parents)
-                )
-            ).filter(
-                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
-            )
-        );
-    };
-
-    graph.getChildrenOfStringSet = function (nodeIdStringSet) {
-        return graph.getChildrenOfNodes(
-            StringSet.toArray(nodeIdStringSet).map(nodeId => graph.nodes[nodeId])
-        );
-    };
-
-    graph.getChildrenOfNodes = function (nodeArr) {
-        return StringSet.fromArray(
-            Utils.concatenate(
-                nodeArr.map(
-                    node => StringSet.toArray(node.children)
-                )
-            ).filter(
-                nodeId => !Utils.isIn(nodeId, nodeArr.map(node => node.id))
-            )
-        );
-    };
-
-    graph.extractNodes = function (nodeIdStringSet) {
-        extractedNodes = {};
-        for (i=0; i<StringSet.cardinality(nodeIdStringSet); i++) {
-            nodeId = StringSet.lookupIndex(i, nodeIdStringSet);
-            extractedNodes[nodeId] =
-                graph.nodes[nodeId];
-            //delete graph.nodes[nodeId];
-            graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeId]));
-        }
-        return extractedNodes;
-    };
-
-    graph.restoreSubgraphNodes = function (newCenterPoint, subgraphNodes, groupText) {
-        // Make up for motion of the group node by applying the change in
-        // position of the group node to all subgraphNodes.
-        terminalestNode = Purs.fromMaybe(undefined)(
-            Purs.terminalestNode(Object.values(subgraphNodes))
-        );
-        groupMovementVector = {
-            "x": newCenterPoint.x - terminalestNode.x,
-            "y": newCenterPoint.y - terminalestNode.y,
-        };
-        for (i=0; i<Object.keys(subgraphNodes).length; i++) {
-            subgraphNode = graph.copyNode(Object.values(subgraphNodes)[i]);
-            subgraphNode.x += groupMovementVector.x;
-            subgraphNode.y += groupMovementVector.y;
-            // Add nodes to graph top level
-            //graph.nodes[subgraphNodeId] = subgraphNode;
-            graph.updatePurs(Purs.AddNode.create(subgraphNode));
-        }
-        graph.updatePurs(Purs.UpdateText.create(terminalestNode.id)(groupText));
-
-        return graph;
-    };
-
-    // Adds changes to gorup node edges to the terminal node of the subgraph.
-    // Adding edges only makes sense after subgraph nodes are restored.
-    graph.copyEdgeModsToTerminalestNode = function (groupNode) {
-        groupNodesStringSet = StringSet.fromArray(Object.keys(groupNode.subgraphNodes));
-        groupNodes = Object.values(groupNode.subgraphNodes);
-
-        groupParents = graph.getParentsOfNodes(groupNodes);
-        groupChildren = graph.getChildrenOfNodes(groupNodes);
-
-        groupNodeParents = graph.getParentsOfNodes([groupNode]);
-        groupNodeChildren = graph.getChildrenOfNodes([groupNode]);
-
-        newParents = StringSet.subtract(groupNodeParents, groupParents);
-        deletedParents = StringSet.subtract(groupParents, groupNodeParents);
-
-        newChildren = StringSet.subtract(groupNodeChildren, groupChildren);
-        deletedChildren = StringSet.subtract(groupChildren, groupNodeChildren);
-
-        terminalestNode = Purs.fromMaybe(undefined)(
-            Purs.terminalestNode(groupNodes));
-
-        for (i=0; i<StringSet.cardinality(newParents); i++) {
-            graph.addEdge(StringSet.lookupIndex(i, newParents),
-                          terminalestNode.id);
-        };
-        for (i=0; i<StringSet.cardinality(deletedParents); i++) {
-            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
-                graph.deleteEdge(
-                    StringSet.lookupIndex(i, deletedParents),
-                    StringSet.lookupIndex(j, groupNodesStringSet));
-            };
-        };
-        for (i=0; i<StringSet.cardinality(newChildren); i++) {
-            graph.addEdge(terminalestNode.id,
-                          StringSet.lookupIndex(i, newChildren));
-        };
-        for (i=0; i<StringSet.cardinality(deletedChildren); i++) {
-            for (j=0; j<StringSet.cardinality(groupNodesStringSet); j++) {
-                graph.deleteEdge(
-                    StringSet.lookupIndex(j, groupNodesStringSet),
-                    StringSet.lookupIndex(i, deletedChildren));
-            };
-        };
-
-        return graph;
-    };
-
-
-    ///////////////////////////////////
-    //////// Grouping/ungrouping
-
-    graph.groupHighlighted = function () {
-        parents = graph.getParentsOfStringSet(graph.highlighted);
-        children = graph.getChildrenOfStringSet(graph.highlighted);
-        terminalestNode = Purs.fromMaybe(undefined)(
-            Purs.terminalestNode(Purs.lookupNodes(graph)(graph.highlighted)));
-
-        groupNodeId = graph.createNode(terminalestNode.x, terminalestNode.y, parents, children);
-        graph.updateText(groupNodeId, terminalestNode.text);
-
-        graph.removeEdgesToFromStringSet(graph.highlighted);
-
-        // Hide the highlighted nodes inside the group node
-        newSubgraphNodes = graph.extractNodes(graph.highlighted);
-        //graph.nodes[groupNodeId].subgraphNodes = newSubgraphNodes;
-        graph.updatePurs(Purs.UpdateSubgraphNodes.create(groupNodeId)(newSubgraphNodes));
-
-        graph.clearHighlights();
-        graph.focusOnNode(groupNodeId);
-
-        return graph;
-    };
-
-    graph.expandGroup = function (groupNodeId) {
-        groupNode = graph.nodes[groupNodeId];
-
-        graph.restoreSubgraphNodes(groupNode,
-                                   groupNode.subgraphNodes,
-                                   groupNode.text);
-
-        graph.restoreEdgesToFromSubgraph(graph.nodes[groupNodeId].subgraphNodes);
-
-        graph.copyEdgeModsToTerminalestNode(groupNode);
-
-        graph.removeEdgesToFromStringSet(StringSet.singleton(groupNodeId));
-
-        // Pick the first node of group to have the focus
-        // TODO: terminalestNode
-        newFocusedNodeId = Object.keys(graph.nodes[groupNodeId].subgraphNodes)[0];
-        graph.focusOnNode(newFocusedNodeId);
-
-        // Highlight expanded group
-        newHighlightedNodes = StringSet.fromArray(Object.keys(graph.nodes[groupNodeId].subgraphNodes));
-        graph.replaceHighlighted(newHighlightedNodes);
-
-        // Remove group node
-        graph.deleteNode(groupNodeId);
-
-        return graph;
-    };
-
-    graph.expandGroupInFocus = function () {
-        if (!Utils.isEmptyObject(graph.nodes[Purs.fromFocus(graph.focus)].subgraphNodes)) {
-            graph.expandGroup(Purs.fromFocus(graph.focus));
-        }
-    };
-
-    graph.toggleGroupExpand = function () {
-        if (StringSet.cardinality(graph.highlighted) == 0) {
-            graph.expandGroupInFocus();
-        } else {
-            graph.groupHighlighted();
-        }
-    };
-
-
-    ///////////////////////////////////
-    //////// Traversal functions
-
-    graph.traverseUp = function () {
-        graph.pursGraph = Purs.traverseUp(graph)(graph.pursGraph);
-        //parents = graph.nodes[Purs.fromFocus(graph.focus)].parents;
-        //if (StringSet.cardinality(parents) > 0) {
-        //    newFocus = StringSet.lookupIndex(0, parents);
-        //    graph.focusOnNode(newFocus);
-        //}
-        return graph;
-    };
-
-    graph.traverseDown = function () {
-        graph.pursGraph = Purs.traverseDown(graph)(graph.pursGraph);
-        //children = graph.nodes[Purs.fromFocus(graph.focus)].children;
-        //if (StringSet.cardinality(children) > 0) {
-        //    newFocus = StringSet.lookupIndex(0, children);
-        //    graph.focusOnNode(newFocus);
-        //}
-        return graph;
-    };
-
-    graph.traverseLeft = function () {
-        graph.pursGraph = Purs.traverseLeft(graph)(graph.pursGraph);
-        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
-        //    Purs.fromFocus(graph.focus)).left;
-        //graph.focusOnNode(newFocus);
-        return graph;
-    };
-
-    graph.traverseRight = function () {
-        graph.pursGraph = Purs.traverseRight(graph)(graph.pursGraph);
-        //newFocus = graph.getNeighboringSiblingOrCoparentIds(
-        //    Purs.fromFocus(graph.focus)).right;
-        //graph.focusOnNode(newFocus);
-        return graph;
-    };
-
-    //graph.traverseAddGroup = function (traversalFunc) {
-    //    return function () {
-    //        graph.focusOnNode(graph.nodes[traverselFunc]);
-    //        return graph;
-    //    };
-    //};
-
-    //graph.getNeighboringSiblingOrCoparentIds = function (nodeId) {
-    //    /*
-    //      Find the nodes that share a parent or child of the given node.
-    //      Sort the nodes by their x location, such that left/right movement
-    //      is spatially coherent.
-    //      */
-    //    siblingsAndCoparentsIds = [];
-    //    StringSet.map(graph.nodes[nodeId].parents,
-    //        parentId => StringSet.map(graph.nodes[parentId].children,
-    //            siblingId => siblingsAndCoparentsIds.push(siblingId)
-    //        )
-    //    );
-    //    StringSet.map(graph.nodes[nodeId].children,
-    //        childId => StringSet.map(graph.nodes[childId].parents,
-    //            coparentId => siblingsAndCoparentsIds.push(coparentId))
-    //    );
-    //    // Sort siblings by x index.
-    //    // Store graph so that the sorting comparison function can access it,
-    //    // as it appears to run outside the constructor context.
-    //    graphNodes = graph.nodes;
-    //    siblingsAndCoparentsIds.sort((a, b) => graphNodes[a].x - graphNodes[b].x);
-    //    onLeft = siblingsAndCoparentsIds.filter(
-    //        nodeId => graph.nodes[nodeId].x < graph.nodes[Purs.fromFocus(graph.focus)].x);
-    //    onRight = siblingsAndCoparentsIds.filter(
-    //        nodeId => graph.nodes[nodeId].x > graph.nodes[Purs.fromFocus(graph.focus)].x);
-    //    return {
-    //        "left": onLeft.length > 0
-    //            ? onLeft[onLeft.length - 1]
-    //            : siblingsAndCoparentsIds[siblingsAndCoparentsIds.length-1],
-    //        "right": onRight.length > 0 ? onRight[0] : siblingsAndCoparentsIds[0],
-    //    };
-    //};
-
-    ///////////////////////////////////
-    //////// Highlighting a selection/focusing
-
-    graph.focusOnNode = function (id) {
-        graph.focusOn(Purs.FocusNode.create(id));
-    };
-
-    graph.focusOnEdge = function (id) {
-        graph.focusOn(Purs.FocusEdge.create(id));
-    };
-
-    graph.focusOn = function (focus) {
-        graph.updatePurs(Purs.UpdateFocus.create(focus));
-    };
-
-    graph.unHighlightNode = function(nodeId) {
-        //// Old JS graph
-        //StringSet.deleteInPlace(nodeId, graph.highlighted);
-        // New PS graph
-        graph.updatePurs(Purs.UnHighlight.create(nodeId));
-    };
-
-    graph.highlightNode = function(nodeId) {
-        //// Old JS graph
-        //StringSet.insertInPlace(nodeId, graph.highlighted);
-        // New PS graph
-        graph.updatePurs(Purs.Highlight.create(nodeId));
-    };
-
-    graph.highlightFocus = function () {
-        graph.highlightNode(Purs.fromFocus(graph.focus));
-        return graph;
-    };
-
-    graph.unHighlightFocus = function () {
-        graph.unHighlightNode(Purs.fromFocus(graph.focus));
-        return graph;
-    };
-
-    graph.toggleHighlightFocus = function () {
-        if (!StringSet.isIn(Purs.fromFocus(graph.focus), graph.highlighted)) {
-            graph.highlightFocus();
-        } else {
-            graph.unHighlightFocus();
-        }
-        return graph;
-    };
-
-    graph.replaceHighlighted = function(newHighlighted) {
-        oldHighlightedNodes = StringSet.copy(graph.highlighted);
-        for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
-            graph.unHighlightNode(
-                StringSet.lookupIndex(i, oldHighlightedNodes));
-        };
-        for (i=0; i<StringSet.cardinality(newHighlighted); i++) {
-            graph.highlightNode(
-                StringSet.lookupIndex(i, newHighlighted));
-        };
-    };
-
-    graph.clearHighlights = function () {
-        graph.replaceHighlighted(StringSet.empty());
-        return graph;
-    };
-
-    ///////////////////////////////////
-    //////// Node Spatial Arrangement
-
-    graph.getNewNodePosition = function (parentId) {
-        // Find right-most child
-        children = graph.nodes[parentId].children;
-        if (StringSet.cardinality(children) > 0) {
-            rightmostChildId = StringSet.lookupIndex(
-                Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
-                children);
-            return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
-        } else {
-            return graph.getNewPositionBelowOf(graph.nodes[parentId]);
-
-        }
-    };
-
-    graph.getNewPositionRightOf = function (nodeObject) {
-        attempt = {"x": nodeObject.x + newNodeOffset.x,
-                   "y": nodeObject.y};
-        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-            return graph.getNewPositionRightOf(attempt);
-        } else {
-            return attempt;
-        }
-    };
-
-    graph.getNewPositionBelowOf = function (nodeObject) {
-        attempt = {"x": nodeObject.x,
-                   "y": nodeObject.y + newNodeOffset.y};
-        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-            return graph.getNewPositionRightOf(attempt);
-        } else {
-            return attempt;
-        }
-    };
-};
-module.exports = Graph;
-
-
-/***/ }),
-
-/***/ "./graphUI.js":
-/*!********************!*\
-  !*** ./graphUI.js ***!
-  \********************/
-/*! no static exports found */
-/***/ (function(module, exports, __webpack_require__) {
-
-const d3 = __webpack_require__(/*! ./d3.js */ "./d3.js");
-const Utils = __webpack_require__(/*! ./utils */ "./utils.js");
-const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
-const Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
-
-module.exports = function GraphUI(graph) {
-    ///////////////////////////////////
-    //////// Explicit state
-
-    var graphUI = this;
-    graphUI.graph = graph;
-
-    var mouseState = {
-        "clickedNode": undefined,
-        "drawingEdge": [],
-        "mouseoverNode": undefined,
-    };
-
-    // Keyboard modes: normal, insert, visual
-    graphUI.keyboardMode = "normal";
-
-
-    ///////////////////////////////////
-    //////// Constants
-    var fadeSpeed = 150,
-        width = 500,
-        height = 500;
-
-
-    ///////////////////////////////////
-    //////// D3
-
-    graphUI.svg = d3.select("body").append("svg")
-        .attr("width", width)
-        .attr("height", height);
-
-    // Define Z axis ordering of elements
-    graphUI.svg.append("g").attr("id", "text");
-    graphUI.svg.append("g").attr("id", "nodeHalos");
-    graphUI.svg.append("g").attr("id", "edges");
-    graphUI.svg.append("g").attr("id", "edgeBorders");
-    graphUI.svg.append("g").attr("id", "nodes");
-    graphUI.svg.append("g").attr("id", "nodeBorders");
-
-    // Markers for arrowheads
-    // Normal arrow
-    graphUI.svg.append("defs").append("marker")
-        .attr("id", "arrow")
-        .attr("markerWidth", 10)
-        .attr("markerHeight", 10)
-        .attr("refX", 15)
-        .attr("refY", 5)
-        .attr("orient", "auto")
-        .attr("markerUnits", "userSpaceOnUse")
-        .append("path")
-        .attr("d", "M0,0 L0,10 L8,5 z")
-        .attr("fill", "#000");
-
-    // For pointing to a group
-    graphUI.svg.append("defs").append("marker")
-        .attr("id", "arrow-to-group")
-        .attr("markerWidth", 10)
-        .attr("markerHeight", 10)
-        .attr("refX", 13)
-        .attr("refY", 3)
-        .attr("orient", "auto")
-        .attr("markerUnits", "userSpaceOnUse")
-        .append("path")
-        .attr("d", "M0,0 L0,10 L8,5 z")
-        .attr("fill", "#000");
-
-    // For the arrow being drawn (by dragging)
-    graphUI.svg.append("defs").append("marker")
-        .attr("id", "drawing-arrow")
-        .attr("markerWidth", 10)
-        .attr("markerHeight", 10)
-        .attr("refX", 3)
-        .attr("refY", 3)
-        .attr("orient", "auto")
-        .attr("markerUnits", "userSpaceOnUse")
-        .append("path")
-        .attr("d", "M0,0 L0,10 L8,5 z")
-        .attr("fill", "#000");
-
-    graphUI.updateEdges = function () {
-        graphUI.svg.select("#edges").selectAll("line").filter(".edge")
-            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
-                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
-            })
-            .join(
-                enter => enter.append("line")
-                    .classed("edge", true)
-                    .attr("x1", edgeNode => edgeNode.source.x)
-                    .attr("y1", edgeNode => edgeNode.source.y)
-                    .attr("x2", edgeNode => edgeNode.target.x)
-                    .attr("y2", edgeNode => edgeNode.target.y)
-                    .classed("focused", edgeNode => Purs.computeEdgeId(
-                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
-                            == Purs.fromFocus(graphUI.graph.focus))
-                    .attr("marker-end", edgeNode => {
-                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
-                            return "url(#arrow)";
-                        } else {
-                            return "url(#arrow-to-group)";
-                        }}),
-                update => update
-                    .attr("x1", edgeNode => edgeNode.source.x)
-                    .attr("y1", edgeNode => edgeNode.source.y)
-                    .attr("x2", edgeNode => edgeNode.target.x)
-                    .attr("y2", edgeNode => edgeNode.target.y)
-                    .classed("focused", edgeNode => Purs.computeEdgeId(
-                        {"source": edgeNode.source.id, "target": edgeNode.target.id})
-                            == Purs.fromFocus(graphUI.graph.focus))
-                    .attr("marker-end", edgeNode => {
-                        if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
-                            return "url(#arrow)";
-                        } else {
-                            return "url(#arrow-to-group)";
-                        }
-                    })
-            );
-    };
-
-    graphUI.updateEdgeBorders = function () {
-        graphUI.svg.select("#edgeBorders").selectAll("line").filter(".edgeBorder")
-            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
-                return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
-            })
-            .join(
-                enter => enter.append("line")
-                    .classed("edgeBorder", true)
-                    .attr("x1", edgeNodes => edgeNodes.source.x)
-                    .attr("y1", edgeNodes => edgeNodes.source.y)
-                    .attr("x2", edgeNodes => edgeNodes.target.x)
-                    .attr("y2", edgeNodes => edgeNodes.target.y)
-                    .attr("stroke-linecap", "butt")
-                    .on("click", function(edgeNodes) {
-                        console.log(edgeNodes);
-                        graphUI.graph.focusOnEdge(Purs.computeEdgeId(
-                            {"source": edgeNodes.source.id, "target": edgeNodes.target.id}));
-                        graphUI.update();
-                    })
-                    .on("mouseover", function (d) {
-                        Utils.fadeIn(this, fadeSpeed);
-                    })
-                    .on("mouseout", function (d) {
-                        if (!d3.select(this).classed("grouped")) {
-                            Utils.fadeOut(this, fadeSpeed);
-                        }
-                    }),
-                update => update
-                    .attr("x1", edgeNodes => edgeNodes.source.x)
-                    .attr("y1", edgeNodes => edgeNodes.source.y)
-                    .attr("x2", edgeNodes => edgeNodes.target.x)
-                    .attr("y2", edgeNodes => edgeNodes.target.y)
-            );
-    };
-
-    graphUI.updateDrawingEdge = function () {
-        graphUI.svg.select("#edges").selectAll("line").filter(".drawing")
-            .data(mouseState.drawingEdge)
-            .join(
-                enter => enter.append("line")
-                    .classed("drawing", true)
-                    .attr("x1", d => d.source.x)
-                    .attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y)
-                    .attr("marker-end", "url(#drawing-arrow)"),
-                update => update
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y)
-            );
-    };
-
-    graphUI.updateText = function () {
-        graphUI.svg.select("#text").selectAll("foreignObject")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0])
-            .join(
-                enter => enter.append("foreignObject")
-                    .attr("x", d => d[1].x + 20)
-                    .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 12 + 12)
-                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
-                    .append('xhtml:div')
-                    .append('div')
-                    .attr("contentEditable", true)
-                    .text(d => d[1].text)
-                    .lower()
-                    .on("keydown", function (d) {
-                        graphUI.graph.updateText(d[0], this.innerText);
-                        graphUI.update();
-                    })
-                    .on("keyup", function (d) {
-                        graphUI.graph.updateText(d[0], this.innerText);
-                        graphUI.update();
-                    }),
-                update => update
-                    .attr("x", d => d[1].x + 20)
-                    .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 20 + 20)
-                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
-                    .each(function (d) {
-                        if (graphUI.keyboardMode == "insert" &&
-                            d[0] == Purs.fromFocus(graphUI.graph.focus)) {
-                            d3.select(this).select("div").select("div").node().focus();
-                        } else {
-                            d3.select(this).select("div").select("div").node().blur();
-                        }
-                    })
-            );
-    };
-
-    graphUI.updateNodes = function () {
-        graphUI.svg.select("#nodes").selectAll("circle").filter(".node")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0])
-            .join(
-                enter => enter.append("circle")
-                    .attr("class", graphUI.keyboardMode)
-                    .classed("node", true)
-                    .attr("r", d => {
-                        if (Object.keys(d[1].subgraphNodes).length > 0) {
-                            return 12;
-                        } else {
-                            return 7;
-                        }
-                    })
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus)),
-                update => update
-                    .attr("class", graphUI.keyboardMode)
-                    .classed("node", true)
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-                    .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus))
-            );
-    };
-
-    graphUI.updateNodeBorders = function () {
-        borders = graphUI.svg.select("#nodeBorders").selectAll("circle").filter(".nodeBorder")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0] + d[1].x + d[1].y)
-            .join(
-                enter => enter.append("circle")
-                    .classed("nodeBorder", true)
-                    .attr("r", 28)
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
-                    .call(d3.drag()
-                          .on("start", dragstarted_node)
-                          .on("drag", dragged_node)
-                          .on("end", dragended_node))
-                    .on("mouseover", function (d) {
-                        mouseState.mouseoverNode = d[0];
-                        Utils.fadeIn(this, fadeSpeed);
-                    })
-                    .on("mouseout", function (d) {
-                        mouseState.mouseoverNode = undefined;
-                        if (!d3.select(this).classed("grouped")) {
-                            Utils.fadeOut(this, fadeSpeed);
-                        }
-                    })
-                    .each(function () {
-                        if (d3.select(this).classed("grouped")) {
-                            Utils.fadeIn(this, fadeSpeed);
-                        } else {
-                            Utils.fadeOut(this, fadeSpeed);
-                        }
-                    }),
-                update => update
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-                    .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
-                    .each(function () {
-                        if (d3.select(this).classed("grouped")) {
-                            Utils.fadeIn(this, fadeSpeed);
-                        } else {
-                            Utils.fadeOut(this, fadeSpeed);
-                        }
-                    })
-            );
-    };
-
-    graphUI.updateNodeHalos = function () {
-        graphUI.svg.select("#nodeHalos").selectAll("circle").filter(".halo")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0])
-            .join(
-                enter => enter.append("circle")
-                    .classed("halo", true)
-                    .attr("r", "40")
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-                    .on("mousedown", function (d) {
-                        mouseState.clickedNode = d[0];
-                    })
-                    .on("mouseover", function (d) {
-                        mouseState.mouseoverNode = d[0];
-                        d3.select(this).classed("ready", false);
-                        if (mouseState.clickedNode != undefined &&
-                            mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
-                            d3.select(this).classed("ready", true);
-                        }
-                        Utils.fadeIn(this, fadeSpeed);
-                        graphUI.update();
-                    })
-                    .on("mouseout", function () {
-                        mouseState.mouseoverNode = undefined;
-                        Utils.fadeOut(this, fadeSpeed);
-                    })
-                    .call(d3.drag()
-                          .on("start", dragstarted_halo)
-                          .on("drag", dragged_halo)
-                          .on("end", dragended_halo)),
-                update => update
-                    .attr("cx", d => d[1].x)
-                    .attr("cy", d => d[1].y)
-            );
-    };
-
-    graphUI.update = function () {
-        graphUI.graph.usePursGraph();
-
-        graphUI.updateEdges();
-
-        graphUI.updateEdgeBorders();
-
-        graphUI.updateDrawingEdge();
-
-        graphUI.updateText();
-
-        graphUI.updateNodes();
-
-        graphUI.updateNodeBorders();
-
-        graphUI.updateNodeHalos();
-
-        // Reset states
-        graphUI.svg.on("mouseup", function () {
-            mouseState.clickedNode = undefined;
-            graphUI.update();
-        });
-    };
-
-    // Ctrl+click to create new unconnected node
-    graphUI.svg.on("mousedown", function () {
-        if (d3.event.ctrlKey) {
-            graphUI.graph.createNode(d3.event.x, d3.event.y, StringSet.empty(), StringSet.empty());
-            graphUI.update();
-        }
-    });
-
-    function dragstarted_node(d) {
-        d3.select(this).style("pointer-events", "none");
-        graphUI.graph.focusOnNode(d[0]);
-        graphUI.update();
-    }
-
-    function dragged_node(d) {
-        graphUI.graph.moveNode(d[0], {
-            "x": d3.event.x,
-            "y": d3.event.y,
-        });
-        graphUI.update();
-    }
-
-    function dragended_node(d) {
-        d3.select(this).style("pointer-events", "all");
-        create_edge_if_possible();
-        graphUI.update();
-    }
-
-    function dragstarted_halo(d) {
-        d3.select(this).style("pointer-events", "none");
-        mouseState.drawingEdge = [{"source": d[1],
-                                   "target": {"x": d3.event.x,
-                                              "y": d3.event.y}}];
-        graphUI.update();
-    }
-
-    function dragged_halo(d) {
-        mouseState.drawingEdge = [{"source": d[1],
-                              "target": {"x": d3.event.x,
-                                         "y": d3.event.y}}];
-        graphUI.update();
-    }
-
-    function dragended_halo(d) {
-        d3.select(this).style("pointer-events", "all");
-        create_edge_if_possible();
-        mouseState.drawingEdge = [];
-        graphUI.update();
-        mouseState.clickedNode = undefined;
-        d3.selectAll("*").classed("ready", false);
-        graphUI.update();
-    }
-
-    function create_edge_if_possible() {
-        if (mouseState.clickedNode != undefined &&
-            mouseState.clickedNode != mouseState.mouseoverNode &&
-            mouseState.mouseoverNode != undefined) {
-            graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
-            graphUI.graph.focusOnNode(mouseState.mouseoverNode);
-            mouseState.clickedNode = undefined;
-            mouseState.mouseoverNode = undefined;
-        };
-    }
-
-
-    ///////////////////////////////////
-    //////// Keyboard input
-
-    d3.select("body").on("keydown", function () {
-        //console.log(d3.event);
-        //console.log(d3.event.key);
-        if (d3.event.key in keybindings[graphUI.keyboardMode]) {
-            if (Utils.isIn(d3.event.key, preventDefaultKeys)) {
-                d3.event.preventDefault();
-                d3.event.stopPropagation();
-            }
-            keybindings[graphUI.keyboardMode][d3.event.key](graphUI.graph);
-            graphUI.update();
-        }
-    });
-
-    function normalMode() {
-        graphUI.keyboardMode = "normal";
-    }
-
-    function visualMode() {
-        graphUI.graph.highlightFocus();
-        graphUI.keyboardMode = "visual";
-    }
-
-    function insertMode() {
-        d3.event.preventDefault();
-        graphUI.keyboardMode = "insert";
-    }
-
-    var preventDefaultKeys = [
-        " ",
-    ];
-
-    var keybindings = {
-        "normal": {
-            "j": graph => graph.traverseDown(),
-            "k": graph => graph.traverseUp(),
-            "h": graph => graph.traverseLeft(),
-            "l": graph => graph.traverseRight(),
-            "o": graph => graph.newNodeBelowFocus(),
-            "x": graph => graph.removeFocused(),
-            "Delete": graph => graph.removeFocused(),
-            "s": graph => graph.toggleHighlightFocus(),
-            "Escape": graph => graph.clearHighlights(),
-            "i": insertMode,
-            "v": visualMode,
-            " ": graph => graph.toggleGroupExpand(),
-        },
-        "insert": {
-            "Escape": normalMode,
-        },
-        "visual": {
-            "j": graph => graph.traverseDown().highlightFocus(),
-            "k": graph => graph.traverseUp().highlightFocus(),
-            "h": graph => graph.traverseLeft().highlightFocus(),
-            "l": graph => graph.traverseRight().highlightFocus(),
-            "s": graph => graph.toggleHighlightFocus(),
-            "Delete": graph => graph.removeFocusFromGroup(),
-            "Escape": normalMode,
-            " ": graph => graph.toggleGroupExpand,
-        }
-    };
-};
-
-
-/***/ }),
-
 /***/ "./purescript/output/Control.Alt/index.js":
 /*!************************************************!*\
   !*** ./purescript/output/Control.Alt/index.js ***!
@@ -20353,6 +20355,368 @@ module.exports = {
     monadErrorMaybe: monadErrorMaybe,
     monadThrowEffect: monadThrowEffect,
     monadErrorEffect: monadErrorEffect
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Control.Monad.Except.Trans/index.js":
+/*!***************************************************************!*\
+  !*** ./purescript/output/Control.Monad.Except.Trans/index.js ***!
+  \***************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Alt = __webpack_require__(/*! ../Control.Alt/index.js */ "./purescript/output/Control.Alt/index.js");
+var Control_Alternative = __webpack_require__(/*! ../Control.Alternative/index.js */ "./purescript/output/Control.Alternative/index.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Apply = __webpack_require__(/*! ../Control.Apply/index.js */ "./purescript/output/Control.Apply/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Monad = __webpack_require__(/*! ../Control.Monad/index.js */ "./purescript/output/Control.Monad/index.js");
+var Control_Monad_Cont_Class = __webpack_require__(/*! ../Control.Monad.Cont.Class/index.js */ "./purescript/output/Control.Monad.Cont.Class/index.js");
+var Control_Monad_Error_Class = __webpack_require__(/*! ../Control.Monad.Error.Class/index.js */ "./purescript/output/Control.Monad.Error.Class/index.js");
+var Control_Monad_Reader_Class = __webpack_require__(/*! ../Control.Monad.Reader.Class/index.js */ "./purescript/output/Control.Monad.Reader.Class/index.js");
+var Control_Monad_Rec_Class = __webpack_require__(/*! ../Control.Monad.Rec.Class/index.js */ "./purescript/output/Control.Monad.Rec.Class/index.js");
+var Control_Monad_State_Class = __webpack_require__(/*! ../Control.Monad.State.Class/index.js */ "./purescript/output/Control.Monad.State.Class/index.js");
+var Control_Monad_Trans_Class = __webpack_require__(/*! ../Control.Monad.Trans.Class/index.js */ "./purescript/output/Control.Monad.Trans.Class/index.js");
+var Control_Monad_Writer_Class = __webpack_require__(/*! ../Control.Monad.Writer.Class/index.js */ "./purescript/output/Control.Monad.Writer.Class/index.js");
+var Control_MonadPlus = __webpack_require__(/*! ../Control.MonadPlus/index.js */ "./purescript/output/Control.MonadPlus/index.js");
+var Control_MonadZero = __webpack_require__(/*! ../Control.MonadZero/index.js */ "./purescript/output/Control.MonadZero/index.js");
+var Control_Plus = __webpack_require__(/*! ../Control.Plus/index.js */ "./purescript/output/Control.Plus/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_Monoid = __webpack_require__(/*! ../Data.Monoid/index.js */ "./purescript/output/Data.Monoid/index.js");
+var Data_Newtype = __webpack_require__(/*! ../Data.Newtype/index.js */ "./purescript/output/Data.Newtype/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Tuple = __webpack_require__(/*! ../Data.Tuple/index.js */ "./purescript/output/Data.Tuple/index.js");
+var Effect_Class = __webpack_require__(/*! ../Effect.Class/index.js */ "./purescript/output/Effect.Class/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var ExceptT = function (x) {
+    return x;
+};
+var withExceptT = function (dictFunctor) {
+    return function (f) {
+        return function (v) {
+            var mapLeft = function (v1) {
+                return function (v2) {
+                    if (v2 instanceof Data_Either.Right) {
+                        return new Data_Either.Right(v2.value0);
+                    };
+                    if (v2 instanceof Data_Either.Left) {
+                        return new Data_Either.Left(v1(v2.value0));
+                    };
+                    throw new Error("Failed pattern match at Control.Monad.Except.Trans (line 42, column 3 - line 42, column 32): " + [ v1.constructor.name, v2.constructor.name ]);
+                };
+            };
+            return ExceptT(Data_Functor.map(dictFunctor)(mapLeft(f))(v));
+        };
+    };
+};
+var runExceptT = function (v) {
+    return v;
+};
+var newtypeExceptT = new Data_Newtype.Newtype(function (n) {
+    return n;
+}, ExceptT);
+var monadTransExceptT = new Control_Monad_Trans_Class.MonadTrans(function (dictMonad) {
+    return function (m) {
+        return Control_Bind.bind(dictMonad.Bind1())(m)(function (v) {
+            return Control_Applicative.pure(dictMonad.Applicative0())(new Data_Either.Right(v));
+        });
+    };
+});
+var mapExceptT = function (f) {
+    return function (v) {
+        return f(v);
+    };
+};
+var functorExceptT = function (dictFunctor) {
+    return new Data_Functor.Functor(function (f) {
+        return mapExceptT(Data_Functor.map(dictFunctor)(Data_Functor.map(Data_Either.functorEither)(f)));
+    });
+};
+var except = function (dictApplicative) {
+    return function ($96) {
+        return ExceptT(Control_Applicative.pure(dictApplicative)($96));
+    };
+};
+var monadExceptT = function (dictMonad) {
+    return new Control_Monad.Monad(function () {
+        return applicativeExceptT(dictMonad);
+    }, function () {
+        return bindExceptT(dictMonad);
+    });
+};
+var bindExceptT = function (dictMonad) {
+    return new Control_Bind.Bind(function () {
+        return applyExceptT(dictMonad);
+    }, function (v) {
+        return function (k) {
+            return Control_Bind.bind(dictMonad.Bind1())(v)(Data_Either.either(function ($97) {
+                return Control_Applicative.pure(dictMonad.Applicative0())(Data_Either.Left.create($97));
+            })(function (a) {
+                var v1 = k(a);
+                return v1;
+            }));
+        };
+    });
+};
+var applyExceptT = function (dictMonad) {
+    return new Control_Apply.Apply(function () {
+        return functorExceptT(((dictMonad.Bind1()).Apply0()).Functor0());
+    }, Control_Monad.ap(monadExceptT(dictMonad)));
+};
+var applicativeExceptT = function (dictMonad) {
+    return new Control_Applicative.Applicative(function () {
+        return applyExceptT(dictMonad);
+    }, function ($98) {
+        return ExceptT(Control_Applicative.pure(dictMonad.Applicative0())(Data_Either.Right.create($98)));
+    });
+};
+var monadAskExceptT = function (dictMonadAsk) {
+    return new Control_Monad_Reader_Class.MonadAsk(function () {
+        return monadExceptT(dictMonadAsk.Monad0());
+    }, Control_Monad_Trans_Class.lift(monadTransExceptT)(dictMonadAsk.Monad0())(Control_Monad_Reader_Class.ask(dictMonadAsk)));
+};
+var monadReaderExceptT = function (dictMonadReader) {
+    return new Control_Monad_Reader_Class.MonadReader(function () {
+        return monadAskExceptT(dictMonadReader.MonadAsk0());
+    }, function (f) {
+        return mapExceptT(Control_Monad_Reader_Class.local(dictMonadReader)(f));
+    });
+};
+var monadContExceptT = function (dictMonadCont) {
+    return new Control_Monad_Cont_Class.MonadCont(function () {
+        return monadExceptT(dictMonadCont.Monad0());
+    }, function (f) {
+        return ExceptT(Control_Monad_Cont_Class.callCC(dictMonadCont)(function (c) {
+            var v = f(function (a) {
+                return ExceptT(c(new Data_Either.Right(a)));
+            });
+            return v;
+        }));
+    });
+};
+var monadEffectExceptT = function (dictMonadEffect) {
+    return new Effect_Class.MonadEffect(function () {
+        return monadExceptT(dictMonadEffect.Monad0());
+    }, function ($99) {
+        return Control_Monad_Trans_Class.lift(monadTransExceptT)(dictMonadEffect.Monad0())(Effect_Class.liftEffect(dictMonadEffect)($99));
+    });
+};
+var monadRecExceptT = function (dictMonadRec) {
+    return new Control_Monad_Rec_Class.MonadRec(function () {
+        return monadExceptT(dictMonadRec.Monad0());
+    }, function (f) {
+        return function ($100) {
+            return ExceptT(Control_Monad_Rec_Class.tailRecM(dictMonadRec)(function (a) {
+                return Control_Bind.bind((dictMonadRec.Monad0()).Bind1())((function () {
+                    var v = f(a);
+                    return v;
+                })())(function (m$prime) {
+                    return Control_Applicative.pure((dictMonadRec.Monad0()).Applicative0())((function () {
+                        if (m$prime instanceof Data_Either.Left) {
+                            return new Control_Monad_Rec_Class.Done(new Data_Either.Left(m$prime.value0));
+                        };
+                        if (m$prime instanceof Data_Either.Right && m$prime.value0 instanceof Control_Monad_Rec_Class.Loop) {
+                            return new Control_Monad_Rec_Class.Loop(m$prime.value0.value0);
+                        };
+                        if (m$prime instanceof Data_Either.Right && m$prime.value0 instanceof Control_Monad_Rec_Class.Done) {
+                            return new Control_Monad_Rec_Class.Done(new Data_Either.Right(m$prime.value0.value0));
+                        };
+                        throw new Error("Failed pattern match at Control.Monad.Except.Trans (line 74, column 14 - line 77, column 43): " + [ m$prime.constructor.name ]);
+                    })());
+                });
+            })($100));
+        };
+    });
+};
+var monadStateExceptT = function (dictMonadState) {
+    return new Control_Monad_State_Class.MonadState(function () {
+        return monadExceptT(dictMonadState.Monad0());
+    }, function (f) {
+        return Control_Monad_Trans_Class.lift(monadTransExceptT)(dictMonadState.Monad0())(Control_Monad_State_Class.state(dictMonadState)(f));
+    });
+};
+var monadTellExceptT = function (dictMonadTell) {
+    return new Control_Monad_Writer_Class.MonadTell(function () {
+        return monadExceptT(dictMonadTell.Monad0());
+    }, function ($101) {
+        return Control_Monad_Trans_Class.lift(monadTransExceptT)(dictMonadTell.Monad0())(Control_Monad_Writer_Class.tell(dictMonadTell)($101));
+    });
+};
+var monadWriterExceptT = function (dictMonadWriter) {
+    return new Control_Monad_Writer_Class.MonadWriter(function () {
+        return monadTellExceptT(dictMonadWriter.MonadTell0());
+    }, mapExceptT(function (m) {
+        return Control_Bind.bind(((dictMonadWriter.MonadTell0()).Monad0()).Bind1())(Control_Monad_Writer_Class.listen(dictMonadWriter)(m))(function (v) {
+            return Control_Applicative.pure(((dictMonadWriter.MonadTell0()).Monad0()).Applicative0())(Data_Functor.map(Data_Either.functorEither)(function (r) {
+                return new Data_Tuple.Tuple(r, v.value1);
+            })(v.value0));
+        });
+    }), mapExceptT(function (m) {
+        return Control_Monad_Writer_Class.pass(dictMonadWriter)(Control_Bind.bind(((dictMonadWriter.MonadTell0()).Monad0()).Bind1())(m)(function (v) {
+            return Control_Applicative.pure(((dictMonadWriter.MonadTell0()).Monad0()).Applicative0())((function () {
+                if (v instanceof Data_Either.Left) {
+                    return new Data_Tuple.Tuple(new Data_Either.Left(v.value0), Control_Category.identity(Control_Category.categoryFn));
+                };
+                if (v instanceof Data_Either.Right) {
+                    return new Data_Tuple.Tuple(new Data_Either.Right(v.value0.value0), v.value0.value1);
+                };
+                throw new Error("Failed pattern match at Control.Monad.Except.Trans (line 136, column 10 - line 138, column 44): " + [ v.constructor.name ]);
+            })());
+        }));
+    }));
+};
+var monadThrowExceptT = function (dictMonad) {
+    return new Control_Monad_Error_Class.MonadThrow(function () {
+        return monadExceptT(dictMonad);
+    }, function ($102) {
+        return ExceptT(Control_Applicative.pure(dictMonad.Applicative0())(Data_Either.Left.create($102)));
+    });
+};
+var monadErrorExceptT = function (dictMonad) {
+    return new Control_Monad_Error_Class.MonadError(function () {
+        return monadThrowExceptT(dictMonad);
+    }, function (v) {
+        return function (k) {
+            return Control_Bind.bind(dictMonad.Bind1())(v)(Data_Either.either(function (a) {
+                var v1 = k(a);
+                return v1;
+            })(function ($103) {
+                return Control_Applicative.pure(dictMonad.Applicative0())(Data_Either.Right.create($103));
+            }));
+        };
+    });
+};
+var altExceptT = function (dictSemigroup) {
+    return function (dictMonad) {
+        return new Control_Alt.Alt(function () {
+            return functorExceptT(((dictMonad.Bind1()).Apply0()).Functor0());
+        }, function (v) {
+            return function (v1) {
+                return Control_Bind.bind(dictMonad.Bind1())(v)(function (v2) {
+                    if (v2 instanceof Data_Either.Right) {
+                        return Control_Applicative.pure(dictMonad.Applicative0())(new Data_Either.Right(v2.value0));
+                    };
+                    if (v2 instanceof Data_Either.Left) {
+                        return Control_Bind.bind(dictMonad.Bind1())(v1)(function (v3) {
+                            if (v3 instanceof Data_Either.Right) {
+                                return Control_Applicative.pure(dictMonad.Applicative0())(new Data_Either.Right(v3.value0));
+                            };
+                            if (v3 instanceof Data_Either.Left) {
+                                return Control_Applicative.pure(dictMonad.Applicative0())(new Data_Either.Left(Data_Semigroup.append(dictSemigroup)(v2.value0)(v3.value0)));
+                            };
+                            throw new Error("Failed pattern match at Control.Monad.Except.Trans (line 86, column 9 - line 88, column 49): " + [ v3.constructor.name ]);
+                        });
+                    };
+                    throw new Error("Failed pattern match at Control.Monad.Except.Trans (line 82, column 5 - line 88, column 49): " + [ v2.constructor.name ]);
+                });
+            };
+        });
+    };
+};
+var plusExceptT = function (dictMonoid) {
+    return function (dictMonad) {
+        return new Control_Plus.Plus(function () {
+            return altExceptT(dictMonoid.Semigroup0())(dictMonad);
+        }, Control_Monad_Error_Class.throwError(monadThrowExceptT(dictMonad))(Data_Monoid.mempty(dictMonoid)));
+    };
+};
+var alternativeExceptT = function (dictMonoid) {
+    return function (dictMonad) {
+        return new Control_Alternative.Alternative(function () {
+            return applicativeExceptT(dictMonad);
+        }, function () {
+            return plusExceptT(dictMonoid)(dictMonad);
+        });
+    };
+};
+var monadZeroExceptT = function (dictMonoid) {
+    return function (dictMonad) {
+        return new Control_MonadZero.MonadZero(function () {
+            return alternativeExceptT(dictMonoid)(dictMonad);
+        }, function () {
+            return monadExceptT(dictMonad);
+        });
+    };
+};
+var monadPlusExceptT = function (dictMonoid) {
+    return function (dictMonad) {
+        return new Control_MonadPlus.MonadPlus(function () {
+            return monadZeroExceptT(dictMonoid)(dictMonad);
+        });
+    };
+};
+module.exports = {
+    ExceptT: ExceptT,
+    runExceptT: runExceptT,
+    withExceptT: withExceptT,
+    mapExceptT: mapExceptT,
+    except: except,
+    newtypeExceptT: newtypeExceptT,
+    functorExceptT: functorExceptT,
+    applyExceptT: applyExceptT,
+    applicativeExceptT: applicativeExceptT,
+    bindExceptT: bindExceptT,
+    monadExceptT: monadExceptT,
+    monadRecExceptT: monadRecExceptT,
+    altExceptT: altExceptT,
+    plusExceptT: plusExceptT,
+    alternativeExceptT: alternativeExceptT,
+    monadPlusExceptT: monadPlusExceptT,
+    monadZeroExceptT: monadZeroExceptT,
+    monadTransExceptT: monadTransExceptT,
+    monadEffectExceptT: monadEffectExceptT,
+    monadContExceptT: monadContExceptT,
+    monadThrowExceptT: monadThrowExceptT,
+    monadErrorExceptT: monadErrorExceptT,
+    monadAskExceptT: monadAskExceptT,
+    monadReaderExceptT: monadReaderExceptT,
+    monadStateExceptT: monadStateExceptT,
+    monadTellExceptT: monadTellExceptT,
+    monadWriterExceptT: monadWriterExceptT
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Control.Monad.Except/index.js":
+/*!*********************************************************!*\
+  !*** ./purescript/output/Control.Monad.Except/index.js ***!
+  \*********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Monad_Error_Class = __webpack_require__(/*! ../Control.Monad.Error.Class/index.js */ "./purescript/output/Control.Monad.Error.Class/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_Newtype = __webpack_require__(/*! ../Data.Newtype/index.js */ "./purescript/output/Data.Newtype/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var withExcept = Control_Monad_Except_Trans.withExceptT(Data_Identity.functorIdentity);
+var runExcept = function ($0) {
+    return Data_Newtype.unwrap(Data_Identity.newtypeIdentity)(Control_Monad_Except_Trans.runExceptT($0));
+};
+var mapExcept = function (f) {
+    return Control_Monad_Except_Trans.mapExceptT(function ($1) {
+        return Data_Identity.Identity(f(Data_Newtype.unwrap(Data_Identity.newtypeIdentity)($1)));
+    });
+};
+module.exports = {
+    runExcept: runExcept,
+    mapExcept: mapExcept,
+    withExcept: withExcept
 };
 
 
@@ -28371,6 +28735,103 @@ module.exports = {
 
 /***/ }),
 
+/***/ "./purescript/output/Data.Generic.Rep/index.js":
+/*!*****************************************************!*\
+  !*** ./purescript/output/Data.Generic.Rep/index.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Inl = (function () {
+    function Inl(value0) {
+        this.value0 = value0;
+    };
+    Inl.create = function (value0) {
+        return new Inl(value0);
+    };
+    return Inl;
+})();
+var Inr = (function () {
+    function Inr(value0) {
+        this.value0 = value0;
+    };
+    Inr.create = function (value0) {
+        return new Inr(value0);
+    };
+    return Inr;
+})();
+var Product = (function () {
+    function Product(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    Product.create = function (value0) {
+        return function (value1) {
+            return new Product(value0, value1);
+        };
+    };
+    return Product;
+})();
+var NoArguments = (function () {
+    function NoArguments() {
+
+    };
+    NoArguments.value = new NoArguments();
+    return NoArguments;
+})();
+var Constructor = function (x) {
+    return x;
+};
+var Argument = function (x) {
+    return x;
+};
+var Generic = function (from, to) {
+    this.from = from;
+    this.to = to;
+};
+var to = function (dict) {
+    return dict.to;
+};
+var genericMaybe = new Generic(function (v) {
+    if (v instanceof Data_Maybe.Nothing) {
+        return new Inl(NoArguments.value);
+    };
+    if (v instanceof Data_Maybe.Just) {
+        return new Inr(v.value0);
+    };
+    throw new Error("Failed pattern match at Data.Generic.Rep (line 40, column 1 - line 42, column 63): " + [ v.constructor.name ]);
+}, function (v) {
+    if (v instanceof Inl) {
+        return Data_Maybe.Nothing.value;
+    };
+    if (v instanceof Inr) {
+        return new Data_Maybe.Just(v.value0);
+    };
+    throw new Error("Failed pattern match at Data.Generic.Rep (line 40, column 1 - line 42, column 63): " + [ v.constructor.name ]);
+});
+var from = function (dict) {
+    return dict.from;
+};
+module.exports = {
+    Generic: Generic,
+    to: to,
+    from: from,
+    NoArguments: NoArguments,
+    Inl: Inl,
+    Inr: Inr,
+    Product: Product,
+    Constructor: Constructor,
+    Argument: Argument,
+    genericMaybe: genericMaybe
+};
+
+
+/***/ }),
+
 /***/ "./purescript/output/Data.HeytingAlgebra/foreign.js":
 /*!**********************************************************!*\
   !*** ./purescript/output/Data.HeytingAlgebra/foreign.js ***!
@@ -34085,6 +34546,445 @@ module.exports = {
     ordPattern: ordPattern,
     newtypePattern: newtypePattern,
     showPattern: showPattern
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Data.List.NonEmpty/index.js":
+/*!*******************************************************!*\
+  !*** ./purescript/output/Data.List.NonEmpty/index.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Foldable = __webpack_require__(/*! ../Data.Foldable/index.js */ "./purescript/output/Data.Foldable/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_FunctorWithIndex = __webpack_require__(/*! ../Data.FunctorWithIndex/index.js */ "./purescript/output/Data.FunctorWithIndex/index.js");
+var Data_List = __webpack_require__(/*! ../Data.List/index.js */ "./purescript/output/Data.List/index.js");
+var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_NonEmpty = __webpack_require__(/*! ../Data.NonEmpty/index.js */ "./purescript/output/Data.NonEmpty/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Semigroup_Foldable = __webpack_require__(/*! ../Data.Semigroup.Foldable/index.js */ "./purescript/output/Data.Semigroup.Foldable/index.js");
+var Data_Semigroup_Traversable = __webpack_require__(/*! ../Data.Semigroup.Traversable/index.js */ "./purescript/output/Data.Semigroup.Traversable/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_Traversable = __webpack_require__(/*! ../Data.Traversable/index.js */ "./purescript/output/Data.Traversable/index.js");
+var Data_Tuple = __webpack_require__(/*! ../Data.Tuple/index.js */ "./purescript/output/Data.Tuple/index.js");
+var Data_Unfoldable = __webpack_require__(/*! ../Data.Unfoldable/index.js */ "./purescript/output/Data.Unfoldable/index.js");
+var Partial_Unsafe = __webpack_require__(/*! ../Partial.Unsafe/index.js */ "./purescript/output/Partial.Unsafe/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var zipWith = function (f) {
+    return function (v) {
+        return function (v1) {
+            return new Data_NonEmpty.NonEmpty(f(v.value0)(v1.value0), Data_List.zipWith(f)(v.value1)(v1.value1));
+        };
+    };
+};
+var zipWithA = function (dictApplicative) {
+    return function (f) {
+        return function (xs) {
+            return function (ys) {
+                return Data_Semigroup_Traversable.sequence1(Data_List_Types.traversable1NonEmptyList)(dictApplicative.Apply0())(zipWith(f)(xs)(ys));
+            };
+        };
+    };
+};
+var zip = zipWith(Data_Tuple.Tuple.create);
+var wrappedOperation2 = function (name) {
+    return function (f) {
+        return function (v) {
+            return function (v1) {
+                var v2 = f(new Data_List_Types.Cons(v.value0, v.value1))(new Data_List_Types.Cons(v1.value0, v1.value1));
+                if (v2 instanceof Data_List_Types.Cons) {
+                    return new Data_NonEmpty.NonEmpty(v2.value0, v2.value1);
+                };
+                if (v2 instanceof Data_List_Types.Nil) {
+                    return Partial_Unsafe.unsafeCrashWith("Impossible: empty list in NonEmptyList " + name);
+                };
+                throw new Error("Failed pattern match at Data.List.NonEmpty (line 104, column 3 - line 106, column 81): " + [ v2.constructor.name ]);
+            };
+        };
+    };
+};
+var wrappedOperation = function (name) {
+    return function (f) {
+        return function (v) {
+            var v1 = f(new Data_List_Types.Cons(v.value0, v.value1));
+            if (v1 instanceof Data_List_Types.Cons) {
+                return new Data_NonEmpty.NonEmpty(v1.value0, v1.value1);
+            };
+            if (v1 instanceof Data_List_Types.Nil) {
+                return Partial_Unsafe.unsafeCrashWith("Impossible: empty list in NonEmptyList " + name);
+            };
+            throw new Error("Failed pattern match at Data.List.NonEmpty (line 91, column 3 - line 93, column 81): " + [ v1.constructor.name ]);
+        };
+    };
+};
+var updateAt = function (i) {
+    return function (a) {
+        return function (v) {
+            if (i === 0) {
+                return new Data_Maybe.Just(new Data_NonEmpty.NonEmpty(a, v.value1));
+            };
+            if (Data_Boolean.otherwise) {
+                return Data_Functor.map(Data_Maybe.functorMaybe)(function ($161) {
+                    return Data_List_Types.NonEmptyList((function (v1) {
+                        return new Data_NonEmpty.NonEmpty(v.value0, v1);
+                    })($161));
+                })(Data_List.updateAt(i - 1 | 0)(a)(v.value1));
+            };
+            throw new Error("Failed pattern match at Data.List.NonEmpty (line 197, column 1 - line 197, column 75): " + [ i.constructor.name, a.constructor.name, v.constructor.name ]);
+        };
+    };
+};
+var unzip = function (ts) {
+    return new Data_Tuple.Tuple(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Data_Tuple.fst)(ts), Data_Functor.map(Data_List_Types.functorNonEmptyList)(Data_Tuple.snd)(ts));
+};
+var unsnoc = function (v) {
+    var v1 = Data_List.unsnoc(v.value1);
+    if (v1 instanceof Data_Maybe.Nothing) {
+        return {
+            init: Data_List_Types.Nil.value,
+            last: v.value0
+        };
+    };
+    if (v1 instanceof Data_Maybe.Just) {
+        return {
+            init: new Data_List_Types.Cons(v.value0, v1.value0.init),
+            last: v1.value0.last
+        };
+    };
+    throw new Error("Failed pattern match at Data.List.NonEmpty (line 159, column 35 - line 161, column 50): " + [ v1.constructor.name ]);
+};
+var unionBy = function ($162) {
+    return wrappedOperation2("unionBy")(Data_List.unionBy($162));
+};
+var union = function (dictEq) {
+    return wrappedOperation2("union")(Data_List.union(dictEq));
+};
+var uncons = function (v) {
+    return {
+        head: v.value0,
+        tail: v.value1
+    };
+};
+var toList = function (v) {
+    return new Data_List_Types.Cons(v.value0, v.value1);
+};
+var toUnfoldable = function (dictUnfoldable) {
+    return function ($163) {
+        return Data_Unfoldable.unfoldr(dictUnfoldable)(function (xs) {
+            return Data_Functor.map(Data_Maybe.functorMaybe)(function (rec) {
+                return new Data_Tuple.Tuple(rec.head, rec.tail);
+            })(Data_List.uncons(xs));
+        })(toList($163));
+    };
+};
+var tail = function (v) {
+    return v.value1;
+};
+var sortBy = function ($164) {
+    return wrappedOperation("sortBy")(Data_List.sortBy($164));
+};
+var sort = function (dictOrd) {
+    return function (xs) {
+        return sortBy(Data_Ord.compare(dictOrd))(xs);
+    };
+};
+var snoc = function (v) {
+    return function (y) {
+        return new Data_NonEmpty.NonEmpty(v.value0, Data_List.snoc(v.value1)(y));
+    };
+};
+var singleton = function ($165) {
+    return Data_List_Types.NonEmptyList(Data_NonEmpty.singleton(Data_List_Types.plusList)($165));
+};
+var snoc$prime = function (v) {
+    return function (y) {
+        if (v instanceof Data_List_Types.Cons) {
+            return new Data_NonEmpty.NonEmpty(v.value0, Data_List.snoc(v.value1)(y));
+        };
+        if (v instanceof Data_List_Types.Nil) {
+            return singleton(y);
+        };
+        throw new Error("Failed pattern match at Data.List.NonEmpty (line 139, column 1 - line 139, column 51): " + [ v.constructor.name, y.constructor.name ]);
+    };
+};
+var reverse = wrappedOperation("reverse")(Data_List.reverse);
+var nubBy = function ($166) {
+    return wrappedOperation("nubBy")(Data_List.nubBy($166));
+};
+var nub = function (dictEq) {
+    return wrappedOperation("nub")(Data_List.nub(dictEq));
+};
+var modifyAt = function (i) {
+    return function (f) {
+        return function (v) {
+            if (i === 0) {
+                return new Data_Maybe.Just(new Data_NonEmpty.NonEmpty(f(v.value0), v.value1));
+            };
+            if (Data_Boolean.otherwise) {
+                return Data_Functor.map(Data_Maybe.functorMaybe)(function ($167) {
+                    return Data_List_Types.NonEmptyList((function (v1) {
+                        return new Data_NonEmpty.NonEmpty(v.value0, v1);
+                    })($167));
+                })(Data_List.modifyAt(i - 1 | 0)(f)(v.value1));
+            };
+            throw new Error("Failed pattern match at Data.List.NonEmpty (line 202, column 1 - line 202, column 82): " + [ i.constructor.name, f.constructor.name, v.constructor.name ]);
+        };
+    };
+};
+var mapWithIndex = Data_FunctorWithIndex.mapWithIndex(Data_List_Types.functorWithIndexNonEmptyList);
+var lift = function (f) {
+    return function (v) {
+        return f(new Data_List_Types.Cons(v.value0, v.value1));
+    };
+};
+var mapMaybe = function ($168) {
+    return lift(Data_List.mapMaybe($168));
+};
+var partition = function ($169) {
+    return lift(Data_List.partition($169));
+};
+var span = function ($170) {
+    return lift(Data_List.span($170));
+};
+var take = function ($171) {
+    return lift(Data_List.take($171));
+};
+var takeWhile = function ($172) {
+    return lift(Data_List.takeWhile($172));
+};
+var length = function (v) {
+    return 1 + Data_List.length(v.value1) | 0;
+};
+var last = function (v) {
+    return Data_Maybe.fromMaybe(v.value0)(Data_List.last(v.value1));
+};
+var intersectBy = function ($173) {
+    return wrappedOperation2("intersectBy")(Data_List.intersectBy($173));
+};
+var intersect = function (dictEq) {
+    return wrappedOperation2("intersect")(Data_List.intersect(dictEq));
+};
+var insertAt = function (i) {
+    return function (a) {
+        return function (v) {
+            if (i === 0) {
+                return new Data_Maybe.Just(new Data_NonEmpty.NonEmpty(a, new Data_List_Types.Cons(v.value0, v.value1)));
+            };
+            if (Data_Boolean.otherwise) {
+                return Data_Functor.map(Data_Maybe.functorMaybe)(function ($174) {
+                    return Data_List_Types.NonEmptyList((function (v1) {
+                        return new Data_NonEmpty.NonEmpty(v.value0, v1);
+                    })($174));
+                })(Data_List.insertAt(i - 1 | 0)(a)(v.value1));
+            };
+            throw new Error("Failed pattern match at Data.List.NonEmpty (line 192, column 1 - line 192, column 75): " + [ i.constructor.name, a.constructor.name, v.constructor.name ]);
+        };
+    };
+};
+var init = function (v) {
+    return Data_Maybe.maybe(Data_List_Types.Nil.value)(function (v1) {
+        return new Data_List_Types.Cons(v.value0, v1);
+    })(Data_List.init(v.value1));
+};
+var index = function (v) {
+    return function (i) {
+        if (i === 0) {
+            return new Data_Maybe.Just(v.value0);
+        };
+        if (Data_Boolean.otherwise) {
+            return Data_List.index(v.value1)(i - 1 | 0);
+        };
+        throw new Error("Failed pattern match at Data.List.NonEmpty (line 166, column 1 - line 166, column 52): " + [ v.constructor.name, i.constructor.name ]);
+    };
+};
+var head = function (v) {
+    return v.value0;
+};
+var groupBy = function ($175) {
+    return wrappedOperation("groupBy")(Data_List.groupBy($175));
+};
+var group$prime = function (dictOrd) {
+    return wrappedOperation("group'")(Data_List["group'"](dictOrd));
+};
+var group = function (dictEq) {
+    return wrappedOperation("group")(Data_List.group(dictEq));
+};
+var fromList = function (v) {
+    if (v instanceof Data_List_Types.Nil) {
+        return Data_Maybe.Nothing.value;
+    };
+    if (v instanceof Data_List_Types.Cons) {
+        return new Data_Maybe.Just(new Data_NonEmpty.NonEmpty(v.value0, v.value1));
+    };
+    throw new Error("Failed pattern match at Data.List.NonEmpty (line 120, column 1 - line 120, column 57): " + [ v.constructor.name ]);
+};
+var fromFoldable = function (dictFoldable) {
+    return function ($176) {
+        return fromList(Data_List.fromFoldable(dictFoldable)($176));
+    };
+};
+var foldM = function (dictMonad) {
+    return function (f) {
+        return function (a) {
+            return function (v) {
+                return Control_Bind.bind(dictMonad.Bind1())(f(a)(v.value0))(function (a$prime) {
+                    return Data_List.foldM(dictMonad)(f)(a$prime)(v.value1);
+                });
+            };
+        };
+    };
+};
+var findLastIndex = function (f) {
+    return function (v) {
+        var v1 = Data_List.findLastIndex(f)(v.value1);
+        if (v1 instanceof Data_Maybe.Just) {
+            return new Data_Maybe.Just(v1.value0 + 1 | 0);
+        };
+        if (v1 instanceof Data_Maybe.Nothing) {
+            if (f(v.value0)) {
+                return new Data_Maybe.Just(0);
+            };
+            if (Data_Boolean.otherwise) {
+                return Data_Maybe.Nothing.value;
+            };
+        };
+        throw new Error("Failed pattern match at Data.List.NonEmpty (line 186, column 3 - line 190, column 29): " + [ v1.constructor.name ]);
+    };
+};
+var findIndex = function (f) {
+    return function (v) {
+        if (f(v.value0)) {
+            return new Data_Maybe.Just(0);
+        };
+        if (Data_Boolean.otherwise) {
+            return Data_Functor.map(Data_Maybe.functorMaybe)(function (v1) {
+                return v1 + 1 | 0;
+            })(Data_List.findIndex(f)(v.value1));
+        };
+        throw new Error("Failed pattern match at Data.List.NonEmpty (line 179, column 1 - line 179, column 69): " + [ f.constructor.name, v.constructor.name ]);
+    };
+};
+var filterM = function (dictMonad) {
+    return function ($177) {
+        return lift(Data_List.filterM(dictMonad)($177));
+    };
+};
+var filter = function ($178) {
+    return lift(Data_List.filter($178));
+};
+var elemLastIndex = function (dictEq) {
+    return function (x) {
+        return findLastIndex(function (v) {
+            return Data_Eq.eq(dictEq)(v)(x);
+        });
+    };
+};
+var elemIndex = function (dictEq) {
+    return function (x) {
+        return findIndex(function (v) {
+            return Data_Eq.eq(dictEq)(v)(x);
+        });
+    };
+};
+var dropWhile = function ($179) {
+    return lift(Data_List.dropWhile($179));
+};
+var drop = function ($180) {
+    return lift(Data_List.drop($180));
+};
+var cons$prime = function (x) {
+    return function (xs) {
+        return new Data_NonEmpty.NonEmpty(x, xs);
+    };
+};
+var cons = function (y) {
+    return function (v) {
+        return new Data_NonEmpty.NonEmpty(y, new Data_List_Types.Cons(v.value0, v.value1));
+    };
+};
+var concatMap = Data_Function.flip(Control_Bind.bind(Data_List_Types.bindNonEmptyList));
+var concat = function (v) {
+    return Control_Bind.bind(Data_List_Types.bindNonEmptyList)(v)(Control_Category.identity(Control_Category.categoryFn));
+};
+var catMaybes = lift(Data_List.catMaybes);
+var appendFoldable = function (dictFoldable) {
+    return function (v) {
+        return function (ys) {
+            return new Data_NonEmpty.NonEmpty(v.value0, Data_Semigroup.append(Data_List_Types.semigroupList)(v.value1)(Data_List.fromFoldable(dictFoldable)(ys)));
+        };
+    };
+};
+module.exports = {
+    toUnfoldable: toUnfoldable,
+    fromFoldable: fromFoldable,
+    fromList: fromList,
+    toList: toList,
+    singleton: singleton,
+    length: length,
+    cons: cons,
+    "cons'": cons$prime,
+    snoc: snoc,
+    "snoc'": snoc$prime,
+    head: head,
+    last: last,
+    tail: tail,
+    init: init,
+    uncons: uncons,
+    unsnoc: unsnoc,
+    index: index,
+    elemIndex: elemIndex,
+    elemLastIndex: elemLastIndex,
+    findIndex: findIndex,
+    findLastIndex: findLastIndex,
+    insertAt: insertAt,
+    updateAt: updateAt,
+    modifyAt: modifyAt,
+    reverse: reverse,
+    concat: concat,
+    concatMap: concatMap,
+    filter: filter,
+    filterM: filterM,
+    mapMaybe: mapMaybe,
+    catMaybes: catMaybes,
+    appendFoldable: appendFoldable,
+    mapWithIndex: mapWithIndex,
+    sort: sort,
+    sortBy: sortBy,
+    take: take,
+    takeWhile: takeWhile,
+    drop: drop,
+    dropWhile: dropWhile,
+    span: span,
+    group: group,
+    "group'": group$prime,
+    groupBy: groupBy,
+    partition: partition,
+    nub: nub,
+    nubBy: nubBy,
+    union: union,
+    unionBy: unionBy,
+    intersect: intersect,
+    intersectBy: intersectBy,
+    zipWith: zipWith,
+    zipWithA: zipWithA,
+    zip: zip,
+    unzip: unzip,
+    foldM: foldM
 };
 
 
@@ -45012,6 +45912,323 @@ module.exports = {
 
 /***/ }),
 
+/***/ "./purescript/output/Effect.Uncurried/foreign.js":
+/*!*******************************************************!*\
+  !*** ./purescript/output/Effect.Uncurried/foreign.js ***!
+  \*******************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.mkEffectFn1 = function mkEffectFn1(fn) {
+  return function(x) {
+    return fn(x)();
+  };
+};
+
+exports.mkEffectFn2 = function mkEffectFn2(fn) {
+  return function(a, b) {
+    return fn(a)(b)();
+  };
+};
+
+exports.mkEffectFn3 = function mkEffectFn3(fn) {
+  return function(a, b, c) {
+    return fn(a)(b)(c)();
+  };
+};
+
+exports.mkEffectFn4 = function mkEffectFn4(fn) {
+  return function(a, b, c, d) {
+    return fn(a)(b)(c)(d)();
+  };
+};
+
+exports.mkEffectFn5 = function mkEffectFn5(fn) {
+  return function(a, b, c, d, e) {
+    return fn(a)(b)(c)(d)(e)();
+  };
+};
+
+exports.mkEffectFn6 = function mkEffectFn6(fn) {
+  return function(a, b, c, d, e, f) {
+    return fn(a)(b)(c)(d)(e)(f)();
+  };
+};
+
+exports.mkEffectFn7 = function mkEffectFn7(fn) {
+  return function(a, b, c, d, e, f, g) {
+    return fn(a)(b)(c)(d)(e)(f)(g)();
+  };
+};
+
+exports.mkEffectFn8 = function mkEffectFn8(fn) {
+  return function(a, b, c, d, e, f, g, h) {
+    return fn(a)(b)(c)(d)(e)(f)(g)(h)();
+  };
+};
+
+exports.mkEffectFn9 = function mkEffectFn9(fn) {
+  return function(a, b, c, d, e, f, g, h, i) {
+    return fn(a)(b)(c)(d)(e)(f)(g)(h)(i)();
+  };
+};
+
+exports.mkEffectFn10 = function mkEffectFn10(fn) {
+  return function(a, b, c, d, e, f, g, h, i, j) {
+    return fn(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)();
+  };
+};
+
+exports.runEffectFn1 = function runEffectFn1(fn) {
+  return function(a) {
+    return function() {
+      return fn(a);
+    };
+  };
+};
+
+exports.runEffectFn2 = function runEffectFn2(fn) {
+  return function(a) {
+    return function(b) {
+      return function() {
+        return fn(a, b);
+      };
+    };
+  };
+};
+
+exports.runEffectFn3 = function runEffectFn3(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function() {
+          return fn(a, b, c);
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn4 = function runEffectFn4(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function() {
+            return fn(a, b, c, d);
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn5 = function runEffectFn5(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function() {
+              return fn(a, b, c, d, e);
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn6 = function runEffectFn6(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function(f) {
+              return function() {
+                return fn(a, b, c, d, e, f);
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn7 = function runEffectFn7(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function(f) {
+              return function(g) {
+                return function() {
+                  return fn(a, b, c, d, e, f, g);
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn8 = function runEffectFn8(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function(f) {
+              return function(g) {
+                return function(h) {
+                  return function() {
+                    return fn(a, b, c, d, e, f, g, h);
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn9 = function runEffectFn9(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function(f) {
+              return function(g) {
+                return function(h) {
+                  return function(i) {
+                    return function() {
+                      return fn(a, b, c, d, e, f, g, h, i);
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+exports.runEffectFn10 = function runEffectFn10(fn) {
+  return function(a) {
+    return function(b) {
+      return function(c) {
+        return function(d) {
+          return function(e) {
+            return function(f) {
+              return function(g) {
+                return function(h) {
+                  return function(i) {
+                    return function(j) {
+                      return function() {
+                        return fn(a, b, c, d, e, f, g, h, i, j);
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Effect.Uncurried/index.js":
+/*!*****************************************************!*\
+  !*** ./purescript/output/Effect.Uncurried/index.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Effect.Uncurried/foreign.js");
+var Effect = __webpack_require__(/*! ../Effect/index.js */ "./purescript/output/Effect/index.js");
+module.exports = {
+    mkEffectFn1: $foreign.mkEffectFn1,
+    mkEffectFn2: $foreign.mkEffectFn2,
+    mkEffectFn3: $foreign.mkEffectFn3,
+    mkEffectFn4: $foreign.mkEffectFn4,
+    mkEffectFn5: $foreign.mkEffectFn5,
+    mkEffectFn6: $foreign.mkEffectFn6,
+    mkEffectFn7: $foreign.mkEffectFn7,
+    mkEffectFn8: $foreign.mkEffectFn8,
+    mkEffectFn9: $foreign.mkEffectFn9,
+    mkEffectFn10: $foreign.mkEffectFn10,
+    runEffectFn1: $foreign.runEffectFn1,
+    runEffectFn2: $foreign.runEffectFn2,
+    runEffectFn3: $foreign.runEffectFn3,
+    runEffectFn4: $foreign.runEffectFn4,
+    runEffectFn5: $foreign.runEffectFn5,
+    runEffectFn6: $foreign.runEffectFn6,
+    runEffectFn7: $foreign.runEffectFn7,
+    runEffectFn8: $foreign.runEffectFn8,
+    runEffectFn9: $foreign.runEffectFn9,
+    runEffectFn10: $foreign.runEffectFn10
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Effect.Unsafe/foreign.js":
+/*!****************************************************!*\
+  !*** ./purescript/output/Effect.Unsafe/foreign.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.unsafePerformEffect = function (f) {
+  return f();
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Effect.Unsafe/index.js":
+/*!**************************************************!*\
+  !*** ./purescript/output/Effect.Unsafe/index.js ***!
+  \**************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Effect.Unsafe/foreign.js");
+var Effect = __webpack_require__(/*! ../Effect/index.js */ "./purescript/output/Effect/index.js");
+module.exports = {
+    unsafePerformEffect: $foreign.unsafePerformEffect
+};
+
+
+/***/ }),
+
 /***/ "./purescript/output/Effect/foreign.js":
 /*!*********************************************!*\
   !*** ./purescript/output/Effect/foreign.js ***!
@@ -45133,6 +46350,1002 @@ module.exports = {
     whileE: $foreign.whileE,
     forE: $foreign.forE,
     foreachE: $foreign.foreachE
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Class/index.js":
+/*!**************************************************!*\
+  !*** ./purescript/output/Foreign.Class/index.js ***!
+  \**************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Monad_Except = __webpack_require__(/*! ../Control.Monad.Except/index.js */ "./purescript/output/Control.Monad.Except/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Array = __webpack_require__(/*! ../Data.Array/index.js */ "./purescript/output/Data.Array/index.js");
+var Data_Bifunctor = __webpack_require__(/*! ../Data.Bifunctor/index.js */ "./purescript/output/Data.Bifunctor/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Newtype = __webpack_require__(/*! ../Data.Newtype/index.js */ "./purescript/output/Data.Newtype/index.js");
+var Data_Traversable = __webpack_require__(/*! ../Data.Traversable/index.js */ "./purescript/output/Data.Traversable/index.js");
+var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
+var Data_Void = __webpack_require__(/*! ../Data.Void/index.js */ "./purescript/output/Data.Void/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Foreign_Internal = __webpack_require__(/*! ../Foreign.Internal/index.js */ "./purescript/output/Foreign.Internal/index.js");
+var Foreign_NullOrUndefined = __webpack_require__(/*! ../Foreign.NullOrUndefined/index.js */ "./purescript/output/Foreign.NullOrUndefined/index.js");
+var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Decode = function (decode) {
+    this.decode = decode;
+};
+var Encode = function (encode) {
+    this.encode = encode;
+};
+var voidEncode = new Encode(Data_Void.absurd);
+var voidDecode = new Decode(function (v) {
+    return Control_Monad_Except_Trans.except(Data_Identity.applicativeIdentity)(new Data_Either.Left(Control_Applicative.pure(Data_List_Types.applicativeNonEmptyList)(new Foreign.ForeignError("Decode: void"))));
+});
+var unitEncode = new Encode(function (v) {
+    return Foreign.unsafeToForeign({});
+});
+var unitDecode = new Decode(function (v) {
+    return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Unit.unit);
+});
+var stringEncode = new Encode(Foreign.unsafeToForeign);
+var stringDecode = new Decode(Foreign.readString);
+var numberEncode = new Encode(Foreign.unsafeToForeign);
+var numberDecode = new Decode(Foreign.readNumber);
+var intEncode = new Encode(Foreign.unsafeToForeign);
+var intDecode = new Decode(Foreign.readInt);
+var foreignEncode = new Encode(Control_Category.identity(Control_Category.categoryFn));
+var foreignDecode = new Decode(Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity)));
+var encode = function (dict) {
+    return dict.encode;
+};
+var identityEncode = function (dictEncode) {
+    return new Encode(function ($13) {
+        return encode(dictEncode)(Data_Newtype.unwrap(Data_Identity.newtypeIdentity)($13));
+    });
+};
+var maybeEncode = function (dictEncode) {
+    return new Encode(Data_Maybe.maybe(Foreign_NullOrUndefined["null"])(encode(dictEncode)));
+};
+var objectEncode = function (dictEncode) {
+    return new Encode(function ($14) {
+        return Foreign.unsafeToForeign(Foreign_Object.mapWithKey(function (v) {
+            return encode(dictEncode);
+        })($14));
+    });
+};
+var decode = function (dict) {
+    return dict.decode;
+};
+var identityDecode = function (dictDecode) {
+    return new Decode(function ($15) {
+        return Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Identity.Identity)(decode(dictDecode)($15));
+    });
+};
+var maybeDecode = function (dictDecode) {
+    return new Decode(Foreign_NullOrUndefined.readNullOrUndefined(decode(dictDecode)));
+};
+var objectDecode = function (dictDecode) {
+    return new Decode(Control_Bind.composeKleisliFlipped(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(function ($16) {
+        return Data_Traversable.sequence(Foreign_Object.traversableObject)(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Foreign_Object.mapWithKey(function (v) {
+            return decode(dictDecode);
+        })($16));
+    })(Foreign_Internal.readObject));
+};
+var charEncode = new Encode(Foreign.unsafeToForeign);
+var charDecode = new Decode(Foreign.readChar);
+var booleanEncode = new Encode(Foreign.unsafeToForeign);
+var booleanDecode = new Decode(Foreign.readBoolean);
+var arrayEncode = function (dictEncode) {
+    return new Encode(function ($17) {
+        return Foreign.unsafeToForeign(Data_Functor.map(Data_Functor.functorArray)(encode(dictEncode))($17));
+    });
+};
+var arrayDecode = function (dictDecode) {
+    return new Decode((function () {
+        var readElement = function (i) {
+            return function (value) {
+                return Control_Monad_Except.mapExcept(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Foreign.ErrorAtIndex.create(i))))(decode(dictDecode)(value));
+            };
+        };
+        var readElements = function (arr) {
+            return Data_Traversable.sequence(Data_Traversable.traversableArray)(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Array.zipWith(readElement)(Data_Array.range(0)(Data_Array.length(arr)))(arr));
+        };
+        return Control_Bind.composeKleisli(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Foreign.readArray)(readElements);
+    })());
+};
+module.exports = {
+    decode: decode,
+    encode: encode,
+    Decode: Decode,
+    Encode: Encode,
+    voidDecode: voidDecode,
+    unitDecode: unitDecode,
+    foreignDecode: foreignDecode,
+    stringDecode: stringDecode,
+    charDecode: charDecode,
+    booleanDecode: booleanDecode,
+    numberDecode: numberDecode,
+    intDecode: intDecode,
+    identityDecode: identityDecode,
+    arrayDecode: arrayDecode,
+    maybeDecode: maybeDecode,
+    objectDecode: objectDecode,
+    voidEncode: voidEncode,
+    unitEncode: unitEncode,
+    foreignEncode: foreignEncode,
+    stringEncode: stringEncode,
+    charEncode: charEncode,
+    booleanEncode: booleanEncode,
+    numberEncode: numberEncode,
+    intEncode: intEncode,
+    identityEncode: identityEncode,
+    arrayEncode: arrayEncode,
+    maybeEncode: maybeEncode,
+    objectEncode: objectEncode
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Generic.Class/index.js":
+/*!**********************************************************!*\
+  !*** ./purescript/output/Foreign.Generic.Class/index.js ***!
+  \**********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Alt = __webpack_require__(/*! ../Control.Alt/index.js */ "./purescript/output/Control.Alt/index.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Monad_Except = __webpack_require__(/*! ../Control.Monad.Except/index.js */ "./purescript/output/Control.Monad.Except/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Bifunctor = __webpack_require__(/*! ../Data.Bifunctor/index.js */ "./purescript/output/Data.Bifunctor/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Foldable = __webpack_require__(/*! ../Data.Foldable/index.js */ "./purescript/output/Data.Foldable/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_Generic_Rep = __webpack_require__(/*! ../Data.Generic.Rep/index.js */ "./purescript/output/Data.Generic.Rep/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_List = __webpack_require__(/*! ../Data.List/index.js */ "./purescript/output/Data.List/index.js");
+var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Monoid = __webpack_require__(/*! ../Data.Monoid/index.js */ "./purescript/output/Data.Monoid/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Data_Symbol = __webpack_require__(/*! ../Data.Symbol/index.js */ "./purescript/output/Data.Symbol/index.js");
+var Data_Unfoldable = __webpack_require__(/*! ../Data.Unfoldable/index.js */ "./purescript/output/Data.Unfoldable/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Foreign_Class = __webpack_require__(/*! ../Foreign.Class/index.js */ "./purescript/output/Foreign.Class/index.js");
+var Foreign_Generic_Types = __webpack_require__(/*! ../Foreign.Generic.Types/index.js */ "./purescript/output/Foreign.Generic.Types/index.js");
+var Foreign_Index = __webpack_require__(/*! ../Foreign.Index/index.js */ "./purescript/output/Foreign.Index/index.js");
+var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Record = __webpack_require__(/*! ../Record/index.js */ "./purescript/output/Record/index.js");
+var Record_Builder = __webpack_require__(/*! ../Record.Builder/index.js */ "./purescript/output/Record.Builder/index.js");
+var Type_Data_RowList = __webpack_require__(/*! ../Type.Data.RowList/index.js */ "./purescript/output/Type.Data.RowList/index.js");
+var Type_Proxy = __webpack_require__(/*! ../Type.Proxy/index.js */ "./purescript/output/Type.Proxy/index.js");
+var Unsafe_Coerce = __webpack_require__(/*! ../Unsafe.Coerce/index.js */ "./purescript/output/Unsafe.Coerce/index.js");
+var GenericDecode = function (decodeOpts) {
+    this.decodeOpts = decodeOpts;
+};
+var GenericEncode = function (encodeOpts) {
+    this.encodeOpts = encodeOpts;
+};
+var GenericDecodeArgs = function (decodeArgs) {
+    this.decodeArgs = decodeArgs;
+};
+var GenericEncodeArgs = function (encodeArgs) {
+    this.encodeArgs = encodeArgs;
+};
+var GenericCountArgs = function (countArgs) {
+    this.countArgs = countArgs;
+};
+var Decode_ = function (decode_) {
+    this.decode_ = decode_;
+};
+var Encode_ = function (encode_) {
+    this.encode_ = encode_;
+};
+var DecodeRecord = function (decodeRecord_) {
+    this.decodeRecord_ = decodeRecord_;
+};
+var EncodeRecord = function (encodeRecord_) {
+    this.encodeRecord_ = encodeRecord_;
+};
+var genericEncodeArgsNoArguments = new GenericEncodeArgs(function (v) {
+    return Data_Monoid.mempty(Data_Monoid.monoidFn(Data_List_Types.monoidList));
+});
+var genericDecodeNoConstructors = new GenericDecode(function (opts) {
+    return function (v) {
+        return Foreign.fail(new Foreign.ForeignError("No constructors"));
+    };
+});
+var genericDecodeArgsNoArguments = new GenericDecodeArgs(function (v) {
+    return function (v1) {
+        return function (v2) {
+            if (v2 instanceof Data_List_Types.Nil) {
+                return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))({
+                    result: Data_Generic_Rep.NoArguments.value,
+                    rest: Data_List_Types.Nil.value,
+                    next: v1
+                });
+            };
+            return Foreign.fail(new Foreign.ForeignError("Too many constructor arguments"));
+        };
+    };
+});
+var genericCountArgsNoArguments = new GenericCountArgs(function (v) {
+    return new Data_Either.Left(Data_Generic_Rep.NoArguments.value);
+});
+var genericCountArgsArgument = new GenericCountArgs(function (v) {
+    return new Data_Either.Right(1);
+});
+var encode_Other = function (dictEncode) {
+    return new Encode_(function (v) {
+        return Foreign_Class.encode(dictEncode);
+    });
+};
+var encode_ = function (dict) {
+    return dict.encode_;
+};
+var genericEncodeArgsArgument = function (dictEncode_) {
+    return new GenericEncodeArgs(function (opts) {
+        return function (v) {
+            return Data_List.singleton(encode_(dictEncode_)(opts)(v));
+        };
+    });
+};
+var encodeRecord_ = function (dict) {
+    return dict.encodeRecord_;
+};
+var encode_Record = function (dictRowToList) {
+    return function (dictEncodeRecord) {
+        return new Encode_(function (opts) {
+            return function ($147) {
+                return Foreign.unsafeToForeign(encodeRecord_(dictEncodeRecord)(Type_Data_RowList.RLProxy.value)(opts)($147));
+            };
+        });
+    };
+};
+var encodeRecordNil = new EncodeRecord(function (v) {
+    return function (v1) {
+        return function (v2) {
+            return Foreign_Object.empty;
+        };
+    };
+});
+var encodeRecordCons = function (dictCons) {
+    return function (dictEncodeRecord) {
+        return function (dictIsSymbol) {
+            return function (dictEncode_) {
+                return new EncodeRecord(function (v) {
+                    return function (opts) {
+                        return function (rec) {
+                            var obj = encodeRecord_(dictEncodeRecord)(Type_Data_RowList.RLProxy.value)(opts)(rec);
+                            var l = Data_Symbol.reflectSymbol(dictIsSymbol)(Data_Symbol.SProxy.value);
+                            return Foreign_Object.insert(opts.fieldTransform(l))(encode_(dictEncode_)(opts)(Record.get(dictIsSymbol)(dictCons)(Data_Symbol.SProxy.value)(rec)))(obj);
+                        };
+                    };
+                });
+            };
+        };
+    };
+};
+var encodeOpts = function (dict) {
+    return dict.encodeOpts;
+};
+var genericEncodeNoConstructors = new GenericEncode(function (opts) {
+    return function (a) {
+        return encodeOpts(genericEncodeNoConstructors)(opts)(a);
+    };
+});
+var genericEncodeSum = function (dictGenericEncode) {
+    return function (dictGenericEncode1) {
+        return new GenericEncode(function (opts) {
+            return function (v) {
+                if (v instanceof Data_Generic_Rep.Inl) {
+                    return encodeOpts(dictGenericEncode)({
+                        sumEncoding: opts.sumEncoding,
+                        unwrapSingleConstructors: false,
+                        unwrapSingleArguments: opts.unwrapSingleArguments,
+                        fieldTransform: opts.fieldTransform
+                    })(v.value0);
+                };
+                if (v instanceof Data_Generic_Rep.Inr) {
+                    return encodeOpts(dictGenericEncode1)({
+                        sumEncoding: opts.sumEncoding,
+                        unwrapSingleConstructors: false,
+                        unwrapSingleArguments: opts.unwrapSingleArguments,
+                        fieldTransform: opts.fieldTransform
+                    })(v.value0);
+                };
+                throw new Error("Failed pattern match at Foreign.Generic.Class (line 119, column 1 - line 121, column 29): " + [ opts.constructor.name, v.constructor.name ]);
+            };
+        });
+    };
+};
+var encodeArgs = function (dict) {
+    return dict.encodeArgs;
+};
+var genericEncodeArgsProduct = function (dictGenericEncodeArgs) {
+    return function (dictGenericEncodeArgs1) {
+        return new GenericEncodeArgs(function (opts) {
+            return function (v) {
+                return Data_Semigroup.append(Data_List_Types.semigroupList)(encodeArgs(dictGenericEncodeArgs)(opts)(v.value0))(encodeArgs(dictGenericEncodeArgs1)(opts)(v.value1));
+            };
+        });
+    };
+};
+var genericEncodeConstructor = function (dictIsSymbol) {
+    return function (dictGenericEncodeArgs) {
+        return new GenericEncode(function (opts) {
+            return function (v) {
+                var unwrapArguments = function (v1) {
+                    if (v1.length === 0) {
+                        return Data_Maybe.Nothing.value;
+                    };
+                    if (v1.length === 1 && opts.unwrapSingleArguments) {
+                        return new Data_Maybe.Just(v1[0]);
+                    };
+                    return new Data_Maybe.Just(Foreign.unsafeToForeign(v1));
+                };
+                var encodeArgsArray = function ($148) {
+                    return unwrapArguments(Data_List.toUnfoldable(Data_Unfoldable.unfoldableArray)(encodeArgs(dictGenericEncodeArgs)(opts)($148)));
+                };
+                var ctorName = Data_Symbol.reflectSymbol(dictIsSymbol)(Data_Symbol.SProxy.value);
+                if (opts.unwrapSingleConstructors) {
+                    return Data_Maybe.maybe(Foreign.unsafeToForeign({}))(Foreign.unsafeToForeign)(encodeArgsArray(v));
+                };
+                return Foreign.unsafeToForeign(Foreign_Object.union(Foreign_Object.singleton(opts.sumEncoding.value0.tagFieldName)(Foreign.unsafeToForeign(opts.sumEncoding.value0.constructorTagTransform(ctorName))))(Data_Maybe.maybe(Foreign_Object.empty)(Foreign_Object.singleton(opts.sumEncoding.value0.contentsFieldName))(encodeArgsArray(v))));
+            };
+        });
+    };
+};
+var decode_Other = function (dictDecode) {
+    return new Decode_(function (v) {
+        return Foreign_Class.decode(dictDecode);
+    });
+};
+var decode_ = function (dict) {
+    return dict.decode_;
+};
+var genericDecodeArgsArgument = function (dictDecode_) {
+    return new GenericDecodeArgs(function (v) {
+        return function (v1) {
+            return function (v2) {
+                if (v2 instanceof Data_List_Types.Cons) {
+                    return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Monad_Except.mapExcept(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Foreign.ErrorAtIndex.create(v1))))(decode_(dictDecode_)(v)(v2.value0)))(function (v3) {
+                        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))({
+                            result: v3,
+                            rest: v2.value1,
+                            next: v1 + 1 | 0
+                        });
+                    });
+                };
+                return Foreign.fail(new Foreign.ForeignError("Not enough constructor arguments"));
+            };
+        };
+    });
+};
+var decodeRecord_ = function (dict) {
+    return dict.decodeRecord_;
+};
+var decode_Record = function (dictRowToList) {
+    return function (dictDecodeRecord) {
+        return new Decode_(function (opts) {
+            return Data_Functor.map(Data_Functor.functorFn)(Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Function.flip(Record_Builder.build)({})))(decodeRecord_(dictDecodeRecord)(Type_Data_RowList.RLProxy.value)(opts));
+        });
+    };
+};
+var decodeRecordNil = new DecodeRecord(function (v) {
+    return function (v1) {
+        return function (v2) {
+            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Control_Category.identity(Record_Builder.categoryBuilder));
+        };
+    };
+});
+var decodeRecordCons = function (dictCons) {
+    return function (dictDecodeRecord) {
+        return function (dictIsSymbol) {
+            return function (dictDecode_) {
+                return function (dictLacks) {
+                    return new DecodeRecord(function (v) {
+                        return function (opts) {
+                            return function (f) {
+                                return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(decodeRecord_(dictDecodeRecord)(Type_Data_RowList.RLProxy.value)(opts)(f))(function (v1) {
+                                    var l = Data_Symbol.reflectSymbol(dictIsSymbol)(Data_Symbol.SProxy.value);
+                                    var l_transformed = opts.fieldTransform(l);
+                                    return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Foreign_Index.index(Foreign_Index.indexString)(f)(l_transformed))(function (v2) {
+                                        return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Monad_Except.mapExcept(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Foreign.ErrorAtProperty.create(l_transformed))))(decode_(dictDecode_)(opts)(v2)))(function (v3) {
+                                            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Control_Semigroupoid.composeFlipped(Record_Builder.semigroupoidBuilder)(v1)(Record_Builder.insert(dictCons)(dictLacks)(dictIsSymbol)(Data_Symbol.SProxy.value)(v3)));
+                                        });
+                                    });
+                                });
+                            };
+                        };
+                    });
+                };
+            };
+        };
+    };
+};
+var decodeOpts = function (dict) {
+    return dict.decodeOpts;
+};
+var genericDecodeSum = function (dictGenericDecode) {
+    return function (dictGenericDecode1) {
+        return new GenericDecode(function (opts) {
+            return function (f) {
+                var opts$prime = {
+                    unwrapSingleConstructors: false,
+                    fieldTransform: opts.fieldTransform,
+                    sumEncoding: opts.sumEncoding,
+                    unwrapSingleArguments: opts.unwrapSingleArguments
+                };
+                return Control_Alt.alt(Control_Monad_Except_Trans.altExceptT(Data_List_Types.semigroupNonEmptyList)(Data_Identity.monadIdentity))(Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Generic_Rep.Inl.create)(decodeOpts(dictGenericDecode)(opts$prime)(f)))(Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Generic_Rep.Inr.create)(decodeOpts(dictGenericDecode1)(opts$prime)(f)));
+            };
+        });
+    };
+};
+var decodeArgs = function (dict) {
+    return dict.decodeArgs;
+};
+var genericDecodeArgsProduct = function (dictGenericDecodeArgs) {
+    return function (dictGenericDecodeArgs1) {
+        return new GenericDecodeArgs(function (opts) {
+            return function (i) {
+                return function (xs) {
+                    return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(decodeArgs(dictGenericDecodeArgs)(opts)(i)(xs))(function (v) {
+                        return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(decodeArgs(dictGenericDecodeArgs1)(opts)(v.next)(v.rest))(function (v1) {
+                            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))({
+                                result: new Data_Generic_Rep.Product(v.result, v1.result),
+                                rest: v1.rest,
+                                next: v1.next
+                            });
+                        });
+                    });
+                };
+            };
+        });
+    };
+};
+var countArgs = function (dict) {
+    return dict.countArgs;
+};
+var genericCountArgsProduct = function (dictGenericCountArgs) {
+    return function (dictGenericCountArgs1) {
+        return new GenericCountArgs(function (v) {
+            var v1 = countArgs(dictGenericCountArgs1)(Type_Proxy["Proxy"].value);
+            var v2 = countArgs(dictGenericCountArgs)(Type_Proxy["Proxy"].value);
+            if (v2 instanceof Data_Either.Left && v1 instanceof Data_Either.Left) {
+                return new Data_Either.Left(new Data_Generic_Rep.Product(v2.value0, v1.value0));
+            };
+            if (v2 instanceof Data_Either.Left && v1 instanceof Data_Either.Right) {
+                return new Data_Either.Right(v1.value0);
+            };
+            if (v2 instanceof Data_Either.Right && v1 instanceof Data_Either.Left) {
+                return new Data_Either.Right(v2.value0);
+            };
+            if (v2 instanceof Data_Either.Right && v1 instanceof Data_Either.Right) {
+                return new Data_Either.Right(v2.value0 + v1.value0 | 0);
+            };
+            throw new Error("Failed pattern match at Foreign.Generic.Class (line 168, column 5 - line 172, column 40): " + [ v2.constructor.name, v1.constructor.name ]);
+        });
+    };
+};
+var genericDecodeConstructor = function (dictIsSymbol) {
+    return function (dictGenericDecodeArgs) {
+        return function (dictGenericCountArgs) {
+            return new GenericDecode(function (opts) {
+                return function (f) {
+                    var numArgs = countArgs(dictGenericCountArgs)(Type_Proxy["Proxy"].value);
+                    var readArguments = function (args) {
+                        if (numArgs instanceof Data_Either.Left) {
+                            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(numArgs.value0);
+                        };
+                        if (numArgs instanceof Data_Either.Right && (numArgs.value0 === 1 && opts.unwrapSingleArguments)) {
+                            return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(decodeArgs(dictGenericDecodeArgs)(opts)(0)(Data_List.singleton(args)))(function (v) {
+                                return Control_Bind.discard(Control_Bind.discardUnit)(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Applicative.unless(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_List["null"](v.rest))(Foreign.fail(new Foreign.ForeignError("Expected a single argument"))))(function () {
+                                    return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(v.result);
+                                });
+                            });
+                        };
+                        if (numArgs instanceof Data_Either.Right) {
+                            return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Foreign.readArray(args))(function (v) {
+                                return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(decodeArgs(dictGenericDecodeArgs)(opts)(0)(Data_List.fromFoldable(Data_Foldable.foldableArray)(v)))(function (v1) {
+                                    return Control_Bind.discard(Control_Bind.discardUnit)(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Applicative.unless(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_List["null"](v1.rest))(Foreign.fail(new Foreign.ForeignError("Expected " + (Data_Show.show(Data_Show.showInt)(numArgs.value0) + " constructor arguments")))))(function () {
+                                        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(v1.result);
+                                    });
+                                });
+                            });
+                        };
+                        throw new Error("Failed pattern match at Foreign.Generic.Class (line 75, column 9 - line 87, column 24): " + [ numArgs.constructor.name ]);
+                    };
+                    var ctorName = Data_Symbol.reflectSymbol(dictIsSymbol)(Data_Symbol.SProxy.value);
+                    if (opts.unwrapSingleConstructors) {
+                        return Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Generic_Rep.Constructor)(readArguments(f));
+                    };
+                    return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Monad_Except.mapExcept(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Foreign.ErrorAtProperty.create(opts.sumEncoding.value0.tagFieldName))))(Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Foreign_Index.index(Foreign_Index.indexString)(f)(opts.sumEncoding.value0.tagFieldName))(Foreign.readString))(function (v) {
+                        var expected = opts.sumEncoding.value0.constructorTagTransform(ctorName);
+                        return Control_Bind.discard(Control_Bind.discardUnit)(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Applicative.unless(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(v === expected)(Foreign.fail(new Foreign.ForeignError("Expected " + (Data_Show.show(Data_Show.showString)(expected) + " tag")))))(function () {
+                            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(v);
+                        });
+                    })))(function (v) {
+                        return Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Control_Monad_Except.mapExcept(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Data_Functor.map(Data_List_Types.functorNonEmptyList)(Foreign.ErrorAtProperty.create(opts.sumEncoding.value0.contentsFieldName))))(Control_Bind.bind(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Foreign_Index.index(Foreign_Index.indexString)(f)(opts.sumEncoding.value0.contentsFieldName))(readArguments)))(function (v1) {
+                            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(v1);
+                        });
+                    });
+                };
+            });
+        };
+    };
+};
+module.exports = {
+    countArgs: countArgs,
+    decodeArgs: decodeArgs,
+    decodeOpts: decodeOpts,
+    decodeRecord_: decodeRecord_,
+    decode_: decode_,
+    encodeArgs: encodeArgs,
+    encodeOpts: encodeOpts,
+    encodeRecord_: encodeRecord_,
+    encode_: encode_,
+    GenericDecode: GenericDecode,
+    GenericEncode: GenericEncode,
+    GenericDecodeArgs: GenericDecodeArgs,
+    GenericEncodeArgs: GenericEncodeArgs,
+    GenericCountArgs: GenericCountArgs,
+    Decode_: Decode_,
+    Encode_: Encode_,
+    DecodeRecord: DecodeRecord,
+    EncodeRecord: EncodeRecord,
+    genericDecodeNoConstructors: genericDecodeNoConstructors,
+    genericEncodeNoConstructors: genericEncodeNoConstructors,
+    genericDecodeConstructor: genericDecodeConstructor,
+    genericEncodeConstructor: genericEncodeConstructor,
+    genericDecodeSum: genericDecodeSum,
+    genericEncodeSum: genericEncodeSum,
+    genericDecodeArgsNoArguments: genericDecodeArgsNoArguments,
+    genericEncodeArgsNoArguments: genericEncodeArgsNoArguments,
+    genericDecodeArgsArgument: genericDecodeArgsArgument,
+    genericEncodeArgsArgument: genericEncodeArgsArgument,
+    genericDecodeArgsProduct: genericDecodeArgsProduct,
+    genericEncodeArgsProduct: genericEncodeArgsProduct,
+    genericCountArgsNoArguments: genericCountArgsNoArguments,
+    genericCountArgsArgument: genericCountArgsArgument,
+    genericCountArgsProduct: genericCountArgsProduct,
+    decode_Record: decode_Record,
+    decode_Other: decode_Other,
+    encode_Record: encode_Record,
+    encode_Other: encode_Other,
+    decodeRecordNil: decodeRecordNil,
+    encodeRecordNil: encodeRecordNil,
+    decodeRecordCons: decodeRecordCons,
+    encodeRecordCons: encodeRecordCons
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Generic.Types/index.js":
+/*!**********************************************************!*\
+  !*** ./purescript/output/Foreign.Generic.Types/index.js ***!
+  \**********************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var TaggedObject = (function () {
+    function TaggedObject(value0) {
+        this.value0 = value0;
+    };
+    TaggedObject.create = function (value0) {
+        return new TaggedObject(value0);
+    };
+    return TaggedObject;
+})();
+module.exports = {
+    TaggedObject: TaggedObject
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Generic/index.js":
+/*!****************************************************!*\
+  !*** ./purescript/output/Foreign.Generic/index.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_Generic_Rep = __webpack_require__(/*! ../Data.Generic.Rep/index.js */ "./purescript/output/Data.Generic.Rep/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Foreign_Class = __webpack_require__(/*! ../Foreign.Class/index.js */ "./purescript/output/Foreign.Class/index.js");
+var Foreign_Generic_Class = __webpack_require__(/*! ../Foreign.Generic.Class/index.js */ "./purescript/output/Foreign.Generic.Class/index.js");
+var Foreign_Generic_Types = __webpack_require__(/*! ../Foreign.Generic.Types/index.js */ "./purescript/output/Foreign.Generic.Types/index.js");
+var Foreign_JSON = __webpack_require__(/*! ../Foreign.JSON/index.js */ "./purescript/output/Foreign.JSON/index.js");
+var Global_Unsafe = __webpack_require__(/*! ../Global.Unsafe/index.js */ "./purescript/output/Global.Unsafe/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var genericEncode = function (dictGeneric) {
+    return function (dictGenericEncode) {
+        return function (opts) {
+            return function ($10) {
+                return Foreign_Generic_Class.encodeOpts(dictGenericEncode)(opts)(Data_Generic_Rep.from(dictGeneric)($10));
+            };
+        };
+    };
+};
+var genericEncodeJSON = function (dictGeneric) {
+    return function (dictGenericEncode) {
+        return function (opts) {
+            return function ($11) {
+                return Global_Unsafe.unsafeStringify(genericEncode(dictGeneric)(dictGenericEncode)(opts)($11));
+            };
+        };
+    };
+};
+var genericDecode = function (dictGeneric) {
+    return function (dictGenericDecode) {
+        return function (opts) {
+            return function ($12) {
+                return Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Generic_Rep.to(dictGeneric))(Foreign_Generic_Class.decodeOpts(dictGenericDecode)(opts)($12));
+            };
+        };
+    };
+};
+var genericDecodeJSON = function (dictGeneric) {
+    return function (dictGenericDecode) {
+        return function (opts) {
+            return Control_Bind.composeKleisliFlipped(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(genericDecode(dictGeneric)(dictGenericDecode)(opts))(Foreign_JSON.parseJSON);
+        };
+    };
+};
+var encodeJSON = function (dictEncode) {
+    return function ($13) {
+        return Global_Unsafe.unsafeStringify(Foreign_Class.encode(dictEncode)($13));
+    };
+};
+var defaultOptions = {
+    sumEncoding: new Foreign_Generic_Types.TaggedObject({
+        tagFieldName: "tag",
+        contentsFieldName: "contents",
+        constructorTagTransform: Control_Category.identity(Control_Category.categoryFn)
+    }),
+    unwrapSingleConstructors: false,
+    unwrapSingleArguments: true,
+    fieldTransform: Control_Category.identity(Control_Category.categoryFn)
+};
+var decodeJSON = function (dictDecode) {
+    return Foreign_JSON.decodeJSONWith(Foreign_Class.decode(dictDecode));
+};
+module.exports = {
+    defaultOptions: defaultOptions,
+    genericDecode: genericDecode,
+    genericEncode: genericEncode,
+    decodeJSON: decodeJSON,
+    encodeJSON: encodeJSON,
+    genericDecodeJSON: genericDecodeJSON,
+    genericEncodeJSON: genericEncodeJSON
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Index/foreign.js":
+/*!****************************************************!*\
+  !*** ./purescript/output/Foreign.Index/foreign.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.unsafeReadPropImpl = function (f, s, key, value) {
+  return value == null ? f : s(value[key]);
+};
+
+exports.unsafeHasOwnProperty = function (prop, value) {
+  return Object.prototype.hasOwnProperty.call(value, prop);
+};
+
+exports.unsafeHasProperty = function (prop, value) {
+  return prop in value;
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Index/index.js":
+/*!**************************************************!*\
+  !*** ./purescript/output/Foreign.Index/index.js ***!
+  \**************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Foreign.Index/foreign.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Function_Uncurried = __webpack_require__(/*! ../Data.Function.Uncurried/index.js */ "./purescript/output/Data.Function.Uncurried/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_List_NonEmpty = __webpack_require__(/*! ../Data.List.NonEmpty/index.js */ "./purescript/output/Data.List.NonEmpty/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Index = function (errorAt, hasOwnProperty, hasProperty, index) {
+    this.errorAt = errorAt;
+    this.hasOwnProperty = hasOwnProperty;
+    this.hasProperty = hasProperty;
+    this.index = index;
+};
+var Indexable = function (ix) {
+    this.ix = ix;
+};
+var unsafeReadProp = function (k) {
+    return function (value) {
+        return $foreign.unsafeReadPropImpl(Foreign.fail(new Foreign.TypeMismatch("object", Foreign.typeOf(value))), Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity)), k, value);
+    };
+};
+var readProp = unsafeReadProp;
+var readIndex = unsafeReadProp;
+var ix = function (dict) {
+    return dict.ix;
+};
+var index = function (dict) {
+    return dict.index;
+};
+var indexableExceptT = new Indexable(function (dictIndex) {
+    return function (f) {
+        return function (i) {
+            return Control_Bind.bindFlipped(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(Data_Function.flip(index(dictIndex))(i))(f);
+        };
+    };
+});
+var indexableForeign = new Indexable(function (dictIndex) {
+    return index(dictIndex);
+});
+var hasPropertyImpl = function (v) {
+    return function (value) {
+        if (Foreign.isNull(value)) {
+            return false;
+        };
+        if (Foreign.isUndefined(value)) {
+            return false;
+        };
+        if (Foreign.typeOf(value) === "object" || Foreign.typeOf(value) === "function") {
+            return $foreign.unsafeHasProperty(v, value);
+        };
+        return false;
+    };
+};
+var hasProperty = function (dict) {
+    return dict.hasProperty;
+};
+var hasOwnPropertyImpl = function (v) {
+    return function (value) {
+        if (Foreign.isNull(value)) {
+            return false;
+        };
+        if (Foreign.isUndefined(value)) {
+            return false;
+        };
+        if (Foreign.typeOf(value) === "object" || Foreign.typeOf(value) === "function") {
+            return $foreign.unsafeHasOwnProperty(v, value);
+        };
+        return false;
+    };
+};
+var indexInt = new Index(Foreign.ErrorAtIndex.create, hasOwnPropertyImpl, hasPropertyImpl, Data_Function.flip(readIndex));
+var indexString = new Index(Foreign.ErrorAtProperty.create, hasOwnPropertyImpl, hasPropertyImpl, Data_Function.flip(readProp));
+var hasOwnProperty = function (dict) {
+    return dict.hasOwnProperty;
+};
+var errorAt = function (dict) {
+    return dict.errorAt;
+};
+module.exports = {
+    Index: Index,
+    Indexable: Indexable,
+    readProp: readProp,
+    readIndex: readIndex,
+    ix: ix,
+    index: index,
+    hasProperty: hasProperty,
+    hasOwnProperty: hasOwnProperty,
+    errorAt: errorAt,
+    indexString: indexString,
+    indexInt: indexInt,
+    indexableForeign: indexableForeign,
+    indexableExceptT: indexableExceptT
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.Internal/index.js":
+/*!*****************************************************!*\
+  !*** ./purescript/output/Foreign.Internal/index.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var isObject = function (v) {
+    return Foreign.tagOf(v) === "Object";
+};
+var readObject = function (value) {
+    if (isObject(value)) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Foreign.unsafeFromForeign(value));
+    };
+    if (Data_Boolean.otherwise) {
+        return Foreign.fail(new Foreign.TypeMismatch("Object", Foreign.tagOf(value)));
+    };
+    throw new Error("Failed pattern match at Foreign.Internal (line 13, column 1 - line 13, column 44): " + [ value.constructor.name ]);
+};
+module.exports = {
+    isObject: isObject,
+    readObject: readObject
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.JSON/foreign.js":
+/*!***************************************************!*\
+  !*** ./purescript/output/Foreign.JSON/foreign.js ***!
+  \***************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.parseJSONImpl = function (str) {
+  return JSON.parse(str);
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.JSON/index.js":
+/*!*************************************************!*\
+  !*** ./purescript/output/Foreign.JSON/index.js ***!
+  \*************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Foreign.JSON/foreign.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Monad_Except = __webpack_require__(/*! ../Control.Monad.Except/index.js */ "./purescript/output/Control.Monad.Except/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Bifunctor = __webpack_require__(/*! ../Data.Bifunctor/index.js */ "./purescript/output/Data.Bifunctor/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
+var Effect_Exception = __webpack_require__(/*! ../Effect.Exception/index.js */ "./purescript/output/Effect.Exception/index.js");
+var Effect_Uncurried = __webpack_require__(/*! ../Effect.Uncurried/index.js */ "./purescript/output/Effect.Uncurried/index.js");
+var Effect_Unsafe = __webpack_require__(/*! ../Effect.Unsafe/index.js */ "./purescript/output/Effect.Unsafe/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var parseJSON = function ($0) {
+    return Control_Monad_Except_Trans.ExceptT(Data_Identity.Identity(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(function ($1) {
+        return Control_Applicative.pure(Data_List_Types.applicativeNonEmptyList)(Foreign.ForeignError.create(Effect_Exception.message($1)));
+    })(Effect_Unsafe.unsafePerformEffect(Effect_Exception["try"](function () {
+        return $foreign.parseJSONImpl($0);
+    })))));
+};
+var decodeJSONWith = function (f) {
+    return Control_Bind.composeKleisliFlipped(Control_Monad_Except_Trans.bindExceptT(Data_Identity.monadIdentity))(f)(parseJSON);
+};
+module.exports = {
+    parseJSON: parseJSON,
+    decodeJSONWith: decodeJSONWith
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.NullOrUndefined/foreign.js":
+/*!**************************************************************!*\
+  !*** ./purescript/output/Foreign.NullOrUndefined/foreign.js ***!
+  \**************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports) {
+
+exports['null'] = null;
+
+exports['undefined'] = undefined;
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign.NullOrUndefined/index.js":
+/*!************************************************************!*\
+  !*** ./purescript/output/Foreign.NullOrUndefined/index.js ***!
+  \************************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Foreign.NullOrUndefined/foreign.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var readNullOrUndefined = function (v) {
+    return function (value) {
+        if (Foreign.isNull(value) || Foreign.isUndefined(value)) {
+            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Maybe.Nothing.value);
+        };
+        return Data_Functor.map(Control_Monad_Except_Trans.functorExceptT(Data_Identity.functorIdentity))(Data_Maybe.Just.create)(v(value));
+    };
+};
+module.exports = {
+    readNullOrUndefined: readNullOrUndefined,
+    "undefined": $foreign["undefined"],
+    "null": $foreign["null"]
 };
 
 
@@ -45485,8 +47698,8 @@ var fromFoldable = function (dictFoldable) {
     return function (l) {
         return $foreign.runST(function __do() {
             var v = Foreign_Object_ST["new"]();
-            Data_Foldable.for_(Control_Monad_ST_Internal.applicativeST)(Data_Foldable.foldableArray)(Data_Array.fromFoldable(dictFoldable)(l))(function (v1) {
-                return Foreign_Object_ST.poke(v1.value0)(v1.value1)(v);
+            Control_Monad_ST_Internal.foreach(Data_Array.fromFoldable(dictFoldable)(l))(function (v1) {
+                return Data_Functor["void"](Control_Monad_ST_Internal.functorST)(Foreign_Object_ST.poke(v1.value0)(v1.value1)(v));
             })();
             return v;
         });
@@ -45684,7 +47897,7 @@ var alter = function (f) {
             if (v instanceof Data_Maybe.Just) {
                 return insert(k)(v.value0)(m);
             };
-            throw new Error("Failed pattern match at Foreign.Object (line 207, column 15 - line 209, column 25): " + [ v.constructor.name ]);
+            throw new Error("Failed pattern match at Foreign.Object (line 208, column 15 - line 210, column 25): " + [ v.constructor.name ]);
         };
     };
 };
@@ -45742,6 +47955,393 @@ module.exports = {
     all: $foreign.all,
     runST: $foreign.runST,
     toArrayWithKey: $foreign.toArrayWithKey
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign/foreign.js":
+/*!**********************************************!*\
+  !*** ./purescript/output/Foreign/foreign.js ***!
+  \**********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.unsafeToForeign = function (value) {
+  return value;
+};
+
+exports.unsafeFromForeign = function (value) {
+  return value;
+};
+
+exports.typeOf = function (value) {
+  return typeof value;
+};
+
+exports.tagOf = function (value) {
+  return Object.prototype.toString.call(value).slice(8, -1);
+};
+
+exports.isNull = function (value) {
+  return value === null;
+};
+
+exports.isUndefined = function (value) {
+  return value === undefined;
+};
+
+exports.isArray = Array.isArray || function (value) {
+  return Object.prototype.toString.call(value) === "[object Array]";
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Foreign/index.js":
+/*!********************************************!*\
+  !*** ./purescript/output/Foreign/index.js ***!
+  \********************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Foreign/foreign.js");
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Monad_Error_Class = __webpack_require__(/*! ../Control.Monad.Error.Class/index.js */ "./purescript/output/Control.Monad.Error.Class/index.js");
+var Control_Monad_Except = __webpack_require__(/*! ../Control.Monad.Except/index.js */ "./purescript/output/Control.Monad.Except/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Boolean = __webpack_require__(/*! ../Data.Boolean/index.js */ "./purescript/output/Data.Boolean/index.js");
+var Data_Either = __webpack_require__(/*! ../Data.Either/index.js */ "./purescript/output/Data.Either/index.js");
+var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
+var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
+var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
+var Data_Int = __webpack_require__(/*! ../Data.Int/index.js */ "./purescript/output/Data.Int/index.js");
+var Data_List_NonEmpty = __webpack_require__(/*! ../Data.List.NonEmpty/index.js */ "./purescript/output/Data.List.NonEmpty/index.js");
+var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
+var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
+var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
+var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/output/Data.Show/index.js");
+var Data_String_CodeUnits = __webpack_require__(/*! ../Data.String.CodeUnits/index.js */ "./purescript/output/Data.String.CodeUnits/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var ForeignError = (function () {
+    function ForeignError(value0) {
+        this.value0 = value0;
+    };
+    ForeignError.create = function (value0) {
+        return new ForeignError(value0);
+    };
+    return ForeignError;
+})();
+var TypeMismatch = (function () {
+    function TypeMismatch(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    TypeMismatch.create = function (value0) {
+        return function (value1) {
+            return new TypeMismatch(value0, value1);
+        };
+    };
+    return TypeMismatch;
+})();
+var ErrorAtIndex = (function () {
+    function ErrorAtIndex(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    ErrorAtIndex.create = function (value0) {
+        return function (value1) {
+            return new ErrorAtIndex(value0, value1);
+        };
+    };
+    return ErrorAtIndex;
+})();
+var ErrorAtProperty = (function () {
+    function ErrorAtProperty(value0, value1) {
+        this.value0 = value0;
+        this.value1 = value1;
+    };
+    ErrorAtProperty.create = function (value0) {
+        return function (value1) {
+            return new ErrorAtProperty(value0, value1);
+        };
+    };
+    return ErrorAtProperty;
+})();
+var showForeignError = new Data_Show.Show(function (v) {
+    if (v instanceof ForeignError) {
+        return "(ForeignError " + (Data_Show.show(Data_Show.showString)(v.value0) + ")");
+    };
+    if (v instanceof ErrorAtIndex) {
+        return "(ErrorAtIndex " + (Data_Show.show(Data_Show.showInt)(v.value0) + (" " + (Data_Show.show(showForeignError)(v.value1) + ")")));
+    };
+    if (v instanceof ErrorAtProperty) {
+        return "(ErrorAtProperty " + (Data_Show.show(Data_Show.showString)(v.value0) + (" " + (Data_Show.show(showForeignError)(v.value1) + ")")));
+    };
+    if (v instanceof TypeMismatch) {
+        return "(TypeMismatch " + (Data_Show.show(Data_Show.showString)(v.value0) + (" " + (Data_Show.show(Data_Show.showString)(v.value1) + ")")));
+    };
+    throw new Error("Failed pattern match at Foreign (line 63, column 1 - line 63, column 47): " + [ v.constructor.name ]);
+});
+var renderForeignError = function (v) {
+    if (v instanceof ForeignError) {
+        return v.value0;
+    };
+    if (v instanceof ErrorAtIndex) {
+        return "Error at array index " + (Data_Show.show(Data_Show.showInt)(v.value0) + (": " + renderForeignError(v.value1)));
+    };
+    if (v instanceof ErrorAtProperty) {
+        return "Error at property " + (Data_Show.show(Data_Show.showString)(v.value0) + (": " + renderForeignError(v.value1)));
+    };
+    if (v instanceof TypeMismatch) {
+        return "Type mismatch: expected " + (v.value0 + (", found " + v.value1));
+    };
+    throw new Error("Failed pattern match at Foreign (line 72, column 1 - line 72, column 45): " + [ v.constructor.name ]);
+};
+var readUndefined = function (value) {
+    if ($foreign.isUndefined(value)) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Maybe.Nothing.value);
+    };
+    if (Data_Boolean.otherwise) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(new Data_Maybe.Just(value));
+    };
+    throw new Error("Failed pattern match at Foreign (line 157, column 1 - line 157, column 46): " + [ value.constructor.name ]);
+};
+var readNullOrUndefined = function (value) {
+    if ($foreign.isNull(value) || $foreign.isUndefined(value)) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Maybe.Nothing.value);
+    };
+    if (Data_Boolean.otherwise) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(new Data_Maybe.Just(value));
+    };
+    throw new Error("Failed pattern match at Foreign (line 162, column 1 - line 162, column 52): " + [ value.constructor.name ]);
+};
+var readNull = function (value) {
+    if ($foreign.isNull(value)) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(Data_Maybe.Nothing.value);
+    };
+    if (Data_Boolean.otherwise) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))(new Data_Maybe.Just(value));
+    };
+    throw new Error("Failed pattern match at Foreign (line 152, column 1 - line 152, column 41): " + [ value.constructor.name ]);
+};
+var fail = function ($107) {
+    return Control_Monad_Error_Class.throwError(Control_Monad_Except_Trans.monadThrowExceptT(Data_Identity.monadIdentity))(Data_List_NonEmpty.singleton($107));
+};
+var readArray = function (value) {
+    if ($foreign.isArray(value)) {
+        return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))($foreign.unsafeFromForeign(value));
+    };
+    if (Data_Boolean.otherwise) {
+        return fail(new TypeMismatch("array", $foreign.tagOf(value)));
+    };
+    throw new Error("Failed pattern match at Foreign (line 147, column 1 - line 147, column 42): " + [ value.constructor.name ]);
+};
+var unsafeReadTagged = function (tag) {
+    return function (value) {
+        if ($foreign.tagOf(value) === tag) {
+            return Control_Applicative.pure(Control_Monad_Except_Trans.applicativeExceptT(Data_Identity.monadIdentity))($foreign.unsafeFromForeign(value));
+        };
+        if (Data_Boolean.otherwise) {
+            return fail(new TypeMismatch(tag, $foreign.tagOf(value)));
+        };
+        throw new Error("Failed pattern match at Foreign (line 106, column 1 - line 106, column 55): " + [ tag.constructor.name, value.constructor.name ]);
+    };
+};
+var readBoolean = unsafeReadTagged("Boolean");
+var readNumber = unsafeReadTagged("Number");
+var readInt = function (value) {
+    var error = Data_Either.Left.create(Data_List_NonEmpty.singleton(new TypeMismatch("Int", $foreign.tagOf(value))));
+    var fromNumber = function ($108) {
+        return Data_Maybe.maybe(error)(Control_Applicative.pure(Data_Either.applicativeEither))(Data_Int.fromNumber($108));
+    };
+    return Control_Monad_Except.mapExcept(Data_Either.either(Data_Function["const"](error))(fromNumber))(readNumber(value));
+};
+var readString = unsafeReadTagged("String");
+var readChar = function (value) {
+    var error = Data_Either.Left.create(Data_List_NonEmpty.singleton(new TypeMismatch("Char", $foreign.tagOf(value))));
+    var fromString = function ($109) {
+        return Data_Maybe.maybe(error)(Control_Applicative.pure(Data_Either.applicativeEither))(Data_String_CodeUnits.toChar($109));
+    };
+    return Control_Monad_Except.mapExcept(Data_Either.either(Data_Function["const"](error))(fromString))(readString(value));
+};
+var eqForeignError = new Data_Eq.Eq(function (x) {
+    return function (y) {
+        if (x instanceof ForeignError && y instanceof ForeignError) {
+            return x.value0 === y.value0;
+        };
+        if (x instanceof TypeMismatch && y instanceof TypeMismatch) {
+            return x.value0 === y.value0 && x.value1 === y.value1;
+        };
+        if (x instanceof ErrorAtIndex && y instanceof ErrorAtIndex) {
+            return x.value0 === y.value0 && Data_Eq.eq(eqForeignError)(x.value1)(y.value1);
+        };
+        if (x instanceof ErrorAtProperty && y instanceof ErrorAtProperty) {
+            return x.value0 === y.value0 && Data_Eq.eq(eqForeignError)(x.value1)(y.value1);
+        };
+        return false;
+    };
+});
+var ordForeignError = new Data_Ord.Ord(function () {
+    return eqForeignError;
+}, function (x) {
+    return function (y) {
+        if (x instanceof ForeignError && y instanceof ForeignError) {
+            return Data_Ord.compare(Data_Ord.ordString)(x.value0)(y.value0);
+        };
+        if (x instanceof ForeignError) {
+            return Data_Ordering.LT.value;
+        };
+        if (y instanceof ForeignError) {
+            return Data_Ordering.GT.value;
+        };
+        if (x instanceof TypeMismatch && y instanceof TypeMismatch) {
+            var v = Data_Ord.compare(Data_Ord.ordString)(x.value0)(y.value0);
+            if (v instanceof Data_Ordering.LT) {
+                return Data_Ordering.LT.value;
+            };
+            if (v instanceof Data_Ordering.GT) {
+                return Data_Ordering.GT.value;
+            };
+            return Data_Ord.compare(Data_Ord.ordString)(x.value1)(y.value1);
+        };
+        if (x instanceof TypeMismatch) {
+            return Data_Ordering.LT.value;
+        };
+        if (y instanceof TypeMismatch) {
+            return Data_Ordering.GT.value;
+        };
+        if (x instanceof ErrorAtIndex && y instanceof ErrorAtIndex) {
+            var v = Data_Ord.compare(Data_Ord.ordInt)(x.value0)(y.value0);
+            if (v instanceof Data_Ordering.LT) {
+                return Data_Ordering.LT.value;
+            };
+            if (v instanceof Data_Ordering.GT) {
+                return Data_Ordering.GT.value;
+            };
+            return Data_Ord.compare(ordForeignError)(x.value1)(y.value1);
+        };
+        if (x instanceof ErrorAtIndex) {
+            return Data_Ordering.LT.value;
+        };
+        if (y instanceof ErrorAtIndex) {
+            return Data_Ordering.GT.value;
+        };
+        if (x instanceof ErrorAtProperty && y instanceof ErrorAtProperty) {
+            var v = Data_Ord.compare(Data_Ord.ordString)(x.value0)(y.value0);
+            if (v instanceof Data_Ordering.LT) {
+                return Data_Ordering.LT.value;
+            };
+            if (v instanceof Data_Ordering.GT) {
+                return Data_Ordering.GT.value;
+            };
+            return Data_Ord.compare(ordForeignError)(x.value1)(y.value1);
+        };
+        throw new Error("Failed pattern match at Foreign (line 61, column 8 - line 61, column 52): " + [ x.constructor.name, y.constructor.name ]);
+    };
+});
+module.exports = {
+    ForeignError: ForeignError,
+    TypeMismatch: TypeMismatch,
+    ErrorAtIndex: ErrorAtIndex,
+    ErrorAtProperty: ErrorAtProperty,
+    renderForeignError: renderForeignError,
+    unsafeReadTagged: unsafeReadTagged,
+    readString: readString,
+    readChar: readChar,
+    readBoolean: readBoolean,
+    readNumber: readNumber,
+    readInt: readInt,
+    readArray: readArray,
+    readNull: readNull,
+    readUndefined: readUndefined,
+    readNullOrUndefined: readNullOrUndefined,
+    fail: fail,
+    eqForeignError: eqForeignError,
+    ordForeignError: ordForeignError,
+    showForeignError: showForeignError,
+    unsafeToForeign: $foreign.unsafeToForeign,
+    unsafeFromForeign: $foreign.unsafeFromForeign,
+    typeOf: $foreign.typeOf,
+    tagOf: $foreign.tagOf,
+    isNull: $foreign.isNull,
+    isUndefined: $foreign.isUndefined,
+    isArray: $foreign.isArray
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Global.Unsafe/foreign.js":
+/*!****************************************************!*\
+  !*** ./purescript/output/Global.Unsafe/foreign.js ***!
+  \****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/* globals exports, JSON */
+
+
+exports.unsafeStringify = function (x) {
+  return JSON.stringify(x);
+};
+
+exports.unsafeToFixed = function (digits) {
+  return function (n) {
+    return n.toFixed(digits);
+  };
+};
+
+exports.unsafeToExponential = function (digits) {
+  return function (n) {
+    return n.toExponential(digits);
+  };
+};
+
+exports.unsafeToPrecision  = function (digits) {
+  return function (n) {
+    return n.toPrecision(digits);
+  };
+};
+
+exports.unsafeDecodeURI = decodeURI;
+exports.unsafeEncodeURI = encodeURI;
+exports.unsafeDecodeURIComponent = decodeURIComponent;
+exports.unsafeEncodeURIComponent = encodeURIComponent;
+
+
+/***/ }),
+
+/***/ "./purescript/output/Global.Unsafe/index.js":
+/*!**************************************************!*\
+  !*** ./purescript/output/Global.Unsafe/index.js ***!
+  \**************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Global.Unsafe/foreign.js");
+module.exports = {
+    unsafeStringify: $foreign.unsafeStringify,
+    unsafeToFixed: $foreign.unsafeToFixed,
+    unsafeToExponential: $foreign.unsafeToExponential,
+    unsafeToPrecision: $foreign.unsafeToPrecision,
+    unsafeDecodeURI: $foreign.unsafeDecodeURI,
+    unsafeEncodeURI: $foreign.unsafeEncodeURI,
+    unsafeDecodeURIComponent: $foreign.unsafeDecodeURIComponent,
+    unsafeEncodeURIComponent: $foreign.unsafeEncodeURIComponent
 };
 
 
@@ -45810,13 +48410,18 @@ module.exports = {
 "use strict";
 // Generated by purs version 0.12.2
 
+var Control_Applicative = __webpack_require__(/*! ../Control.Applicative/index.js */ "./purescript/output/Control.Applicative/index.js");
+var Control_Bind = __webpack_require__(/*! ../Control.Bind/index.js */ "./purescript/output/Control.Bind/index.js");
+var Control_Monad_Except_Trans = __webpack_require__(/*! ../Control.Monad.Except.Trans/index.js */ "./purescript/output/Control.Monad.Except.Trans/index.js");
 var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
 var Data_Array = __webpack_require__(/*! ../Data.Array/index.js */ "./purescript/output/Data.Array/index.js");
 var Data_Eq = __webpack_require__(/*! ../Data.Eq/index.js */ "./purescript/output/Data.Eq/index.js");
 var Data_Foldable = __webpack_require__(/*! ../Data.Foldable/index.js */ "./purescript/output/Data.Foldable/index.js");
 var Data_Function = __webpack_require__(/*! ../Data.Function/index.js */ "./purescript/output/Data.Function/index.js");
 var Data_Functor = __webpack_require__(/*! ../Data.Functor/index.js */ "./purescript/output/Data.Functor/index.js");
+var Data_Generic_Rep = __webpack_require__(/*! ../Data.Generic.Rep/index.js */ "./purescript/output/Data.Generic.Rep/index.js");
 var Data_HeytingAlgebra = __webpack_require__(/*! ../Data.HeytingAlgebra/index.js */ "./purescript/output/Data.HeytingAlgebra/index.js");
+var Data_Identity = __webpack_require__(/*! ../Data.Identity/index.js */ "./purescript/output/Data.Identity/index.js");
 var Data_Lens = __webpack_require__(/*! ../Data.Lens/index.js */ "./purescript/output/Data.Lens/index.js");
 var Data_Lens_At = __webpack_require__(/*! ../Data.Lens.At/index.js */ "./purescript/output/Data.Lens.At/index.js");
 var Data_Lens_Getter = __webpack_require__(/*! ../Data.Lens.Getter/index.js */ "./purescript/output/Data.Lens.Getter/index.js");
@@ -45825,44 +48430,28 @@ var Data_Lens_Lens = __webpack_require__(/*! ../Data.Lens.Lens/index.js */ "./pu
 var Data_Lens_Record = __webpack_require__(/*! ../Data.Lens.Record/index.js */ "./purescript/output/Data.Lens.Record/index.js");
 var Data_Lens_Setter = __webpack_require__(/*! ../Data.Lens.Setter/index.js */ "./purescript/output/Data.Lens.Setter/index.js");
 var Data_List = __webpack_require__(/*! ../Data.List/index.js */ "./purescript/output/Data.List/index.js");
+var Data_List_NonEmpty = __webpack_require__(/*! ../Data.List.NonEmpty/index.js */ "./purescript/output/Data.List.NonEmpty/index.js");
 var Data_List_Types = __webpack_require__(/*! ../Data.List.Types/index.js */ "./purescript/output/Data.List.Types/index.js");
 var Data_Maybe = __webpack_require__(/*! ../Data.Maybe/index.js */ "./purescript/output/Data.Maybe/index.js");
+var Data_Monoid = __webpack_require__(/*! ../Data.Monoid/index.js */ "./purescript/output/Data.Monoid/index.js");
 var Data_Ord = __webpack_require__(/*! ../Data.Ord/index.js */ "./purescript/output/Data.Ord/index.js");
 var Data_Ordering = __webpack_require__(/*! ../Data.Ordering/index.js */ "./purescript/output/Data.Ordering/index.js");
 var Data_Profunctor_Strong = __webpack_require__(/*! ../Data.Profunctor.Strong/index.js */ "./purescript/output/Data.Profunctor.Strong/index.js");
-var Data_Ring = __webpack_require__(/*! ../Data.Ring/index.js */ "./purescript/output/Data.Ring/index.js");
 var Data_Semigroup = __webpack_require__(/*! ../Data.Semigroup/index.js */ "./purescript/output/Data.Semigroup/index.js");
-var Data_Semiring = __webpack_require__(/*! ../Data.Semiring/index.js */ "./purescript/output/Data.Semiring/index.js");
 var Data_String = __webpack_require__(/*! ../Data.String/index.js */ "./purescript/output/Data.String/index.js");
+var Data_String_CodeUnits = __webpack_require__(/*! ../Data.String.CodeUnits/index.js */ "./purescript/output/Data.String.CodeUnits/index.js");
 var Data_String_Common = __webpack_require__(/*! ../Data.String.Common/index.js */ "./purescript/output/Data.String.Common/index.js");
 var Data_String_Pattern = __webpack_require__(/*! ../Data.String.Pattern/index.js */ "./purescript/output/Data.String.Pattern/index.js");
 var Data_Symbol = __webpack_require__(/*! ../Data.Symbol/index.js */ "./purescript/output/Data.Symbol/index.js");
+var Data_Tuple = __webpack_require__(/*! ../Data.Tuple/index.js */ "./purescript/output/Data.Tuple/index.js");
 var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
+var Foreign = __webpack_require__(/*! ../Foreign/index.js */ "./purescript/output/Foreign/index.js");
+var Foreign_Class = __webpack_require__(/*! ../Foreign.Class/index.js */ "./purescript/output/Foreign.Class/index.js");
+var Foreign_Generic = __webpack_require__(/*! ../Foreign.Generic/index.js */ "./purescript/output/Foreign.Generic/index.js");
+var Foreign_Generic_Class = __webpack_require__(/*! ../Foreign.Generic.Class/index.js */ "./purescript/output/Foreign.Generic.Class/index.js");
+var Foreign_Generic_Types = __webpack_require__(/*! ../Foreign.Generic.Types/index.js */ "./purescript/output/Foreign.Generic.Types/index.js");
 var Foreign_Object = __webpack_require__(/*! ../Foreign.Object/index.js */ "./purescript/output/Foreign.Object/index.js");
 var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
-var Op = (function () {
-    function Op(value0) {
-        this.value0 = value0;
-    };
-    Op.create = function (value0) {
-        return new Op(value0);
-    };
-    return Op;
-})();
-var Undo = (function () {
-    function Undo() {
-
-    };
-    Undo.value = new Undo();
-    return Undo;
-})();
-var Redo = (function () {
-    function Redo() {
-
-    };
-    Redo.value = new Redo();
-    return Redo;
-})();
 var GraphNode = function (x) {
     return x;
 };
@@ -46041,17 +48630,175 @@ var UnHighlight = (function () {
     };
     return UnHighlight;
 })();
-var singletonNodeIdSet = function (nodeId) {
-    return Foreign_Object.singleton(nodeId)(Data_Unit.unit);
+var version = "0.0";
+var nodeIdSetFromArray = function (nodeIdArr) {
+    return Foreign_Object.fromFoldable(Data_Foldable.foldableArray)(Data_Functor.map(Data_Functor.functorArray)(function (nodeId) {
+        return new Data_Tuple.Tuple(nodeId, Data_Unit.unit);
+    })(nodeIdArr));
 };
 var maybe = Data_Maybe.Just.create;
+var listOpsFromGraph = function (v) {
+    var addNodes = Data_Functor.map(Data_Functor.functorArray)(function (node) {
+        return new AddNode(node);
+    })(Foreign_Object.values(v.nodes));
+    var addHighlight = Data_Functor.map(Data_Functor.functorArray)(function (highlightId) {
+        return new Highlight(highlightId);
+    })(Foreign_Object.keys(v.highlighted));
+    var addFocus = new UpdateFocus(v.focus);
+    var addEdges = Data_Foldable.foldMap(Data_Foldable.foldableArray)(Data_Monoid.monoidArray)(function (v1) {
+        return Data_Functor.map(Data_Functor.functorArray)(function (parentId) {
+            return new AddEdge({
+                source: v1.id,
+                target: parentId
+            });
+        })(Foreign_Object.keys(v1.parents));
+    })(Foreign_Object.values(v.nodes));
+    return Data_List.fromFoldable(Data_Foldable.foldableArray)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(addNodes)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(addEdges)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(addHighlight)([ addFocus ]))));
+};
 var insert = function (nodeId) {
     return Foreign_Object.insert(nodeId)(Data_Unit.unit);
 };
-var graphLength = function (graph) {
-    return Data_List.length(graph);
+var graphLength = Data_List.length;
+var genericGraphNode = new Data_Generic_Rep.Generic(function (x) {
+    return x;
+}, function (x) {
+    return x;
+});
+var genericGraph = new Data_Generic_Rep.Generic(function (x) {
+    return x;
+}, function (x) {
+    return x;
+});
+var genericFocus = new Data_Generic_Rep.Generic(function (x) {
+    if (x instanceof FocusNode) {
+        return new Data_Generic_Rep.Inl(x.value0);
+    };
+    if (x instanceof FocusEdge) {
+        return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0));
+    };
+    if (x instanceof NoFocus) {
+        return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(Data_Generic_Rep.NoArguments.value));
+    };
+    throw new Error("Failed pattern match at Main (line 138, column 8 - line 138, column 48): " + [ x.constructor.name ]);
+}, function (x) {
+    if (x instanceof Data_Generic_Rep.Inl) {
+        return new FocusNode(x.value0);
+    };
+    if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inl) {
+        return new FocusEdge(x.value0.value0);
+    };
+    if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inr) {
+        return NoFocus.value;
+    };
+    throw new Error("Failed pattern match at Main (line 138, column 8 - line 138, column 48): " + [ x.constructor.name ]);
+});
+var genericEncodeOpts = {
+    unwrapSingleConstructors: true,
+    fieldTransform: Foreign_Generic.defaultOptions.fieldTransform,
+    sumEncoding: Foreign_Generic.defaultOptions.sumEncoding,
+    unwrapSingleArguments: Foreign_Generic.defaultOptions.unwrapSingleArguments
 };
 var fromMaybe = Data_Maybe.fromMaybe;
+var encodeGraphNode = new Foreign_Class.Encode(function (node) {
+    return Foreign_Generic.genericEncode(genericGraphNode)(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+        return "GraphNode";
+    }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+        return "y";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.numberEncode)))(new Data_Symbol.IsSymbol(function () {
+        return "x";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.numberEncode)))(new Data_Symbol.IsSymbol(function () {
+        return "text";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+        return "subgraphNodes";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(encodeGraphNode))))(new Data_Symbol.IsSymbol(function () {
+        return "parents";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(Foreign_Class.unitEncode))))(new Data_Symbol.IsSymbol(function () {
+        return "id";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+        return "children";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(Foreign_Class.unitEncode)))))))(genericEncodeOpts)(node);
+});
+var encodeFocus = new Foreign_Class.Encode(Foreign_Generic.genericEncode(genericFocus)(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "FocusNode";
+}))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "FocusEdge";
+}))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "target";
+}))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "source";
+}))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))))(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "NoFocus";
+}))(Foreign_Generic_Class.genericEncodeArgsNoArguments))))(genericEncodeOpts));
+var encodeGraph = new Foreign_Class.Encode(Foreign_Generic.genericEncode(genericGraph)(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "Graph";
+}))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "nodes";
+}))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(encodeGraphNode))))(new Data_Symbol.IsSymbol(function () {
+    return "highlighted";
+}))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(Foreign_Class.unitEncode))))(new Data_Symbol.IsSymbol(function () {
+    return "focus";
+}))(Foreign_Generic_Class.encode_Other(encodeFocus))))))(genericEncodeOpts));
+var emptyNodeIdSet = Foreign_Object.empty;
+var emptyListGraphOp = Data_List_Types.Nil.value;
+var emptyGraph = {
+    nodes: Foreign_Object.empty,
+    focus: NoFocus.value,
+    highlighted: emptyNodeIdSet
+};
+var $$delete = Foreign_Object["delete"];
+var decodeGraphNode = new Foreign_Class.Decode(function (node) {
+    return Foreign_Generic.genericDecode(genericGraphNode)(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+        return "GraphNode";
+    }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+        return "y";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.numberDecode))())(new Data_Symbol.IsSymbol(function () {
+        return "x";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.numberDecode))())(new Data_Symbol.IsSymbol(function () {
+        return "text";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+        return "subgraphNodes";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(decodeGraphNode)))())(new Data_Symbol.IsSymbol(function () {
+        return "parents";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(Foreign_Class.unitDecode)))())(new Data_Symbol.IsSymbol(function () {
+        return "id";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+        return "children";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(Foreign_Class.unitDecode)))())))(Foreign_Generic_Class.genericCountArgsArgument))(genericEncodeOpts)(node);
+});
+var decodeFocus = new Foreign_Class.Decode(Foreign_Generic.genericDecode(genericFocus)(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "FocusNode";
+}))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode)))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "FocusEdge";
+}))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "target";
+}))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "source";
+}))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "NoFocus";
+}))(Foreign_Generic_Class.genericDecodeArgsNoArguments)(Foreign_Generic_Class.genericCountArgsNoArguments))))(genericEncodeOpts));
+var decodeGraph = new Foreign_Class.Decode(Foreign_Generic.genericDecode(genericGraph)(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "Graph";
+}))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "nodes";
+}))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(decodeGraphNode)))())(new Data_Symbol.IsSymbol(function () {
+    return "highlighted";
+}))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(Foreign_Class.unitDecode)))())(new Data_Symbol.IsSymbol(function () {
+    return "focus";
+}))(Foreign_Generic_Class.decode_Other(decodeFocus))())))(Foreign_Generic_Class.genericCountArgsArgument))(genericEncodeOpts));
+var graphFromJSON = function (graphJSON) {
+    return Foreign_Generic.genericDecodeJSON(genericGraph)(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+        return "Graph";
+    }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+        return "nodes";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(decodeGraphNode)))())(new Data_Symbol.IsSymbol(function () {
+        return "highlighted";
+    }))(Foreign_Generic_Class.decode_Other(Foreign_Class.objectDecode(Foreign_Class.unitDecode)))())(new Data_Symbol.IsSymbol(function () {
+        return "focus";
+    }))(Foreign_Generic_Class.decode_Other(decodeFocus))())))(Foreign_Generic_Class.genericCountArgsArgument))(genericEncodeOpts)(graphJSON);
+};
+var computeEdgeId = function (edge) {
+    return edge.source + ("." + edge.target);
+};
 var fromFocus = function (v) {
     if (v instanceof NoFocus) {
         return "";
@@ -46060,36 +48807,16 @@ var fromFocus = function (v) {
         return v.value0;
     };
     if (v instanceof FocusEdge) {
-        return v.value0;
+        return computeEdgeId(v.value0);
     };
-    throw new Error("Failed pattern match at Main (line 475, column 1 - line 475, column 29): " + [ v.constructor.name ]);
-};
-var emptyUndoableGraph = Data_List_Types.Nil.value;
-var emptyNodeIdSet = Foreign_Object.empty;
-var oppy = AddNode.create({
-    text: "goofus",
-    id: "goofus",
-    x: 455.0,
-    y: 100.0,
-    children: singletonNodeIdSet("thingo"),
-    parents: emptyNodeIdSet,
-    subgraphNodes: Foreign_Object.empty
-});
-var emptyGraph = {
-    nodes: Foreign_Object.empty,
-    focus: NoFocus.value,
-    highlighted: emptyNodeIdSet
-};
-var $$delete = Foreign_Object["delete"];
-var computeEdgeId = function (edge) {
-    return edge.source + ("." + edge.target);
+    throw new Error("Failed pattern match at Main (line 519, column 1 - line 519, column 29): " + [ v.constructor.name ]);
 };
 var addOp = function (op) {
     return function (ops) {
-        if (op instanceof Op && op.value0 instanceof MoveNode) {
-            if (ops instanceof Data_List_Types.Cons && (ops.value0 instanceof Op && ops.value0.value0 instanceof MoveNode)) {
-                var $42 = op.value0.value0 === ops.value0.value0.value0;
-                if ($42) {
+        if (op instanceof MoveNode) {
+            if (ops instanceof Data_List_Types.Cons && ops.value0 instanceof MoveNode) {
+                var $72 = op.value0 === ops.value0.value0;
+                if ($72) {
                     return new Data_List_Types.Cons(op, ops.value1);
                 };
                 return new Data_List_Types.Cons(op, ops);
@@ -46099,16 +48826,22 @@ var addOp = function (op) {
         return new Data_List_Types.Cons(op, ops);
     };
 };
-var doOp = function (op) {
+var deleteNode = function (v) {
     return function (ops) {
-        return addOp(new Op(op))(ops);
+        var removeParentEdges = Data_Functor.map(Data_Functor.functorArray)(function (parentId) {
+            return new RemoveEdge({
+                source: parentId,
+                target: v.id
+            });
+        })(Foreign_Object.keys(v.parents));
+        var removeChildEdges = Data_Functor.map(Data_Functor.functorArray)(function (childId) {
+            return new RemoveEdge({
+                source: v.id,
+                target: childId
+            });
+        })(Foreign_Object.keys(v.children));
+        return addOp(new RemoveNode(v))(Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(addOp))(ops)(Data_List.fromFoldable(Data_Foldable.foldableArray)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(removeParentEdges)(removeChildEdges))));
     };
-};
-var redo = function (ops) {
-    return addOp(Redo.value)(ops);
-};
-var undo = function (ops) {
-    return addOp(Undo.value)(ops);
 };
 var _y = function (dictStrong) {
     return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
@@ -46168,50 +48901,50 @@ var _GraphNode = function (dictStrong) {
     })(dictStrong);
 };
 var addChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($121) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($121));
+    return Data_Lens_Setter.over(function ($144) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($144));
     })(insert(nodeId));
 };
 var addParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($122) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($122));
+    return Data_Lens_Setter.over(function ($145) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($145));
     })(insert(nodeId));
 };
 var moveNode = function (pos) {
-    return function ($123) {
-        return Data_Lens_Setter.set(function ($124) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($124));
-        })(pos.x)(Data_Lens_Setter.set(function ($125) {
-            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($125));
-        })(pos.y)($123));
+    return function ($146) {
+        return Data_Lens_Setter.set(function ($147) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($147));
+        })(pos.x)(Data_Lens_Setter.set(function ($148) {
+            return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($148));
+        })(pos.y)($146));
     };
 };
 var removeChild = function (nodeId) {
-    return Data_Lens_Setter.over(function ($126) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($126));
+    return Data_Lens_Setter.over(function ($149) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($149));
     })($$delete(nodeId));
 };
 var removeParent = function (nodeId) {
-    return Data_Lens_Setter.over(function ($127) {
-        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($127));
+    return Data_Lens_Setter.over(function ($150) {
+        return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($150));
     })($$delete(nodeId));
 };
 var terminalestNode = function (nodes) {
-    var nParents = function ($128) {
-        return Foreign_Object.size(Data_Lens_Getter.view(function ($129) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($129));
-        })($128));
+    var nParents = function ($151) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($152) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($152));
+        })($151));
     };
-    var nChildren = function ($130) {
-        return Foreign_Object.size(Data_Lens_Getter.view(function ($131) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($131));
-        })($130));
+    var nChildren = function ($153) {
+        return Foreign_Object.size(Data_Lens_Getter.view(function ($154) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($154));
+        })($153));
     };
     var isTerminal = function (node) {
         return nChildren(node) === 0;
     };
-    var getY = Data_Lens_Getter.view(function ($132) {
-        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($132));
+    var getY = Data_Lens_Getter.view(function ($155) {
+        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($155));
     });
     var lower = function (a) {
         return function (b) {
@@ -46229,11 +48962,11 @@ var terminalestNode = function (nodes) {
     };
     return Data_Foldable.maximumBy(Data_Foldable.foldableArray)(mostParentsLowest)(v);
 };
-var updateSubgraphNodes = Data_Lens_Setter.set(function ($133) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($133));
+var updateSubgraphNodes = Data_Lens_Setter.set(function ($156) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($156));
 });
-var updateText = Data_Lens_Setter.set(function ($134) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($134));
+var updateText = Data_Lens_Setter.set(function ($157) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($157));
 });
 var _Graph = function (dictStrong) {
     return Data_Lens_Lens.lens(function (v) {
@@ -46244,58 +48977,58 @@ var _Graph = function (dictStrong) {
 };
 var applyGraphOp = function (v) {
     if (v instanceof AddNode) {
-        return Data_Lens_Setter.setJust(function ($135) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($135)));
+        return Data_Lens_Setter.setJust(function ($158) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($158)));
         })(v.value0);
     };
     if (v instanceof RemoveNode) {
-        return Data_Lens_Setter.set(function ($136) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($136)));
+        return Data_Lens_Setter.set(function ($159) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($159)));
         })(Data_Maybe.Nothing.value);
     };
     if (v instanceof MoveNode) {
-        return Data_Lens_Setter.over(function ($137) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($137)));
+        return Data_Lens_Setter.over(function ($160) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($160)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(moveNode(v.value1)));
     };
     if (v instanceof AddParent) {
-        return Data_Lens_Setter.over(function ($138) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($138)));
+        return Data_Lens_Setter.over(function ($161) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($161)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(addParent(v.value1)));
     };
     if (v instanceof RemoveParent) {
-        return Data_Lens_Setter.over(function ($139) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($139)));
+        return Data_Lens_Setter.over(function ($162) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($162)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(removeParent(v.value1)));
     };
     if (v instanceof AddChild) {
-        return Data_Lens_Setter.over(function ($140) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($140)));
+        return Data_Lens_Setter.over(function ($163) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($163)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(addChild(v.value1)));
     };
     if (v instanceof RemoveChild) {
-        return Data_Lens_Setter.over(function ($141) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($141)));
+        return Data_Lens_Setter.over(function ($164) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($164)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(removeChild(v.value1)));
     };
     if (v instanceof AddEdge) {
-        return function ($142) {
-            return applyGraphOp(new AddParent(v.value0.target, v.value0.source))(applyGraphOp(new AddChild(v.value0.source, v.value0.target))($142));
+        return function ($165) {
+            return applyGraphOp(new AddParent(v.value0.target, v.value0.source))(applyGraphOp(new AddChild(v.value0.source, v.value0.target))($165));
         };
     };
     if (v instanceof RemoveEdge) {
-        return function ($143) {
-            return applyGraphOp(new RemoveParent(v.value0.target, v.value0.source))(applyGraphOp(new RemoveChild(v.value0.source, v.value0.target))($143));
+        return function ($166) {
+            return applyGraphOp(new RemoveParent(v.value0.target, v.value0.source))(applyGraphOp(new RemoveChild(v.value0.source, v.value0.target))($166));
         };
     };
     if (v instanceof UpdateText) {
-        return Data_Lens_Setter.over(function ($144) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($144)));
+        return Data_Lens_Setter.over(function ($167) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($167)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(updateText(v.value1)));
     };
     if (v instanceof UpdateSubgraphNodes) {
-        return Data_Lens_Setter.over(function ($145) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($145)));
+        return Data_Lens_Setter.over(function ($168) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($168)));
         })(Data_Functor.map(Data_Maybe.functorMaybe)(updateSubgraphNodes(v.value1)));
     };
     if (v instanceof UpdateFocus) {
@@ -46308,156 +49041,83 @@ var applyGraphOp = function (v) {
         });
     };
     if (v instanceof Highlight) {
-        return Data_Lens_Setter.over(function ($146) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($146));
+        return Data_Lens_Setter.over(function ($169) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($169));
         })(insert(v.value0));
     };
     if (v instanceof UnHighlight) {
-        return Data_Lens_Setter.over(function ($147) {
-            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($147));
+        return Data_Lens_Setter.over(function ($170) {
+            return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($170));
         })($$delete(v.value0));
     };
-    throw new Error("Failed pattern match at Main (line 185, column 1 - line 185, column 42): " + [ v.constructor.name ]);
+    throw new Error("Failed pattern match at Main (line 239, column 1 - line 239, column 42): " + [ v.constructor.name ]);
 };
 var buildGraph = function (ops) {
-    var urr = function ($copy_v) {
-        return function ($copy_v1) {
-            return function ($copy_rev) {
-                return function ($copy_v2) {
-                    var $tco_var_v = $copy_v;
-                    var $tco_var_v1 = $copy_v1;
-                    var $tco_var_rev = $copy_rev;
-                    var $tco_done = false;
-                    var $tco_result;
-                    function $tco_loop(v, v1, rev, v2) {
-                        if (v === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Op)) {
-                            $tco_var_v = 0;
-                            $tco_var_v1 = v1;
-                            $tco_var_rev = new Data_List_Types.Cons(v2.value0.value0, rev);
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Op) {
-                            $tco_var_v = v - 1 | 0;
-                            $tco_var_v1 = v1;
-                            $tco_var_rev = rev;
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        if (v === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Redo)) {
-                            $tco_var_v = 0;
-                            $tco_var_v1 = v1 + 1 | 0;
-                            $tco_var_rev = rev;
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Redo) {
-                            $tco_var_v = v - 1 | 0;
-                            $tco_var_v1 = v1;
-                            $tco_var_rev = rev;
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        if (v1 === 0 && (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Undo)) {
-                            $tco_var_v = v + 1 | 0;
-                            $tco_var_v1 = 0;
-                            $tco_var_rev = rev;
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        if (v2 instanceof Data_List_Types.Cons && v2.value0 instanceof Undo) {
-                            $tco_var_v = v;
-                            $tco_var_v1 = v1 - 1 | 0;
-                            $tco_var_rev = rev;
-                            $copy_v2 = v2.value1;
-                            return;
-                        };
-                        $tco_done = true;
-                        return rev;
-                    };
-                    while (!$tco_done) {
-                        $tco_result = $tco_loop($tco_var_v, $tco_var_v1, $tco_var_rev, $copy_v2);
-                    };
-                    return $tco_result;
-                };
-            };
-        };
-    };
-    var undoRedoReverse = function (ops$prime) {
-        return urr(0)(0)(Data_List_Types.Nil.value)(ops$prime);
-    };
-    return Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(emptyGraph)(undoRedoReverse(ops));
+    return Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(emptyGraph)(Data_List.reverse(ops));
 };
-var demo = buildGraph(new Data_List_Types.Cons(new Op(new UpdateFocus(new FocusNode("goofus"))), new Data_List_Types.Cons(new Op(new Highlight("thingo")), new Data_List_Types.Cons(new Op(AddNode.create({
+var demo = buildGraph(new Data_List_Types.Cons(new UpdateFocus(new FocusNode("goofus")), new Data_List_Types.Cons(new AddNode({
+    text: "Title: Workflow",
+    id: "title",
+    x: 205.0,
+    y: 150.0,
+    children: emptyNodeIdSet,
+    parents: nodeIdSetFromArray([ "goofus" ]),
+    subgraphNodes: Foreign_Object.empty
+}), new Data_List_Types.Cons(new Highlight("thingo"), new Data_List_Types.Cons(new AddNode({
     text: "thingo",
     id: "thingo",
     x: 205.0,
     y: 100.0,
     children: emptyNodeIdSet,
-    parents: singletonNodeIdSet("goofus"),
+    parents: nodeIdSetFromArray([ "goofus" ]),
     subgraphNodes: Foreign_Object.empty
-})), new Data_List_Types.Cons(new Op(AddNode.create({
+}), new Data_List_Types.Cons(new AddNode({
     text: "goofus",
     id: "goofus",
-    x: 455.0,
-    y: 100.0,
-    children: singletonNodeIdSet("thingo"),
+    x: 255.0,
+    y: 270.0,
+    children: nodeIdSetFromArray([ "thingo", "title" ]),
     parents: emptyNodeIdSet,
     subgraphNodes: Foreign_Object.empty
-})), Data_List_Types.Nil.value)))));
+}), Data_List_Types.Nil.value))))));
+var graphTitle = function (ops) {
+    var v = buildGraph(ops);
+    var nodeTextArr = Data_Functor.map(Data_Functor.functorArray)(Data_Lens_Getter.view(function ($171) {
+        return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_text(Data_Lens_Internal_Forget.strongForget)($171));
+    }))(Foreign_Object.values(v.nodes));
+    var isTitle = function (nodeText) {
+        return Data_String_CodeUnits.contains("Title:")(nodeText);
+    };
+    var titles = Data_Array.filter(isTitle)(nodeTextArr);
+    return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(titles)(0))(Data_String_CodeUnits.stripPrefix("Title: "));
+};
+var graphToJSON = function (ops) {
+    var v = buildGraph(ops);
+    return Foreign_Generic.genericEncodeJSON(genericGraph)(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+        return "Graph";
+    }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+        return "nodes";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(encodeGraphNode))))(new Data_Symbol.IsSymbol(function () {
+        return "highlighted";
+    }))(Foreign_Generic_Class.encode_Other(Foreign_Class.objectEncode(Foreign_Class.unitEncode))))(new Data_Symbol.IsSymbol(function () {
+        return "focus";
+    }))(Foreign_Generic_Class.encode_Other(encodeFocus))))))(genericEncodeOpts)(v);
+};
 var lookupNode = function (g) {
     return function (nodeId) {
-        return Data_Lens_Getter.view(function ($148) {
-            return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($148)));
+        return Data_Lens_Getter.view(function ($172) {
+            return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($172)));
         })(g);
     };
 };
 var getFocusNode = function (g) {
-    var v = Data_Lens_Getter.view(function ($149) {
-        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($149));
+    var v = Data_Lens_Getter.view(function ($173) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($173));
     })(g);
     if (v instanceof FocusNode) {
         return lookupNode(g)(v.value0);
     };
     return Data_Maybe.Nothing.value;
-};
-var traverseDown = function (g) {
-    return function (ops) {
-        var v = getFocusNode(g);
-        if (v instanceof Data_Maybe.Just) {
-            var v1 = Data_Array.index(Foreign_Object.keys(v.value0.children))(0);
-            if (v1 instanceof Data_Maybe.Nothing) {
-                return ops;
-            };
-            if (v1 instanceof Data_Maybe.Just) {
-                return doOp(new UpdateFocus(new FocusNode(v1.value0)))(ops);
-            };
-            throw new Error("Failed pattern match at Main (line 339, column 28 - line 341, column 63): " + [ v1.constructor.name ]);
-        };
-        if (v instanceof Data_Maybe.Nothing) {
-            return ops;
-        };
-        throw new Error("Failed pattern match at Main (line 338, column 22 - line 342, column 17): " + [ v.constructor.name ]);
-    };
-};
-var traverseUp = function (g) {
-    return function (ops) {
-        var v = getFocusNode(g);
-        if (v instanceof Data_Maybe.Just) {
-            var v1 = Data_Array.index(Foreign_Object.keys(v.value0.parents))(0);
-            if (v1 instanceof Data_Maybe.Nothing) {
-                return ops;
-            };
-            if (v1 instanceof Data_Maybe.Just) {
-                return doOp(new UpdateFocus(new FocusNode(v1.value0)))(ops);
-            };
-            throw new Error("Failed pattern match at Main (line 332, column 28 - line 334, column 65): " + [ v1.constructor.name ]);
-        };
-        if (v instanceof Data_Maybe.Nothing) {
-            return ops;
-        };
-        throw new Error("Failed pattern match at Main (line 331, column 20 - line 335, column 17): " + [ v.constructor.name ]);
-    };
 };
 var lookupEdge = function (g) {
     return function (edgeId) {
@@ -46474,7 +49134,7 @@ var lookupEdge = function (g) {
                 target: targetId
             });
         };
-        throw new Error("Failed pattern match at Main (line 444, column 3 - line 446, column 57): " + [ v.constructor.name ]);
+        throw new Error("Failed pattern match at Main (line 488, column 3 - line 490, column 57): " + [ v.constructor.name ]);
     };
 };
 var lookupNodes = function (g) {
@@ -46484,30 +49144,30 @@ var lookupNodes = function (g) {
 };
 var coparents = function (g) {
     return function (node) {
-        var childIds = Data_Lens_Getter.view(function ($150) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($150));
+        var childIds = Data_Lens_Getter.view(function ($174) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($174));
         })(node);
         var children = lookupNodes(g)(childIds);
-        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($151) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($151));
+        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($175) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($175));
         }))(children);
     };
 };
 var siblings = function (g) {
     return function (node) {
-        var parentIds = Data_Lens_Getter.view(function ($152) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($152));
+        var parentIds = Data_Lens_Getter.view(function ($176) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($176));
         })(node);
         var parents = lookupNodes(g)(parentIds);
-        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($153) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($153));
+        return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($177) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($177));
         }))(parents);
     };
 };
 var nodeOnLeft = function (g) {
     return function (node) {
-        var viewX = Data_Lens_Getter.view(function ($154) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($154));
+        var viewX = Data_Lens_Getter.view(function ($178) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($178));
         });
         var siblingsAndCoparents = lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
         var xSortedSibCops = Data_Array.sortWith(Data_Ord.ordNumber)(viewX)(siblingsAndCoparents);
@@ -46518,24 +49178,10 @@ var nodeOnLeft = function (g) {
         return fromMaybe(node)(Data_Array.index(toTheLeft)(0));
     };
 };
-var traverseLeft = function (g) {
-    return function (ops) {
-        var v = getFocusNode(g);
-        if (v instanceof Data_Maybe.Nothing) {
-            return ops;
-        };
-        if (v instanceof Data_Maybe.Just) {
-            return doOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($155) {
-                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($155));
-            })(nodeOnLeft(g)(v.value0)))))(ops);
-        };
-        throw new Error("Failed pattern match at Main (line 366, column 22 - line 368, column 108): " + [ v.constructor.name ]);
-    };
-};
 var nodeOnRight = function (g) {
     return function (node) {
-        var viewX = Data_Lens_Getter.view(function ($156) {
-            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($156));
+        var viewX = Data_Lens_Getter.view(function ($179) {
+            return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($179));
         });
         var siblingsAndCoparents = lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
         var xSortedSibCops = Data_Array.sortWith(Data_Ord.ordNumber)(viewX)(siblingsAndCoparents);
@@ -46546,78 +49192,181 @@ var nodeOnRight = function (g) {
         return fromMaybe(node)(Data_Array.index(toTheRight)(0));
     };
 };
-var traverseRight = function (g) {
-    return function (ops) {
-        var v = getFocusNode(g);
-        if (v instanceof Data_Maybe.Nothing) {
-            return ops;
-        };
-        if (v instanceof Data_Maybe.Just) {
-            return doOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($157) {
-                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($157));
-            })(nodeOnRight(g)(v.value0)))))(ops);
-        };
-        throw new Error("Failed pattern match at Main (line 380, column 23 - line 382, column 109): " + [ v.constructor.name ]);
+var removeFocus = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($180) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($180));
+    })(g);
+    if (v instanceof NoFocus) {
+        return ops;
     };
-};
-var removeFocus = function (g) {
-    return function (ops) {
-        var v = Data_Lens_Getter.view(function ($158) {
-            return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($158));
-        })(g);
-        if (v instanceof NoFocus) {
+    if (v instanceof FocusNode) {
+        var v1 = lookupNode(g)(v.value0);
+        if (v1 instanceof Data_Maybe.Nothing) {
             return ops;
         };
-        if (v instanceof FocusNode) {
-            var v1 = lookupNode(g)(v.value0);
-            if (v1 instanceof Data_Maybe.Nothing) {
-                return ops;
-            };
-            if (v1 instanceof Data_Maybe.Just) {
-                var newFocus = function (currentFocus) {
-                    var v2 = Foreign_Object.size(v1.value0.parents);
-                    if (v2 === 0) {
-                        var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.children))(0);
-                        if (v3 instanceof Data_Maybe.Nothing) {
-                            return NoFocus.value;
-                        };
-                        if (v3 instanceof Data_Maybe.Just) {
-                            return new FocusNode(v3.value0);
-                        };
-                        throw new Error("Failed pattern match at Main (line 312, column 16 - line 314, column 46): " + [ v3.constructor.name ]);
-                    };
-                    var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.parents))(0);
+        if (v1 instanceof Data_Maybe.Just) {
+            var newFocus = (function () {
+                var v2 = Foreign_Object.size(v1.value0.parents);
+                if (v2 === 0) {
+                    var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.children))(0);
                     if (v3 instanceof Data_Maybe.Nothing) {
                         return NoFocus.value;
                     };
                     if (v3 instanceof Data_Maybe.Just) {
                         return new FocusNode(v3.value0);
                     };
-                    throw new Error("Failed pattern match at Main (line 315, column 24 - line 317, column 48): " + [ v3.constructor.name ]);
+                    throw new Error("Failed pattern match at Main (line 365, column 18 - line 367, column 48): " + [ v3.constructor.name ]);
                 };
-                return doOp(new UpdateFocus(newFocus(v1.value0)))(doOp(new RemoveNode(v1.value0))(ops));
-            };
-            throw new Error("Failed pattern match at Main (line 307, column 23 - line 320, column 54): " + [ v1.constructor.name ]);
+                var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.parents))(0);
+                if (v3 instanceof Data_Maybe.Nothing) {
+                    return NoFocus.value;
+                };
+                if (v3 instanceof Data_Maybe.Just) {
+                    return new FocusNode(v3.value0);
+                };
+                throw new Error("Failed pattern match at Main (line 368, column 26 - line 370, column 50): " + [ v3.constructor.name ]);
+            })();
+            return addOp(new UpdateFocus(newFocus))(deleteNode(v1.value0)(ops));
         };
-        if (v instanceof FocusEdge) {
-            var v1 = lookupEdge(g)(v.value0);
-            if (v1 instanceof Data_Maybe.Nothing) {
-                return ops;
-            };
-            if (v1 instanceof Data_Maybe.Just) {
-                return doOp(new UpdateFocus(new FocusNode(v1.value0.source)))(doOp(new RemoveEdge(v1.value0))(ops));
-            };
-            throw new Error("Failed pattern match at Main (line 321, column 23 - line 324, column 35): " + [ v1.constructor.name ]);
-        };
-        throw new Error("Failed pattern match at Main (line 305, column 21 - line 324, column 35): " + [ v.constructor.name ]);
+        throw new Error("Failed pattern match at Main (line 360, column 25 - line 373, column 49): " + [ v1.constructor.name ]);
     };
+    if (v instanceof FocusEdge) {
+        return addOp(new UpdateFocus(new FocusNode(v.value0.source)))(addOp(new RemoveEdge(v.value0))(ops));
+    };
+    throw new Error("Failed pattern match at Main (line 358, column 3 - line 375, column 38): " + [ v.constructor.name ]);
+};
+var toggleHighlightFocus = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($181) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($181));
+    })(g);
+    if (v instanceof FocusNode) {
+        var v1 = Foreign_Object.member(v.value0)(Data_Lens_Getter.view(function ($182) {
+            return _Graph(Data_Lens_Internal_Forget.strongForget)(_highlighted(Data_Lens_Internal_Forget.strongForget)($182));
+        })(g));
+        if (v1) {
+            return addOp(new UnHighlight(v.value0))(ops);
+        };
+        if (!v1) {
+            return addOp(new Highlight(v.value0))(ops);
+        };
+        throw new Error("Failed pattern match at Main (line 385, column 25 - line 387, column 44): " + [ v1.constructor.name ]);
+    };
+    return ops;
+};
+var traverseDown = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($183) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($183));
+    })(g);
+    if (v instanceof FocusNode) {
+        return fromMaybe(ops)(Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.value0))(function (v1) {
+            var node = Data_Lens_Getter.view(_GraphNode(Data_Lens_Internal_Forget.strongForget))(v1);
+            return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(Foreign_Object.keys(node.children))(0))(function (v2) {
+                return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(addOp(new UpdateFocus(new FocusEdge({
+                    source: node.id,
+                    target: v2
+                })))(ops));
+            });
+        }));
+    };
+    if (v instanceof FocusEdge) {
+        return addOp(new UpdateFocus(new FocusNode(v.value0.target)))(ops);
+    };
+    if (v instanceof NoFocus) {
+        return ops;
+    };
+    throw new Error("Failed pattern match at Main (line 408, column 3 - line 415, column 19): " + [ v.constructor.name ]);
+};
+var traverseUp = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($184) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($184));
+    })(g);
+    if (v instanceof FocusNode) {
+        return fromMaybe(ops)(Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.value0))(function (v1) {
+            var node = Data_Lens_Getter.view(_GraphNode(Data_Lens_Internal_Forget.strongForget))(v1);
+            return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(Foreign_Object.keys(node.parents))(0))(function (v2) {
+                return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(addOp(new UpdateFocus(new FocusEdge({
+                    source: v2,
+                    target: node.id
+                })))(ops));
+            });
+        }));
+    };
+    if (v instanceof FocusEdge) {
+        return addOp(new UpdateFocus(new FocusNode(v.value0.source)))(ops);
+    };
+    if (v instanceof NoFocus) {
+        return ops;
+    };
+    throw new Error("Failed pattern match at Main (line 396, column 3 - line 403, column 19): " + [ v.constructor.name ]);
+};
+var traverseLeft = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($185) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($185));
+    })(g);
+    if (v instanceof FocusNode) {
+        var v1 = lookupNode(g)(v.value0);
+        if (v1 instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        if (v1 instanceof Data_Maybe.Just) {
+            return addOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($186) {
+                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($186));
+            })(nodeOnLeft(g)(v1.value0)))))(ops);
+        };
+        throw new Error("Failed pattern match at Main (line 442, column 25 - line 444, column 113): " + [ v1.constructor.name ]);
+    };
+    if (v instanceof FocusEdge) {
+        return (function ($187) {
+            return traverseUp(traverseLeft($187));
+        })(traverseDown(ops));
+    };
+    if (v instanceof NoFocus) {
+        return ops;
+    };
+    throw new Error("Failed pattern match at Main (line 441, column 3 - line 446, column 19): " + [ v.constructor.name ]);
+};
+var traverseRight = function (ops) {
+    var g = buildGraph(ops);
+    var v = Data_Lens_Getter.view(function ($188) {
+        return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($188));
+    })(g);
+    if (v instanceof FocusNode) {
+        var v1 = lookupNode(g)(v.value0);
+        if (v1 instanceof Data_Maybe.Nothing) {
+            return ops;
+        };
+        if (v1 instanceof Data_Maybe.Just) {
+            return addOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($189) {
+                return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($189));
+            })(nodeOnRight(g)(v1.value0)))))(ops);
+        };
+        throw new Error("Failed pattern match at Main (line 461, column 25 - line 463, column 114): " + [ v1.constructor.name ]);
+    };
+    if (v instanceof FocusEdge) {
+        return (function ($190) {
+            return traverseUp(traverseRight($190));
+        })(traverseDown(ops));
+    };
+    if (v instanceof NoFocus) {
+        return ops;
+    };
+    throw new Error("Failed pattern match at Main (line 460, column 3 - line 465, column 19): " + [ v.constructor.name ]);
 };
 module.exports = {
+    version: version,
+    genericEncodeOpts: genericEncodeOpts,
     insert: insert,
     "delete": $$delete,
-    singletonNodeIdSet: singletonNodeIdSet,
+    nodeIdSetFromArray: nodeIdSetFromArray,
     emptyNodeIdSet: emptyNodeIdSet,
     Graph: Graph,
+    graphToJSON: graphToJSON,
+    graphFromJSON: graphFromJSON,
     emptyGraph: emptyGraph,
     GraphNode: GraphNode,
     computeEdgeId: computeEdgeId,
@@ -46659,14 +49408,11 @@ module.exports = {
     updateSubgraphNodes: updateSubgraphNodes,
     applyGraphOp: applyGraphOp,
     demo: demo,
-    oppy: oppy,
-    graphLength: graphLength,
-    emptyUndoableGraph: emptyUndoableGraph,
-    Op: Op,
-    Undo: Undo,
-    Redo: Redo,
     addOp: addOp,
+    buildGraph: buildGraph,
+    deleteNode: deleteNode,
     removeFocus: removeFocus,
+    toggleHighlightFocus: toggleHighlightFocus,
     traverseUp: traverseUp,
     traverseDown: traverseDown,
     siblings: siblings,
@@ -46675,10 +49421,6 @@ module.exports = {
     traverseLeft: traverseLeft,
     nodeOnRight: nodeOnRight,
     traverseRight: traverseRight,
-    doOp: doOp,
-    undo: undo,
-    redo: redo,
-    buildGraph: buildGraph,
     lookupNode: lookupNode,
     lookupNodes: lookupNodes,
     getFocusNode: getFocusNode,
@@ -46686,7 +49428,20 @@ module.exports = {
     terminalestNode: terminalestNode,
     fromMaybe: fromMaybe,
     maybe: maybe,
-    fromFocus: fromFocus
+    fromFocus: fromFocus,
+    emptyListGraphOp: emptyListGraphOp,
+    graphLength: graphLength,
+    graphTitle: graphTitle,
+    listOpsFromGraph: listOpsFromGraph,
+    genericGraph: genericGraph,
+    encodeGraph: encodeGraph,
+    decodeGraph: decodeGraph,
+    genericGraphNode: genericGraphNode,
+    encodeGraphNode: encodeGraphNode,
+    decodeGraphNode: decodeGraphNode,
+    genericFocus: genericFocus,
+    encodeFocus: encodeFocus,
+    decodeFocus: decodeFocus
 };
 
 
@@ -46963,6 +49718,194 @@ var Data_Show = __webpack_require__(/*! ../Data.Show/index.js */ "./purescript/o
 var Data_Unit = __webpack_require__(/*! ../Data.Unit/index.js */ "./purescript/output/Data.Unit/index.js");
 var Data_Void = __webpack_require__(/*! ../Data.Void/index.js */ "./purescript/output/Data.Void/index.js");
 module.exports = {};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Record.Builder/foreign.js":
+/*!*****************************************************!*\
+  !*** ./purescript/output/Record.Builder/foreign.js ***!
+  \*****************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.copyRecord = function(rec) {
+  var copy = {};
+  for (var key in rec) {
+    if ({}.hasOwnProperty.call(rec, key)) {
+      copy[key] = rec[key];
+    }
+  }
+  return copy;
+};
+
+exports.unsafeInsert = function(l) {
+  return function(a) {
+    return function(rec) {
+      rec[l] = a;
+      return rec;
+    };
+  };
+};
+
+exports.unsafeModify = function(l) {
+  return function (f) {
+    return function(rec) {
+      rec[l] = f(rec[l]);
+      return rec;
+    };
+  };
+};
+
+exports.unsafeDelete = function(l) {
+  return function(rec) {
+    delete rec[l];
+    return rec;
+  };
+};
+
+exports.unsafeRename = function(l1) {
+  return function (l2) {
+    return function (rec) {
+      rec[l2] = rec[l1];
+      delete rec[l1];
+      return rec;
+    };
+  };
+};
+
+
+/***/ }),
+
+/***/ "./purescript/output/Record.Builder/index.js":
+/*!***************************************************!*\
+  !*** ./purescript/output/Record.Builder/index.js ***!
+  \***************************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+// Generated by purs version 0.12.2
+
+var $foreign = __webpack_require__(/*! ./foreign.js */ "./purescript/output/Record.Builder/foreign.js");
+var Control_Category = __webpack_require__(/*! ../Control.Category/index.js */ "./purescript/output/Control.Category/index.js");
+var Control_Semigroupoid = __webpack_require__(/*! ../Control.Semigroupoid/index.js */ "./purescript/output/Control.Semigroupoid/index.js");
+var Data_Function_Uncurried = __webpack_require__(/*! ../Data.Function.Uncurried/index.js */ "./purescript/output/Data.Function.Uncurried/index.js");
+var Data_Symbol = __webpack_require__(/*! ../Data.Symbol/index.js */ "./purescript/output/Data.Symbol/index.js");
+var Prelude = __webpack_require__(/*! ../Prelude/index.js */ "./purescript/output/Prelude/index.js");
+var Record_Unsafe_Union = __webpack_require__(/*! ../Record.Unsafe.Union/index.js */ "./purescript/output/Record.Unsafe.Union/index.js");
+var Type_Row = __webpack_require__(/*! ../Type.Row/index.js */ "./purescript/output/Type.Row/index.js");
+var Unsafe_Coerce = __webpack_require__(/*! ../Unsafe.Coerce/index.js */ "./purescript/output/Unsafe.Coerce/index.js");
+var Builder = function (x) {
+    return x;
+};
+var union = function (dictUnion) {
+    return function (r2) {
+        return function (r1) {
+            return Record_Unsafe_Union.unsafeUnionFn(r1, r2);
+        };
+    };
+};
+var semigroupoidBuilder = Control_Semigroupoid.semigroupoidFn;
+var rename = function (dictIsSymbol) {
+    return function (dictIsSymbol1) {
+        return function (dictCons) {
+            return function (dictLacks) {
+                return function (dictCons1) {
+                    return function (dictLacks1) {
+                        return function (l1) {
+                            return function (l2) {
+                                return function (r1) {
+                                    return $foreign.unsafeRename(Data_Symbol.reflectSymbol(dictIsSymbol)(l1))(Data_Symbol.reflectSymbol(dictIsSymbol1)(l2))(r1);
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+    };
+};
+var nub = function (dictNub) {
+    return Unsafe_Coerce.unsafeCoerce;
+};
+var modify = function (dictCons) {
+    return function (dictCons1) {
+        return function (dictIsSymbol) {
+            return function (l) {
+                return function (f) {
+                    return function (r1) {
+                        return $foreign.unsafeModify(Data_Symbol.reflectSymbol(dictIsSymbol)(l))(f)(r1);
+                    };
+                };
+            };
+        };
+    };
+};
+var merge = function (dictUnion) {
+    return function (dictNub) {
+        return function (r2) {
+            return function (r1) {
+                return Record_Unsafe_Union.unsafeUnionFn(r1, r2);
+            };
+        };
+    };
+};
+var insert = function (dictCons) {
+    return function (dictLacks) {
+        return function (dictIsSymbol) {
+            return function (l) {
+                return function (a) {
+                    return function (r1) {
+                        return $foreign.unsafeInsert(Data_Symbol.reflectSymbol(dictIsSymbol)(l))(a)(r1);
+                    };
+                };
+            };
+        };
+    };
+};
+var disjointUnion = function (dictUnion) {
+    return function (dictNub) {
+        return function (r1) {
+            return function (r2) {
+                return Record_Unsafe_Union.unsafeUnionFn(r1, r2);
+            };
+        };
+    };
+};
+var $$delete = function (dictIsSymbol) {
+    return function (dictLacks) {
+        return function (dictCons) {
+            return function (l) {
+                return function (r2) {
+                    return $foreign.unsafeDelete(Data_Symbol.reflectSymbol(dictIsSymbol)(l))(r2);
+                };
+            };
+        };
+    };
+};
+var categoryBuilder = Control_Category.categoryFn;
+var build = function (v) {
+    return function (r1) {
+        return v($foreign.copyRecord(r1));
+    };
+};
+module.exports = {
+    build: build,
+    insert: insert,
+    modify: modify,
+    "delete": $$delete,
+    rename: rename,
+    merge: merge,
+    union: union,
+    disjointUnion: disjointUnion,
+    nub: nub,
+    semigroupoidBuilder: semigroupoidBuilder,
+    categoryBuilder: categoryBuilder
+};
 
 
 /***/ }),
@@ -48251,7 +51194,7 @@ exports.union = union;
 /*! no static exports found */
 /***/ (function(module, exports, __webpack_require__) {
 
-var d3 = __webpack_require__(/*! ./d3.js */ "./d3.js");
+var d3 = __webpack_require__(/*! ./libs/d3.js */ "./libs/d3.js");
 
 var isIn = function(element, array) {
     return array.indexOf(element) > -1;
@@ -48360,6 +51303,16 @@ var deepCopyObject = function (o) {
 };
 exports.deepCopyObject = deepCopyObject;
 
+var simulateClickOn = function (element) {
+    var clickEvent = new MouseEvent('click', {
+        view: window,
+        bubbles: true,
+        cancelable: true
+    });
+    element.dispatchEvent(clickEvent);
+};
+exports.simulateClickOn = simulateClickOn;
+
 
 /***/ }),
 
@@ -48375,6 +51328,7 @@ const GraphUI = __webpack_require__(/*! ./graphUI.js */ "./graphUI.js");
 const StringSet = __webpack_require__(/*! ./stringSet.js */ "./stringSet.js");
 const Utils = __webpack_require__(/*! ./utils.js */ "./utils.js");
 var Purs = __webpack_require__(/*! ./purescript/output/Main/index.js */ "./purescript/output/Main/index.js");
+
 
 ///////////////////////////////////
 //////// Data
@@ -48440,6 +51394,7 @@ window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
+window.copyPursGraph = copyPursGraph;
 window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
 window.graphUI.graph.newNodeBelowFocus();

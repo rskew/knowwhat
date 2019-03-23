@@ -22,20 +22,42 @@ module Main where
 -- will require some interplay between the graph and the list of operations
 -- for undo/redo.
 
-import Prelude (Unit, unit, ($), (<<<), map, (-), (+), flip, (==), compare, Ordering, append, (<>), (<), (<=))
-import Data.String (Pattern(..), split)
+import Prelude (Unit, unit, ($), (<<<), (>>>), map, flip, (==), compare, Ordering, append, (<>), (<), (<=), bind, pure, (>>=))
+import Data.String (Pattern(..), split, contains, stripPrefix)
 import Data.Foldable (foldl, maximumBy, foldMap, all)
-import Data.Array (mapMaybe, filter, sortWith, partition, reverse, (!!))
+import Data.Array (mapMaybe, filter, sortWith, partition, (!!))
+import Data.Array as Array
 import Data.Maybe (Maybe(..), isJust)
 import Data.Maybe as Maybe
-import Foreign.Object as Object
-import Foreign.Object (Object, keys, size)
 import Data.Lens (Lens', lens, view, over, set, setJust)
 import Data.Symbol (SProxy(..))
 import Data.Lens.Record (prop)
 import Data.Lens.At (at)
-import Data.List (List(..), (:), length)
+import Data.List (List(..), (:))
+import Data.List as List
+import Data.Generic.Rep (class Generic)
+import Data.Identity (Identity)
+import Data.List.NonEmpty (NonEmptyList)
+import Data.Tuple (Tuple(..))
+import Control.Monad.Except.Trans (ExceptT)
+import Foreign.Object as Object
+import Foreign.Object (Object, keys, values, size)
+import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
+import Foreign.Generic.Types (SumEncoding)
+import Foreign.Class (class Encode, class Decode)
+import Foreign (ForeignError)
 
+
+version :: String
+version = "0.0"
+
+genericEncodeOpts ::
+  { unwrapSingleConstructors :: Boolean
+  , fieldTransform :: String -> String
+  , sumEncoding :: SumEncoding
+  , unwrapSingleArguments :: Boolean
+  }
+genericEncodeOpts = defaultOptions { unwrapSingleConstructors = true }
 
 type NodeId = String
 
@@ -47,8 +69,8 @@ insert nodeId = Object.insert nodeId unit
 delete :: NodeId -> NodeIdSet -> NodeIdSet
 delete = Object.delete
 
-singletonNodeIdSet :: NodeId -> NodeIdSet
-singletonNodeIdSet nodeId = Object.singleton nodeId unit
+nodeIdSetFromArray :: Array NodeId -> NodeIdSet
+nodeIdSetFromArray nodeIdArr = Object.fromFoldable $ map (\nodeId -> (Tuple nodeId unit)) nodeIdArr
 
 emptyNodeIdSet :: NodeIdSet
 emptyNodeIdSet = Object.empty
@@ -58,6 +80,22 @@ newtype Graph = Graph
   , focus :: Focus
   , highlighted :: NodeIdSet
   }
+derive instance genericGraph :: Generic Graph _
+
+instance encodeGraph :: Encode Graph where
+  encode = genericEncode genericEncodeOpts
+
+instance decodeGraph :: Decode Graph where
+  decode = genericDecode genericEncodeOpts
+
+graphToJSON :: List GraphOp -> String
+graphToJSON ops =
+  let (Graph g) = buildGraph ops in
+  genericEncodeJSON genericEncodeOpts (Graph g)
+
+graphFromJSON :: String -> ExceptT (NonEmptyList ForeignError) Identity Graph
+graphFromJSON graphJSON = genericDecodeJSON genericEncodeOpts graphJSON
+
 
 emptyGraph :: Graph
 emptyGraph = Graph
@@ -75,6 +113,14 @@ newtype GraphNode = GraphNode
   , parents :: NodeIdSet
   , subgraphNodes :: Object GraphNode
   }
+derive instance genericGraphNode :: Generic GraphNode _
+
+instance encodeGraphNode :: Encode GraphNode where
+  encode node = genericEncode genericEncodeOpts node
+
+instance decodeGraphNode :: Decode GraphNode where
+  decode node = genericDecode genericEncodeOpts node
+
 
 type Point2D = { x :: Number, y :: Number }
 
@@ -87,8 +133,16 @@ computeEdgeId edge = edge.source <> "." <> edge.target
 
 data Focus =
   FocusNode String
-  | FocusEdge String
+  | FocusEdge Edge
   | NoFocus
+derive instance genericFocus :: Generic Focus _
+
+instance encodeFocus :: Encode Focus where
+  encode = genericEncode genericEncodeOpts
+
+instance decodeFocus :: Decode Focus where
+  decode = genericDecode genericEncodeOpts
+
 
 data GraphOp =
   AddNode GraphNode
@@ -220,62 +274,51 @@ applyGraphOp (UnHighlight nodeId) =
 
 
 demo :: Graph
-demo = buildGraph
-       ( Op (UpdateFocus (FocusNode "goofus"))
-       : Op (Highlight "thingo")
-       : Op (AddNode $ GraphNode
+demo = buildGraph $
+       UpdateFocus (FocusNode "goofus")
+       : AddNode (GraphNode
+           { text: "Title: Workflow"
+           , id : "title"
+           , x : 205.0
+           , y : 150.0
+           , children : emptyNodeIdSet
+           , parents : nodeIdSetFromArray ["goofus"]
+           , subgraphNodes : Object.empty
+           })
+       : Highlight "thingo"
+       : AddNode (GraphNode
            { text: "thingo"
            , id : "thingo"
            , x : 205.0
            , y : 100.0
            , children : emptyNodeIdSet
-           , parents : singletonNodeIdSet "goofus"
+           , parents : nodeIdSetFromArray ["goofus"]
            , subgraphNodes : Object.empty
            })
-       : Op (AddNode $ GraphNode
+       : AddNode (GraphNode
            { text: "goofus"
            , id : "goofus"
-           , x: 455.0
-           , y: 100.0
-           , children : singletonNodeIdSet "thingo"
+           , x: 255.0
+           , y: 270.0
+           , children : nodeIdSetFromArray [ "thingo", "title" ]
            , parents : emptyNodeIdSet
            , subgraphNodes : Object.empty
            })
        : Nil
-       )
-
-oppy :: GraphOp
-oppy = AddNode $ GraphNode
-   { text: "goofus"
-   , id : "goofus"
-   , x: 455.0
-   , y: 100.0
-   , children : singletonNodeIdSet "thingo"
-   , parents : emptyNodeIdSet
-   , subgraphNodes : Object.empty
-   }
-
-graphLength :: UndoableGraph -> Int
-graphLength graph = length graph
-
-emptyUndoableGraph :: UndoableGraph
-emptyUndoableGraph = Nil
-
-
-data OpOrUndo a = Op a | Undo | Redo
-
-type UndoableGraph = List (OpOrUndo GraphOp)
 
 -- | Group successive movements into a single movement
-addOp :: OpOrUndo GraphOp -> UndoableGraph -> UndoableGraph
+addOp :: GraphOp -> List GraphOp -> List GraphOp
 addOp op ops = case op of
-  Op (MoveNode newNode newPos) -> case ops of
-    (Op (MoveNode prevNode prevPos) : ops') ->
+  MoveNode newNode newPos -> case ops of
+    MoveNode prevNode prevPos : ops' ->
       if newNode == prevNode
          then op : ops'
          else op : ops
     _ -> op : ops
   _ -> op : ops
+
+buildGraph :: List GraphOp -> Graph
+buildGraph ops = foldl (flip applyGraphOp) emptyGraph $ List.reverse ops
 
 
 ------
@@ -301,45 +344,75 @@ addOp op ops = case op of
   --| UngroupNode
 
 
-removeFocus :: Graph -> UndoableGraph -> UndoableGraph
-removeFocus g ops = case view (_Graph <<< _focus) g of
-  NoFocus -> ops
-  FocusNode nodeId -> case lookupNode g nodeId of
-    Nothing -> ops
-    Just (GraphNode focusNode) ->
-      let
-        newFocus currentFocus = case size focusNode.parents of
-          0 -> case (keys focusNode.children) !! 0 of
-            Nothing -> NoFocus
-            Just childId -> FocusNode childId
-          otherwise -> case (keys focusNode.parents) !! 0 of
-            Nothing -> NoFocus
-            Just parentId -> FocusNode parentId
-      in doOp
-        (UpdateFocus (newFocus focusNode))
-        $ doOp (RemoveNode (GraphNode focusNode)) ops
-  FocusEdge edgeId -> case lookupEdge g edgeId of
-    Nothing -> ops
-    Just edge -> doOp (UpdateFocus (FocusNode edge.source))
-      $ doOp (RemoveEdge edge) ops
+deleteNode :: GraphNode -> List GraphOp -> List GraphOp
+deleteNode (GraphNode node) ops =
+  addOp (RemoveNode (GraphNode node))
+  $ foldl (flip addOp) ops $ List.fromFoldable $ removeParentEdges <> removeChildEdges
+  where
+    removeParentEdges = map (\parentId -> RemoveEdge { source: parentId, target: node.id }) $ keys node.parents
+    removeChildEdges = map (\childId -> RemoveEdge { source: node.id, target: childId }) $ keys node.children
 
+removeFocus :: List GraphOp -> List GraphOp
+removeFocus ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    NoFocus -> ops
+    FocusNode nodeId -> case lookupNode g nodeId of
+      Nothing -> ops
+      Just (GraphNode focusNode) ->
+        let
+          newFocus = case size focusNode.parents of
+            0 -> case (keys focusNode.children) !! 0 of
+              Nothing -> NoFocus
+              Just childId -> FocusNode childId
+            otherwise -> case (keys focusNode.parents) !! 0 of
+              Nothing -> NoFocus
+              Just parentId -> FocusNode parentId
+        in addOp
+          (UpdateFocus newFocus)
+          $ deleteNode (GraphNode focusNode) ops
+    FocusEdge edge -> addOp (UpdateFocus (FocusNode edge.source))
+        $ addOp (RemoveEdge edge) ops
+
+
+------
+-- Highlighting
+
+toggleHighlightFocus :: List GraphOp -> List GraphOp
+toggleHighlightFocus ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    FocusNode nodeId -> case Object.member nodeId (view (_Graph <<< _highlighted) g) of
+      true -> addOp (UnHighlight nodeId) ops
+      false -> addOp (Highlight nodeId) ops
+    _ -> ops
 
 ------
 -- Traversal
 
-traverseUp :: Graph -> UndoableGraph -> UndoableGraph
-traverseUp g ops = case getFocusNode g of
-  Just (GraphNode node) -> case (keys node.parents) !! 0 of
-    Nothing -> ops
-    Just parentId -> doOp (UpdateFocus (FocusNode parentId)) ops
-  Nothing -> ops
+traverseUp :: List GraphOp -> List GraphOp
+traverseUp ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    FocusNode nodeId -> fromMaybe ops do
+      graphNode <- lookupNode g nodeId
+      let node = view _GraphNode graphNode
+      parentId <- (keys node.parents) !! 0
+      pure $ addOp (UpdateFocus (FocusEdge { source: parentId, target: node.id })) ops
+    FocusEdge edge -> addOp (UpdateFocus (FocusNode edge.source)) ops
+    NoFocus -> ops
 
-traverseDown :: Graph -> UndoableGraph -> UndoableGraph
-traverseDown g ops = case getFocusNode g of
-  Just (GraphNode node) -> case (keys node.children) !! 0 of
-    Nothing -> ops
-    Just childId -> doOp (UpdateFocus (FocusNode childId)) ops
-  Nothing -> ops
+traverseDown :: List GraphOp -> List GraphOp
+traverseDown ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    FocusNode nodeId -> fromMaybe ops do
+      graphNode <- lookupNode g nodeId
+      let node = view _GraphNode graphNode
+      childId <- (keys node.children) !! 0
+      pure $ addOp (UpdateFocus (FocusEdge { source: node.id, target: childId })) ops
+    FocusEdge edge -> addOp (UpdateFocus (FocusNode edge.target)) ops
+    NoFocus -> ops
 
 siblings :: Graph -> GraphNode -> NodeIdSet
 siblings g node = foldMap (view (_GraphNode <<< _children)) parents
@@ -360,12 +433,17 @@ nodeOnLeft g node = fromMaybe node $ toTheLeft !! 0
     xSortedSibCops = sortWith viewX siblingsAndCoparents
     viewX = view (_GraphNode <<< _x)
     splitSortedSibCops = partition (\n -> viewX n < viewX node) xSortedSibCops
-    toTheLeft = reverse $ splitSortedSibCops.no <> splitSortedSibCops.yes
+    toTheLeft = Array.reverse $ splitSortedSibCops.no <> splitSortedSibCops.yes
 
-traverseLeft :: Graph -> UndoableGraph -> UndoableGraph
-traverseLeft g ops = case getFocusNode g of
-  Nothing -> ops
-  Just graphNode -> doOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnLeft g graphNode)))) ops
+traverseLeft :: List GraphOp -> List GraphOp
+traverseLeft ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    FocusNode nodeId -> case lookupNode g nodeId of
+      Nothing -> ops
+      Just graphNode -> addOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnLeft g graphNode)))) ops
+    FocusEdge edge -> traverseDown >>> traverseLeft >>> traverseUp $ ops
+    NoFocus -> ops
 
 nodeOnRight :: Graph -> GraphNode -> GraphNode
 nodeOnRight g node = fromMaybe node $ toTheRight !! 0
@@ -376,49 +454,15 @@ nodeOnRight g node = fromMaybe node $ toTheRight !! 0
     splitSortedSibCops = partition (\n -> viewX n <= viewX node) xSortedSibCops
     toTheRight = splitSortedSibCops.no <> splitSortedSibCops.yes
 
-traverseRight :: Graph -> UndoableGraph -> UndoableGraph
-traverseRight g ops = case getFocusNode g of
-  Nothing -> ops
-  Just graphNode -> doOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnRight g graphNode)))) ops
-
-------
--- Wrap purs stuff for easy use from JS
-
-doOp :: GraphOp -> UndoableGraph -> UndoableGraph
-doOp op ops = addOp (Op op) ops
-
-undo :: UndoableGraph -> UndoableGraph
-undo ops = addOp Undo ops
-
-redo :: UndoableGraph -> UndoableGraph
-redo ops = addOp Redo ops
-
-
--- | Apply Redos and Undos reversing list of applicable ops along the way
--- | Apply graph ops with a fold
--- |
--- | Undos nullify the operation that comes directly after them, and they
--- | stack up in sequence.
--- | Redos nullify the Undo that comes after them.
--- |
--- | After any op, Undo or Redo, this function can be run to recompute the
--- | current graph state, with operations changing their behaviour according
--- | to Undos and Redos ahead of them in the list. This way, the effect
--- | of a weird sequence of Undos/Redos can't leave the graph in an invalid state
--- | as a simple sequence of grap ops (without Undo/Redo) must produce a valid graph.
-buildGraph :: UndoableGraph -> Graph
-buildGraph ops = foldl (flip applyGraphOp) emptyGraph $ undoRedoReverse ops
-  where
-    undoRedoReverse ops' = urr 0 0 Nil ops'
-    urr :: Int -> Int -> List GraphOp -> UndoableGraph -> List GraphOp
-    urr 0     redos rev ( Op op : ops' ) = urr 0 redos (op : rev) ops'
-    urr undos redos rev ( Op op : ops' ) = urr (undos - 1) redos rev ops'
-    urr 0     redos rev ( Redo  : ops' ) = urr 0 (redos + 1) rev ops'
-    urr undos redos rev ( Redo  : ops' ) = urr (undos - 1) redos rev ops'
-    urr undos 0     rev ( Undo  : ops' ) = urr (undos + 1) 0 rev ops'
-    urr undos redos rev ( Undo  : ops' ) = urr undos (redos - 1) rev ops'
-    urr _     _     rev _                = rev
-
+traverseRight :: List GraphOp -> List GraphOp
+traverseRight ops =
+  let g = buildGraph ops in
+  case view (_Graph <<< _focus) g of
+    FocusNode nodeId -> case lookupNode g nodeId of
+      Nothing -> ops
+      Just graphNode -> addOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) (nodeOnRight g graphNode)))) ops
+    FocusEdge edge -> traverseDown >>> traverseRight >>> traverseUp $ ops
+    NoFocus -> ops
 
 
 ------
@@ -475,4 +519,29 @@ maybe = Just
 fromFocus :: Focus -> String
 fromFocus NoFocus = ""
 fromFocus (FocusNode nodeId) = nodeId
-fromFocus (FocusEdge edgeId) = edgeId
+fromFocus (FocusEdge edge) = computeEdgeId edge
+
+emptyListGraphOp :: List GraphOp
+emptyListGraphOp = Nil
+
+graphLength :: List GraphOp -> Int
+graphLength = List.length
+
+graphTitle :: List GraphOp -> Maybe String
+graphTitle ops =
+  titles !! 0 >>= stripPrefix (Pattern "Title: ")
+  where
+    (Graph g) = buildGraph ops
+    nodeTextArr = map (view (_GraphNode <<< _text)) $ values g.nodes
+    isTitle nodeText =
+      contains (Pattern "Title:") nodeText
+    titles = filter isTitle nodeTextArr
+
+listOpsFromGraph :: Graph -> List GraphOp
+listOpsFromGraph (Graph g) =
+  List.fromFoldable $ addNodes <> addEdges <> addHighlight <> [addFocus]
+  where
+    addNodes = map (\node -> AddNode node) $ values g.nodes
+    addEdges = foldMap (\(GraphNode node) -> map (\parentId -> AddEdge { source: node.id, target: parentId}) (keys node.parents)) $ values g.nodes
+    addHighlight = map (\highlightId -> Highlight highlightId) $ keys g.highlighted
+    addFocus = UpdateFocus g.focus

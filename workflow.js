@@ -4,6 +4,7 @@ const StringSet = require('./stringSet.js');
 const Utils = require('./utils.js');
 var Purs = require('./purescript/output/Main/index.js');
 
+
 ///////////////////////////////////
 //////// Data
 
@@ -68,6 +69,7 @@ window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
+window.copyPursGraph = copyPursGraph;
 window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
 window.graphUI.graph.newNodeBelowFocus();

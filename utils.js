@@ -1,4 +1,4 @@
-var d3 = require("./d3.js");
+var d3 = require("./libs/d3.js");
 
 var isIn = function(element, array) {
     return array.indexOf(element) > -1;
@@ -106,3 +106,13 @@ var deepCopyObject = function (o) {
     return JSON.parse(JSON.stringify(o));
 };
 exports.deepCopyObject = deepCopyObject;
+
+var simulateClickOn = function (element) {
+    var clickEvent = new MouseEvent('click', {
+        view: window,
+        bubbles: true,
+        cancelable: true
+    });
+    element.dispatchEvent(clickEvent);
+};
+exports.simulateClickOn = simulateClickOn;

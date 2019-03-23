@@ -1,7 +1,9 @@
-const d3 = require("./d3.js");
+const d3 = require("./libs/d3.js");
 const Utils = require("./utils");
 const StringSet = require("./stringSet.js");
 const Purs = require('./purescript/output/Main/index.js');
+var FileSaver = require("./libs/FileSaver.min.js");
+
 
 module.exports = function GraphUI(graph) {
     ///////////////////////////////////
@@ -82,6 +84,14 @@ module.exports = function GraphUI(graph) {
         .attr("d", "M0,0 L0,10 L8,5 z")
         .attr("fill", "#000");
 
+    // Hidden file browse button for uploading files
+    d3.select("body").append("input")
+        .attr("type", "file")
+        .on("change", function () {
+            graphUI.processFile();
+        })
+        .style("display", "none");
+
     graphUI.updateEdges = function () {
         graphUI.svg.select("#edges").selectAll("line").filter(".edge")
             .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
@@ -135,9 +145,7 @@ module.exports = function GraphUI(graph) {
                     .attr("y2", edgeNodes => edgeNodes.target.y)
                     .attr("stroke-linecap", "butt")
                     .on("click", function(edgeNodes) {
-                        console.log(edgeNodes);
-                        graphUI.graph.focusOnEdge(Purs.computeEdgeId(
-                            {"source": edgeNodes.source.id, "target": edgeNodes.target.id}));
+                        graphUI.graph.focusOnEdge({"source": edgeNodes.source.id, "target": edgeNodes.target.id});
                         graphUI.update();
                     })
                     .on("mouseover", function (d) {
@@ -319,6 +327,16 @@ module.exports = function GraphUI(graph) {
             );
     };
 
+    graphUI.resizeWindow = function () {
+        xMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(
+            node => node.x));
+        yMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(
+            node => node.y));
+        graphUI.svg
+            .attr("width", xMax + screen.width)
+            .attr("height", yMax + screen.height);
+    };
+
     graphUI.update = function () {
         graphUI.graph.usePursGraph();
 
@@ -341,6 +359,8 @@ module.exports = function GraphUI(graph) {
             mouseState.clickedNode = undefined;
             graphUI.update();
         });
+
+        graphUI.resizeWindow();
     };
 
     // Ctrl+click to create new unconnected node
@@ -409,17 +429,51 @@ module.exports = function GraphUI(graph) {
 
 
     ///////////////////////////////////
+    //////// Save/loading graph
+
+    graphUI.saveGraph = function (graph) {
+        title = Purs.fromMaybe("notitle")(Purs.graphTitle(graph.pursGraph));
+        var blob = new Blob([Purs.graphToJSON(graph.pursGraph)], {type: "application/JSON;charset=utf-8"});
+        FileSaver.saveAs(blob, title + ".workflow-graph_v" + Purs.version + "_" + new Date().toISOString() + ".json");
+    };
+
+    graphUI.loadGraph = function (graphJSON) {
+        // TODO: fix types n stuff to remove ".value0"
+        newGraph = Purs.graphFromJSON(graphJSON).value0;
+        console.log('newgraph: ', newGraph);
+        graphUI.graph.nodes = Utils.deepCopyObject(newGraph.nodes);
+        graphUI.graph.focus = newGraph.focus;
+        graphUI.graph.highlighted = newGraph.highlighted;
+        graphUI.graph.pursGraph = Purs.listOpsFromGraph(newGraph);
+    };
+
+    graphUI.loadFile = function() {
+        Utils.simulateClickOn(document.querySelector('input[type=file]'));
+    };
+
+    graphUI.processFile = function () {
+        var file    = document.querySelector('input[type=file]').files[0];
+        var reader  = new FileReader();
+
+        reader.addEventListener("load", function () {
+            graphUI.loadGraph(reader.result);
+            graphUI.update();
+            console.log('after update nodes: ', graphUI.graph.nodes);
+        }, false);
+
+        if (file) {
+            reader.readAsText(file);
+        }
+    };
+
+    ///////////////////////////////////
     //////// Keyboard input
 
     d3.select("body").on("keydown", function () {
         //console.log(d3.event);
         //console.log(d3.event.key);
         if (d3.event.key in keybindings[graphUI.keyboardMode]) {
-            if (Utils.isIn(d3.event.key, preventDefaultKeys)) {
-                d3.event.preventDefault();
-                d3.event.stopPropagation();
-            }
-            keybindings[graphUI.keyboardMode][d3.event.key](graphUI.graph);
+            keybindings[graphUI.keyboardMode][d3.event.key](graphUI.graph, d3.event);
             graphUI.update();
         }
     });
@@ -438,10 +492,6 @@ module.exports = function GraphUI(graph) {
         graphUI.keyboardMode = "insert";
     }
 
-    var preventDefaultKeys = [
-        " ",
-    ];
-
     var keybindings = {
         "normal": {
             "j": graph => graph.traverseDown(),
@@ -451,11 +501,28 @@ module.exports = function GraphUI(graph) {
             "o": graph => graph.newNodeBelowFocus(),
             "x": graph => graph.removeFocused(),
             "Delete": graph => graph.removeFocused(),
-            "s": graph => graph.toggleHighlightFocus(),
+            "s": function (graph, event) {
+                if (d3.event.ctrlKey) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    graphUI.saveGraph(graph);
+                } else {
+                    graph.toggleHighlightFocus();
+                };
+            },
+            "l": function (graph) {
+                if (d3.event.ctrlKey) {
+                    graphUI.loadFile();
+                };
+            },
             "Escape": graph => graph.clearHighlights(),
             "i": insertMode,
             "v": visualMode,
-            " ": graph => graph.toggleGroupExpand(),
+            " ": function (graph, event) {
+                event.preventDefault();
+                event.stopPropagation();
+                graph.toggleGroupExpand();
+            },
         },
         "insert": {
             "Escape": normalMode,
