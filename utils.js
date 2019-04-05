@@ -27,6 +27,11 @@ var argMax = function(array) {
 }
 exports.argMax = argMax;
 
+var arrayMax = function(array) {
+    return array.reduce(function(r, a) { return Math.max(r, a); });
+}
+exports.arrayMax = arrayMax;
+
 // https://gist.github.com/jed/982883
 var uuidv4 = function() {
     asdf = function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)};

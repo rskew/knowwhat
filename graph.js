@@ -71,9 +71,9 @@ function Graph(graphNodes, focus, highlighted) {
                                     "target": graph.nodes[target]})))));
     };
 
-    graph.newNodeBelowFocus = function () {
+    graph.newChildOfFocus = function () {
         if (Purs.fromFocus(graph.focus) != null) {
-            newNodePos = graph.getNewNodePosition(Purs.fromFocus(graph.focus));
+            newNodePos = Purs.newPositionFrom(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)])(Purs.getChildren);
             graph.createNode(newNodePos.x,
                              newNodePos.y,
                              StringSet.singleton(Purs.fromFocus(graph.focus)),
@@ -87,10 +87,26 @@ function Graph(graphNodes, focus, highlighted) {
         return graph;
     };
 
+    graph.newParentOfFocus = function () {
+        if (Purs.fromFocus(graph.focus) != "") {
+            newNodePos = Purs.newPositionFrom(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)])(Purs.getParents);
+            graph.createNode(newNodePos.x,
+                             newNodePos.y,
+                             StringSet.empty(),
+                             StringSet.singleton(Purs.fromFocus(graph.focus)));
+        } else {
+            graph.createNode(initNodePos.x,
+                             initNodePos.y,
+                             StringSet.empty(),
+                             StringSet.empty());
+        }
+        return graph;
+    };
+
     graph.createNode = function (x, y, parentIds, childIds) {
         newNodeId = Utils.uuidv4();
         newNodeBody = new GraphNodeBody(
-            newNodeId, " ", x, y, parentIds, childIds);
+            newNodeId, " fing  zing", x, y, parentIds, childIds);
 
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
         for (i=0; i<StringSet.cardinality(parentIds); i++) {
@@ -111,21 +127,6 @@ function Graph(graphNodes, focus, highlighted) {
         graph.pursGraph = Purs.removeFocus(graph.pursGraph);
         return graph;
     };
-
-    //graph.deleteNode = function (nodeToRemoveId) {
-    //    // Remove edges to/from the node in other node objects
-    //    for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].parents); i++) {
-    //        parentId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].parents);
-    //        graph.deleteEdge(parentId, nodeToRemoveId);
-    //    }
-    //    for (i=0; i<StringSet.cardinality(graph.nodes[nodeToRemoveId].children); i++) {
-    //        childId = StringSet.lookupIndex(i, graph.nodes[nodeToRemoveId].children);
-    //        graph.deleteEdge(nodeToRemoveId, childId);
-    //    }
-    //    // Remove the node
-    //    graph.updatePurs(Purs.RemoveNode.create(graph.nodes[nodeToRemoveId]));
-    //    return graph;
-    //};
 
     graph.addEdge = function(sourceId, targetId) {
         graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
@@ -253,7 +254,7 @@ function Graph(graphNodes, focus, highlighted) {
         return graph;
     };
 
-    // Adds changes to gorup node edges to the terminal node of the subgraph.
+    // Adds changes to group node edges to the terminal node of the subgraph.
     // Adding edges only makes sense after subgraph nodes are restored.
     graph.copyEdgeModsToTerminalestNode = function (groupNode) {
         groupNodesStringSet = StringSet.fromArray(Object.keys(groupNode.subgraphNodes));
@@ -349,7 +350,6 @@ function Graph(graphNodes, focus, highlighted) {
 
         // Remove group node
         graph.pursGraph = Purs.deleteNode(groupNode)(graph.pursGraph);
-        //graph.deleteNode(groupNodeId);
 
         return graph;
     };
@@ -397,15 +397,11 @@ function Graph(graphNodes, focus, highlighted) {
     //////// Highlighting a selection/focusing
 
     graph.focusOnNode = function (id) {
-        graph.focusOn(Purs.FocusNode.create(id));
+        graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusNode.create(id)));
     };
 
     graph.focusOnEdge = function (edge) {
-        graph.focusOn(Purs.FocusEdge.create(edge));
-    };
-
-    graph.focusOn = function (focus) {
-        graph.updatePurs(Purs.UpdateFocus.create(focus));
+        graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusEdge.create(edge)([])));
     };
 
     graph.unHighlightNode = function(nodeId) {
@@ -416,25 +412,8 @@ function Graph(graphNodes, focus, highlighted) {
         graph.updatePurs(Purs.Highlight.create(nodeId));
     };
 
-    //graph.highlightFocus = function () {
-    //    graph.updatePurs(Purs.highlightFocus(graph.pursGraph));
-    //    //graph.highlightNode(Purs.fromFocus(graph.focus));
-    //    return graph;
-    //};
-
-    //graph.unHighlightFocus = function () {
-    //    graph.updatePurs(Purs.unHighlightFocus(graph.pursGraph));
-    //    //graph.unHighlightNode(Purs.fromFocus(graph.focus));
-    //    return graph;
-    //};
-
     graph.toggleHighlightFocus = function () {
         graph.pursGraph = Purs.toggleHighlightFocus(graph.pursGraph);
-        //if (!StringSet.isIn(Purs.fromFocus(graph.focus), graph.highlighted)) {
-        //    graph.highlightFocus();
-        //} else {
-        //    graph.unHighlightFocus();
-        //}
         return graph;
     };
 
@@ -458,38 +437,38 @@ function Graph(graphNodes, focus, highlighted) {
     ///////////////////////////////////
     //////// Node Spatial Arrangement
 
-    graph.getNewNodePosition = function (parentId) {
-        // Find right-most child
-        children = graph.nodes[parentId].children;
-        if (StringSet.cardinality(children) > 0) {
-            rightmostChildId = StringSet.lookupIndex(
-                Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
-                children);
-            return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
-        } else {
-            return graph.getNewPositionBelowOf(graph.nodes[parentId]);
+    //graph.getNewNodePosition = function (parentId) {
+    //    // Find right-most child
+    //    children = graph.nodes[parentId].children;
+    //    if (StringSet.cardinality(children) > 0) {
+    //        rightmostChildId = StringSet.lookupIndex(
+    //            Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
+    //            children);
+    //        return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
+    //    } else {
+    //        return graph.getNewPositionBelowOf(graph.nodes[parentId]);
 
-        }
-    };
+    //    }
+    //};
 
-    graph.getNewPositionRightOf = function (nodeObject) {
-        attempt = {"x": nodeObject.x + newNodeOffset.x,
-                   "y": nodeObject.y};
-        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-            return graph.getNewPositionRightOf(attempt);
-        } else {
-            return attempt;
-        }
-    };
+    //graph.getNewPositionRightOf = function (nodeObject) {
+    //    attempt = {"x": nodeObject.x + newNodeOffset.x,
+    //               "y": nodeObject.y};
+    //    if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
+    //        return graph.getNewPositionRightOf(attempt);
+    //    } else {
+    //        return attempt;
+    //    }
+    //};
 
-    graph.getNewPositionBelowOf = function (nodeObject) {
-        attempt = {"x": nodeObject.x,
-                   "y": nodeObject.y + newNodeOffset.y};
-        if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-            return graph.getNewPositionRightOf(attempt);
-        } else {
-            return attempt;
-        }
-    };
+    //graph.getNewPositionBelowOf = function (nodeObject) {
+    //    attempt = {"x": nodeObject.x,
+    //               "y": nodeObject.y + newNodeOffset.y};
+    //    if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
+    //        return graph.getNewPositionRightOf(attempt);
+    //    } else {
+    //        return attempt;
+    //    }
+    //};
 };
 module.exports = Graph;

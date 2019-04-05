@@ -106,7 +106,7 @@ module.exports = function GraphUI(graph) {
                     .attr("y2", edgeNode => edgeNode.target.y)
                     .classed("focused", edgeNode => Purs.computeEdgeId(
                         {"source": edgeNode.source.id, "target": edgeNode.target.id})
-                            == Purs.fromFocus(graphUI.graph.focus))
+                             == Purs.fromFocus(graphUI.graph.focus))
                     .attr("marker-end", edgeNode => {
                         if (Utils.isEmptyObject(edgeNode.target.subgraphNodes)) {
                             return "url(#arrow)";
@@ -144,6 +144,8 @@ module.exports = function GraphUI(graph) {
                     .attr("x2", edgeNodes => edgeNodes.target.x)
                     .attr("y2", edgeNodes => edgeNodes.target.y)
                     .attr("stroke-linecap", "butt")
+                    .classed("focusGroup", edgeNode => Purs.edgeInFocusGroup(graphUI.graph.pursGraph)(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id}))
                     .on("click", function(edgeNodes) {
                         graphUI.graph.focusOnEdge({"source": edgeNodes.source.id, "target": edgeNodes.target.id});
                         graphUI.update();
@@ -152,7 +154,7 @@ module.exports = function GraphUI(graph) {
                         Utils.fadeIn(this, fadeSpeed);
                     })
                     .on("mouseout", function (d) {
-                        if (!d3.select(this).classed("grouped")) {
+                        if (!d3.select(this).classed("grouped") && !d3.select(this).classed("focusGroup")) {
                             Utils.fadeOut(this, fadeSpeed);
                         }
                     }),
@@ -161,6 +163,15 @@ module.exports = function GraphUI(graph) {
                     .attr("y1", edgeNodes => edgeNodes.source.y)
                     .attr("x2", edgeNodes => edgeNodes.target.x)
                     .attr("y2", edgeNodes => edgeNodes.target.y)
+                    .classed("focusGroup", edgeNode => Purs.edgeInFocusGroup(graphUI.graph.pursGraph)(
+                        {"source": edgeNode.source.id, "target": edgeNode.target.id}))
+                    .each(function () {
+                        if (d3.select(this).classed("focusGroup")) {
+                            Utils.fadeIn(this, fadeSpeed);
+                        } else {
+                            Utils.fadeOut(this, fadeSpeed);
+                        }
+                    })
             );
     };
 
@@ -185,16 +196,17 @@ module.exports = function GraphUI(graph) {
         graphUI.svg.select("#text").selectAll("foreignObject")
             .data(Object.entries(graphUI.graph.nodes), d => d[0])
             .join(
-                enter => enter.append("foreignObject")
+                // lambda function was causing weird errors here :/
+                function (enter) {
+                    enter.append("foreignObject")
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 12 + 12)
+                    .attr("width", d => Utils.arrayMax(d[1].text.split("\n").map(line => line.length)) * 12 + 12)
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .append('xhtml:div')
                     .append('div')
                     .attr("contentEditable", true)
                     .text(d => d[1].text)
-                    .lower()
                     .on("keydown", function (d) {
                         graphUI.graph.updateText(d[0], this.innerText);
                         graphUI.update();
@@ -202,15 +214,15 @@ module.exports = function GraphUI(graph) {
                     .on("keyup", function (d) {
                         graphUI.graph.updateText(d[0], this.innerText);
                         graphUI.update();
-                    }),
+                    });},
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => d[1].text.length * 20 + 20)
+                    .attr("width", d => Utils.arrayMax(d[1].text.split("\n").map(line => line.length)) * 12 + 12)
                     .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
-                            d[0] == Purs.fromFocus(graphUI.graph.focus)) {
+                              d[0] == Purs.fromFocus(graphUI.graph.focus)) {
                             d3.select(this).select("div").select("div").node().focus();
                         } else {
                             d3.select(this).select("div").select("div").node().blur();
@@ -497,8 +509,15 @@ module.exports = function GraphUI(graph) {
             "j": graph => graph.traverseDown(),
             "k": graph => graph.traverseUp(),
             "h": graph => graph.traverseLeft(),
-            "l": graph => graph.traverseRight(),
-            "o": graph => graph.newNodeBelowFocus(),
+            "l": function (graph) {
+                if (d3.event.ctrlKey) {
+                    graphUI.loadFile();
+                } else {
+                    graph.traverseRight();
+                };
+            },
+            "o": graph => graph.newChildOfFocus(),
+            "O": graph => graph.newParentOfFocus(),
             "x": graph => graph.removeFocused(),
             "Delete": graph => graph.removeFocused(),
             "s": function (graph, event) {
@@ -508,11 +527,6 @@ module.exports = function GraphUI(graph) {
                     graphUI.saveGraph(graph);
                 } else {
                     graph.toggleHighlightFocus();
-                };
-            },
-            "l": function (graph) {
-                if (d3.event.ctrlKey) {
-                    graphUI.loadFile();
                 };
             },
             "Escape": graph => graph.clearHighlights(),

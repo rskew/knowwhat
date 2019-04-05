@@ -72,8 +72,17 @@ window.StringSet = StringSet;
 window.copyPursGraph = copyPursGraph;
 window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
-window.graphUI.graph.newNodeBelowFocus();
+//window.graphUI.graph.newNodeBelowFocus();
 window.graphUI.update();
 window.graphUI.graph.usePursGraph();
 window.graphUI.update();
+
+
+const savedGraph = require("./Workflow.workflow-graph_v0.0_2019-04-03T12_36_57.884Z.json");
+console.log(JSON.stringify(savedGraph));
+console.log(window.graphUI.graph.nodes);
+window.graphUI.loadGraph(JSON.stringify(savedGraph));
+window.graphUI.update();
+console.log(window.graphUI.graph.nodes);
+
 window.graph = window.graphUI.graph;
