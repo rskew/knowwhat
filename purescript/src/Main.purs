@@ -1,26 +1,5 @@
 module Main where
 
--- | Simple graph representation with undo-able operations.
-
-------
--- todo optimisations:
--- - ST monad for mutable updates to graph and/or
---   truncating undo/redo history
---
-------
--- simplest implementation
---
--- The graph is kept as the list of UI operations applied so far in a
--- free-monad-like way.
--- An undo or redo is a grounded graph op.
--- An undo is interpreted as removing the last non-undo graph op.
--- A redo is unterpreted as undoing the last redo.
--- The interpreter walks backwards applying redos and undos first, before
--- applying the remaining operations in sequence.
---
--- Storing the full, computed graph to support faster operations
--- will require some interplay between the graph and the list of operations
--- for undo/redo.
 
 import Control.Monad.Except.Trans (ExceptT)
 import Control.Plus (empty)
@@ -103,10 +82,9 @@ instance encodeGraph :: Encode Graph where
 instance decodeGraph :: Decode Graph where
   decode = genericDecode genericEncodeOpts
 
-graphToJSON :: List GraphOp -> String
-graphToJSON ops =
-  let (Graph g) = buildGraph ops in
-  genericEncodeJSON genericEncodeOpts (Graph g)
+graphToJSON :: Graph -> String
+graphToJSON g =
+  genericEncodeJSON genericEncodeOpts g
 
 graphFromJSON :: String -> ExceptT (NonEmptyList ForeignError) Identity Graph
 graphFromJSON graphJSON = genericDecodeJSON genericEncodeOpts graphJSON
@@ -298,9 +276,8 @@ applyGraphOp (UnHighlight nodeId) =
 
 
 
-
 demo :: Graph
-demo = buildGraph $
+demo = foldl (flip applyGraphOp) emptyGraph $
        UpdateFocus (FocusEdge (Edge { source: "title"
                                     , target: "goofus"})
                               [Edge {"source": "title", "target": "goofus"},
@@ -335,20 +312,6 @@ demo = buildGraph $
            })
        : Nil
 
--- | Group successive movements into a single movement
-addOp :: GraphOp -> List GraphOp -> List GraphOp
-addOp op ops = case op of
-  MoveNode newNode newPos -> case ops of
-    MoveNode prevNode prevPos : ops' ->
-      if newNode == prevNode
-         then op : ops'
-         else op : ops
-    _ -> op : ops
-  _ -> op : ops
-
-buildGraph :: List GraphOp -> Graph
-buildGraph ops = foldl (flip applyGraphOp) emptyGraph $ List.reverse ops
-
 
 ------
 -- Graph Interactions
@@ -373,21 +336,20 @@ buildGraph ops = foldl (flip applyGraphOp) emptyGraph $ List.reverse ops
   --| UngroupNode
 
 
-deleteNode :: GraphNode -> List GraphOp -> List GraphOp
-deleteNode (GraphNode node) ops =
-  addOp (RemoveNode (GraphNode node))
-  $ foldl (flip addOp) ops $ List.fromFoldable $ removeParentEdges <> removeChildEdges
+deleteNode :: GraphNode -> Graph -> Graph
+deleteNode (GraphNode node) g =
+  applyGraphOp (RemoveNode (GraphNode node))
+  $ foldl (flip applyGraphOp) g $ List.fromFoldable $ removeParentEdges <> removeChildEdges
   where
     removeParentEdges = (\parentId -> RemoveEdge (Edge { source: parentId, target: node.id })) <$> keys node.parents
-    removeChildEdges = map (\childId -> RemoveEdge (Edge { source: node.id, target: childId })) $ keys node.children
+    removeChildEdges = (\childId -> RemoveEdge (Edge { source: node.id, target: childId })) <$> keys node.children
 
-removeFocus :: List GraphOp -> List GraphOp
-removeFocus ops =
-  let g = buildGraph ops in
+removeFocus :: Graph -> Graph
+removeFocus g =
   case view (_Graph <<< _focus) g of
-    NoFocus -> ops
+    NoFocus -> g
     FocusNode nodeId -> case lookupNode g nodeId of
-      Nothing -> ops
+      Nothing -> g
       Just (GraphNode focusNode) ->
         let
           newFocus = case size focusNode.parents of
@@ -397,58 +359,56 @@ removeFocus ops =
             otherwise -> case (keys focusNode.parents) !! 0 of
               Nothing -> NoFocus
               Just parentId -> FocusNode parentId
-        in addOp
+        in applyGraphOp
           (UpdateFocus newFocus)
-          $ deleteNode (GraphNode focusNode) ops
-    FocusEdge (Edge edge) _ -> addOp (UpdateFocus (FocusNode edge.source))
-        $ addOp (RemoveEdge (Edge edge)) ops
+          $ applyGraphOp (UnHighlight focusNode.id)
+          $ deleteNode (GraphNode focusNode) g
+    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.source))
+        $ applyGraphOp (RemoveEdge (Edge edge)) g
 
 
 ------
 -- Highlighting
 
-toggleHighlightFocus :: List GraphOp -> List GraphOp
-toggleHighlightFocus ops =
-  let g = buildGraph ops in
+toggleHighlightFocus :: Graph -> Graph
+toggleHighlightFocus g =
   case view (_Graph <<< _focus) g of
     FocusNode nodeId -> case Object.member nodeId (view (_Graph <<< _highlighted) g) of
-      true -> addOp (UnHighlight nodeId) ops
-      false -> addOp (Highlight nodeId) ops
-    FocusEdge edge _ -> addOp (UpdateFocus (FocusEdge edge [])) ops
-    _ -> ops
+      true -> applyGraphOp (UnHighlight nodeId) g
+      false -> applyGraphOp (Highlight nodeId) g
+    FocusEdge edge _ -> applyGraphOp (UpdateFocus (FocusEdge edge [])) g
+    _ -> g
 
 
 ------
 -- Traversal
 
-traverseUp :: List GraphOp -> List GraphOp
-traverseUp ops =
-  let g = buildGraph ops in
+traverseUp :: Graph -> Graph
+traverseUp g =
   case view (_Graph <<< _focus) g of
-    FocusNode nodeId -> fromMaybe ops do
+    FocusNode nodeId -> fromMaybe g do
       GraphNode node <- lookupNode g nodeId
       let upEdges' = Edge <$> { source: _, target: node.id } <$> keys node.parents
       newFocus <- upEdges' !! 0
       -- If the focus group has a single element then collapse the focus
       let upEdges = if length upEdges' == 1 then [] else upEdges'
-      pure $ addOp (UpdateFocus (FocusEdge newFocus upEdges)) ops
-    FocusEdge (Edge edge) _ -> addOp (UpdateFocus (FocusNode edge.source)) ops
-    NoFocus -> ops
+      pure $ applyGraphOp (UpdateFocus (FocusEdge newFocus upEdges)) g
+    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.source)) g
+    NoFocus -> g
 
 -- TODO: remove duplicate code
-traverseDown :: List GraphOp -> List GraphOp
-traverseDown ops =
-  let g = buildGraph ops in
+traverseDown :: Graph -> Graph
+traverseDown g =
   case view (_Graph <<< _focus) g of
-    FocusNode nodeId -> fromMaybe ops do
+    FocusNode nodeId -> fromMaybe g do
       GraphNode node <- lookupNode g nodeId
       let downEdges' = Edge <$> { source: node.id, target: _ } <$> keys node.children
       newFocus <- downEdges' !! 0
       -- If the focus group has a single element then collapse the focus
       let downEdges = if length downEdges' == 1 then [] else downEdges'
-      pure $ addOp (UpdateFocus (FocusEdge newFocus downEdges)) ops
-    FocusEdge (Edge edge) _ -> addOp (UpdateFocus (FocusNode edge.target)) ops
-    NoFocus -> ops
+      pure $ applyGraphOp (UpdateFocus (FocusEdge newFocus downEdges)) g
+    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.target)) g
+    NoFocus -> g
 
 siblings :: Graph -> GraphNode -> NodeIdSet
 siblings g node = foldMap (view (_GraphNode <<< _children)) parents
@@ -520,17 +480,16 @@ edgePosition g (Edge edge) = fromMaybe 0.0 do
   GraphNode target <- lookupNode g edge.target
   pure $ source.x + target.x
 
-moveFocusLeftRight :: DirectionLR -> List GraphOp -> List GraphOp
-moveFocusLeftRight dir ops =
-  let g = buildGraph ops in
+changeFocusLeftRight :: DirectionLR -> Graph -> Graph
+changeFocusLeftRight dir g =
   case view (_Graph <<< _focus) g of
     FocusNode nodeId -> case lookupNode g nodeId of
-      Nothing -> ops
+      Nothing -> g
       Just node ->
         let
           leftNode = nextNodeWrap dir g node
         in
-        addOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) leftNode))) ops
+        applyGraphOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) leftNode))) g
     FocusEdge edge focusGroup ->
       let
         focus = if focusGroup /= []
@@ -545,14 +504,14 @@ moveFocusLeftRight dir ops =
             in
             FocusEdge newFocus newGroup
       in
-      addOp (UpdateFocus focus) ops
-    NoFocus -> ops
+      applyGraphOp (UpdateFocus focus) g
+    NoFocus -> g
 
-traverseLeft :: List GraphOp -> List GraphOp
-traverseLeft ops = moveFocusLeftRight Left ops
+traverseLeft :: Graph -> Graph
+traverseLeft g = changeFocusLeftRight Left g
 
-traverseRight :: List GraphOp -> List GraphOp
-traverseRight ops = moveFocusLeftRight Right ops
+traverseRight :: Graph -> Graph
+traverseRight g = changeFocusLeftRight Right g
 
 
 ------
@@ -561,24 +520,21 @@ traverseRight ops = moveFocusLeftRight Right ops
 rightmostNode :: forall f. Foldable f => f GraphNode -> Maybe GraphNode
 rightmostNode = maximumBy (comparing viewX)
 
-newPositionFrom :: List GraphOp -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
-newPositionFrom ops (GraphNode node) relations =
-  let g = buildGraph ops in
+newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
+newPositionFrom g (GraphNode node) relations =
   fromMaybe { x: node.x, y: node.y + newParentYOffset } do
     (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
     pure { x: rightmostParent.x + newNodeXOffset
          , y: rightmostParent.y }
 
---newChildPosition :: List GraphOp -> GraphNode -> Point2D
---newChildPosition ops (GraphNode node) =
---  let g = buildGraph ops in
+--newChildPosition :: Graph -> GraphNode -> Point2D
+--newChildPosition g (GraphNode node) =
 --  fromMaybe newNodeInitialPos do
 --    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
 --    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
 --
---newParentPosition :: List GraphOp -> GraphNode -> Point2D
---newParentPosition ops (GraphNode node) =
---  let g = buildGraph ops in
+--newParentPosition :: Graph -> GraphNode -> Point2D
+--newParentPosition g (GraphNode node) =
 --  fromMaybe newNodeInitialPos do
 --    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
 --    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
@@ -592,11 +548,6 @@ lookupNode g nodeId = view (_Graph <<< _nodes <<< at nodeId) g
 
 lookupNodes :: Graph -> NodeIdSet -> Array GraphNode
 lookupNodes g nodeIds = mapMaybe (lookupNode g) $ keys nodeIds
-
---getFocusNode :: Graph -> Maybe GraphNode
---getFocusNode g = case view (_Graph <<< _focus) g of
---  FocusNode nodeId -> lookupNode g nodeId
---  otherwise -> Nothing
 
 lookupEdge :: Graph -> EdgeId -> Maybe Edge
 lookupEdge g edgeId =
@@ -640,9 +591,8 @@ fromFocus NoFocus = ""
 fromFocus (FocusNode nodeId) = nodeId
 fromFocus (FocusEdge edge _) = computeEdgeId edge
 
-edgeInFocusGroup :: List GraphOp -> Edge -> Boolean
-edgeInFocusGroup ops edge =
-  let (Graph g) = buildGraph ops in
+edgeInFocusGroup :: Graph -> Edge -> Boolean
+edgeInFocusGroup (Graph g) edge =
   case g.focus of
     FocusEdge _ focusGroup -> elem edge focusGroup
     _ -> false
@@ -653,31 +603,13 @@ getParents (GraphNode node) = node.parents
 getChildren :: GraphNode -> NodeIdSet
 getChildren (GraphNode node) = node.children
 
-emptyListGraphOp :: List GraphOp
-emptyListGraphOp = Nil
-
-graphLength :: List GraphOp -> Int
-graphLength = List.length
-
-graphTitle :: List GraphOp -> Maybe String
-graphTitle ops = titles !! 0 >>= stripPrefix titlePattern
+graphTitle :: Graph -> Maybe String
+graphTitle (Graph g) = titles !! 0 >>= stripPrefix titlePattern
   where
     titlePattern = Pattern "Title: "
-    (Graph g) = buildGraph ops
     nodeTextArr = trim <$> (view (_GraphNode <<< _text)) <$> values g.nodes
     isTitle = contains titlePattern
     titles = filter isTitle nodeTextArr
-
-listOpsFromGraph :: Graph -> List GraphOp
-listOpsFromGraph (Graph g) =
-  List.fromFoldable $ addNodes <> addEdges <> addHighlight <> [addFocus]
-  where
-    addNodes = (\node -> AddNode node) <$> values g.nodes
-    addEdges = foldMap (
-      \(GraphNode node) -> map (
-        \parentId -> AddEdge (Edge { source: node.id, target: parentId})) (keys node.parents)) $ values g.nodes
-    addHighlight = (\highlightId -> Highlight highlightId) <$> keys g.highlighted
-    addFocus = UpdateFocus g.focus
 
 
 ------
@@ -743,3 +675,12 @@ countThrowsDebind n =
       if x + y == n
         then [[x, y]]
         else empty
+
+
+newtype Asdf = Asdf { a :: Int, s :: String, d :: Number, f :: Asdf }
+
+hasImmute :: Asdf -> Asdf
+hasImmute (Asdf asdf) = Asdf $ asdf { f = Asdf (sdfa { f = Asdf (dfas { a = 20 })}) }
+  where
+    Asdf sdfa = asdf.f
+    Asdf dfas = sdfa.f

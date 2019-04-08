@@ -15,10 +15,9 @@ function GraphNodeBody(id, text, x, y, parents, children) {
 function Graph(graphNodes, focus, highlighted) {
     var graph = this;
 
-    // Create the Purescript graph to play along with the JS one
-    graph.pursGraph = Purs.emptyListGraphOp;
+    graph.pursGraph = Purs.emptyGraph;
     graph.updatePurs = function(graphOp) {
-        graph.pursGraph = Purs.addOp(graphOp)(graph.pursGraph);
+        graph.pursGraph = Purs.applyGraphOp(graphOp)(graph.pursGraph);
     };
 
     graph.copyNode = function (node) {
@@ -41,12 +40,10 @@ function Graph(graphNodes, focus, highlighted) {
     graph.updatePurs(Purs.UpdateFocus.create(focus));
 
     graph.usePursGraph = function() {
-        builtPursGraph = Purs.buildGraph(graph.pursGraph);
-        graph.nodes = Utils.deepCopyObject(builtPursGraph.nodes);
-        graph.focus = builtPursGraph.focus;
-        graph.highlighted = builtPursGraph.highlighted;
+        graph.nodes = Utils.deepCopyObject(graph.pursGraph.nodes);
+        graph.focus = graph.pursGraph.focus;
+        graph.highlighted = graph.pursGraph.highlighted;
 
-        console.log("Graph Length: ", Purs.graphLength(graph.pursGraph));
         return graph;
     };
 

@@ -24,17 +24,16 @@ module.exports = function GraphUI(graph) {
 
     ///////////////////////////////////
     //////// Constants
-    var fadeSpeed = 150,
-        width = 500,
-        height = 500;
+    graphUI.fadeSpeed = 150;
+    graphUI.gridSize = 50;
 
 
     ///////////////////////////////////
     //////// D3
 
     graphUI.svg = d3.select("body").append("svg")
-        .attr("width", width)
-        .attr("height", height);
+        .attr("width", screen.width)
+        .attr("height", screen.height);
 
     // Define Z axis ordering of elements
     graphUI.svg.append("g").attr("id", "text");
@@ -151,11 +150,11 @@ module.exports = function GraphUI(graph) {
                         graphUI.update();
                     })
                     .on("mouseover", function (d) {
-                        Utils.fadeIn(this, fadeSpeed);
+                        Utils.fadeIn(this, graphUI.fadeSpeed);
                     })
                     .on("mouseout", function (d) {
                         if (!d3.select(this).classed("grouped") && !d3.select(this).classed("focusGroup")) {
-                            Utils.fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     }),
                 update => update
@@ -167,9 +166,9 @@ module.exports = function GraphUI(graph) {
                         {"source": edgeNode.source.id, "target": edgeNode.target.id}))
                     .each(function () {
                         if (d3.select(this).classed("focusGroup")) {
-                            Utils.fadeIn(this, fadeSpeed);
+                            Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
-                            Utils.fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     })
             );
@@ -201,25 +200,23 @@ module.exports = function GraphUI(graph) {
                     enter.append("foreignObject")
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => Utils.arrayMax(d[1].text.split("\n").map(line => line.length)) * 12 + 12)
-                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
+                    //.attr("width", d => Utils.arrayMax(d[1].text.split("\n").map(line => line.length)) * 12 + 12)
+                    //.attr("height", d => d[1].text.split("\n").length * 20 + 20)
+                    .attr("width", screen.width)
+                    .attr("height", screen.height)
                     .append('xhtml:div')
                     .append('div')
                     .attr("contentEditable", true)
                     .text(d => d[1].text)
                     .on("keydown", function (d) {
                         graphUI.graph.updateText(d[0], this.innerText);
-                        graphUI.update();
                     })
                     .on("keyup", function (d) {
                         graphUI.graph.updateText(d[0], this.innerText);
-                        graphUI.update();
                     });},
                 update => update
                     .attr("x", d => d[1].x + 20)
                     .attr("y", d => d[1].y - 10)
-                    .attr("width", d => Utils.arrayMax(d[1].text.split("\n").map(line => line.length)) * 12 + 12)
-                    .attr("height", d => d[1].text.split("\n").length * 20 + 20)
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
                               d[0] == Purs.fromFocus(graphUI.graph.focus)) {
@@ -273,19 +270,19 @@ module.exports = function GraphUI(graph) {
                           .on("end", dragended_node))
                     .on("mouseover", function (d) {
                         mouseState.mouseoverNode = d[0];
-                        Utils.fadeIn(this, fadeSpeed);
+                        Utils.fadeIn(this, graphUI.fadeSpeed);
                     })
                     .on("mouseout", function (d) {
                         mouseState.mouseoverNode = undefined;
                         if (!d3.select(this).classed("grouped")) {
-                            Utils.fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     })
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
-                            Utils.fadeIn(this, fadeSpeed);
+                            Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
-                            Utils.fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     }),
                 update => update
@@ -294,9 +291,9 @@ module.exports = function GraphUI(graph) {
                     .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
                     .each(function () {
                         if (d3.select(this).classed("grouped")) {
-                            Utils.fadeIn(this, fadeSpeed);
+                            Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
-                            Utils.fadeOut(this, fadeSpeed);
+                            Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     })
             );
@@ -322,12 +319,12 @@ module.exports = function GraphUI(graph) {
                             !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
                             d3.select(this).classed("ready", true);
                         }
-                        Utils.fadeIn(this, fadeSpeed);
+                        Utils.fadeIn(this, graphUI.fadeSpeed);
                         graphUI.update();
                     })
                     .on("mouseout", function () {
                         mouseState.mouseoverNode = undefined;
-                        Utils.fadeOut(this, fadeSpeed);
+                        Utils.fadeOut(this, graphUI.fadeSpeed);
                     })
                     .call(d3.drag()
                           .on("start", dragstarted_halo)
@@ -344,9 +341,11 @@ module.exports = function GraphUI(graph) {
             node => node.x));
         yMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(
             node => node.y));
-        graphUI.svg
-            .attr("width", xMax + screen.width)
-            .attr("height", yMax + screen.height);
+        if (xMax && yMax) {
+            graphUI.svg
+                .attr("width", xMax + screen.width)
+                .attr("height", yMax + screen.height);
+        }
     };
 
     graphUI.update = function () {
@@ -391,8 +390,8 @@ module.exports = function GraphUI(graph) {
 
     function dragged_node(d) {
         graphUI.graph.moveNode(d[0], {
-            "x": d3.event.x,
-            "y": d3.event.y,
+            "x": Math.floor(d3.event.x / graphUI.gridSize) * graphUI.gridSize,
+            "y": Math.floor(d3.event.y / graphUI.gridSize) * graphUI.gridSize,
         });
         graphUI.update();
     }
@@ -439,6 +438,43 @@ module.exports = function GraphUI(graph) {
         };
     }
 
+    graphUI.moveFocusDown = function () {
+        focusNodeId = Purs.fromFocus(graphUI.graph.focus);
+        node = graphUI.graph.nodes[focusNodeId];
+        graphUI.graph.moveNode(focusNodeId, {
+            "x": node.x,
+            "y": node.y + graphUI.gridSize,
+        });
+    };
+
+    graphUI.moveFocusUp = function () {
+        focusNodeId = Purs.fromFocus(graphUI.graph.focus);
+        node = graphUI.graph.nodes[focusNodeId];
+        graphUI.graph.moveNode(focusNodeId, {
+            "x": node.x,
+            "y": node.y - graphUI.gridSize,
+        });
+    };
+
+    graphUI.moveFocusLeft = function () {
+        focusNodeId = Purs.fromFocus(graphUI.graph.focus);
+        console.log(focusNodeId);
+        node = graphUI.graph.nodes[focusNodeId];
+        graphUI.graph.moveNode(focusNodeId, {
+            "x": node.x - graphUI.gridSize,
+            "y": node.y,
+        });
+    };
+
+    graphUI.moveFocusRight = function () {
+        focusNodeId = Purs.fromFocus(graphUI.graph.focus);
+        node = graphUI.graph.nodes[focusNodeId];
+        graphUI.graph.moveNode(focusNodeId, {
+            "x": node.x + graphUI.gridSize,
+            "y": node.y,
+        });
+    };
+
 
     ///////////////////////////////////
     //////// Save/loading graph
@@ -456,7 +492,9 @@ module.exports = function GraphUI(graph) {
         graphUI.graph.nodes = Utils.deepCopyObject(newGraph.nodes);
         graphUI.graph.focus = newGraph.focus;
         graphUI.graph.highlighted = newGraph.highlighted;
-        graphUI.graph.pursGraph = Purs.listOpsFromGraph(newGraph);
+        console.log(graphUI.graph.highlighted);
+        //graphUI.graph.pursGraph = Purs.listOpsFromGraph(newGraph);
+        graphUI.graph.pursGraph = newGraph;
     };
 
     graphUI.loadFile = function() {
@@ -504,6 +542,11 @@ module.exports = function GraphUI(graph) {
         graphUI.keyboardMode = "insert";
     }
 
+    function moveMode() {
+        d3.event.preventDefault();
+        graphUI.keyboardMode = "move";
+    }
+
     var keybindings = {
         "normal": {
             "j": graph => graph.traverseDown(),
@@ -532,6 +575,7 @@ module.exports = function GraphUI(graph) {
             "Escape": graph => graph.clearHighlights(),
             "i": insertMode,
             "v": visualMode,
+            "m": moveMode,
             " ": function (graph, event) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -547,9 +591,18 @@ module.exports = function GraphUI(graph) {
             "h": graph => graph.traverseLeft().highlightFocus(),
             "l": graph => graph.traverseRight().highlightFocus(),
             "s": graph => graph.toggleHighlightFocus(),
-            "Delete": graph => graph.removeFocusFromGroup(),
+            "Delete": graph => graph.removeFocused(),
             "Escape": normalMode,
             " ": graph => graph.toggleGroupExpand,
-        }
+        },
+        "move": {
+            "j": graph => graphUI.moveFocusDown(),
+            "k": graph => graphUI.moveFocusUp(),
+            "h": graph => graphUI.moveFocusLeft(),
+            "l": graph => graphUI.moveFocusRight(),
+            "Escape": normalMode,
+            "s": normalMode,
+            "m": normalMode,
+        },
     };
 };

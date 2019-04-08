@@ -1,10 +1,6 @@
-//svg {
-//    //display: block 1px #ccc;
-//    top: 0%;
-//    left: 0%;
-//    width: 100%;
-//    height: 100%;
-//}
+[contenteditable]:focus {
+    outline: 0px solid transparent;
+}
 
 circle {
     fill: #000;
@@ -18,6 +14,10 @@ circle.node.focused.insert {
     fill: #909;
 }
 
+circle.node.focused.move {
+    fill: #f40;
+}
+
 .nodeBorder {
     fill: #0001;
     opacity: 0.0;
@@ -29,7 +29,7 @@ circle.node.focused.insert {
 }
 
 .halo {
-    fill: #fff;
+    fill: #fff0;
     stroke: #0001;
     stroke-width: 25;
     opacity: 0.0;

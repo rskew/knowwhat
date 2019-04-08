@@ -78,11 +78,11 @@ window.graphUI.graph.usePursGraph();
 window.graphUI.update();
 
 
-const savedGraph = require("./Workflow.workflow-graph_v0.0_2019-04-03T12_36_57.884Z.json");
-console.log(JSON.stringify(savedGraph));
-console.log(window.graphUI.graph.nodes);
-window.graphUI.loadGraph(JSON.stringify(savedGraph));
-window.graphUI.update();
-console.log(window.graphUI.graph.nodes);
+//const savedGraph = require("./Workflow.workflow-graph_v0.0_2019-04-05T02_32_11.381Z.json");
+//console.log(JSON.stringify(savedGraph));
+//console.log(window.graphUI.graph.nodes);
+//window.graphUI.loadGraph(JSON.stringify(savedGraph));
+//window.graphUI.update();
+//console.log(window.graphUI.graph.nodes);
 
 window.graph = window.graphUI.graph;
