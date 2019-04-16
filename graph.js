@@ -70,7 +70,7 @@ function Graph(graphNodes, focus, highlighted) {
 
     graph.newChildOfFocus = function () {
         if (Purs.fromFocus(graph.focus) != null) {
-            newNodePos = Purs.newPositionFrom(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)])(Purs.getChildren);
+            newNodePos = Purs.newChildPosition(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)]);
             graph.createNode(newNodePos.x,
                              newNodePos.y,
                              StringSet.singleton(Purs.fromFocus(graph.focus)),
@@ -86,7 +86,7 @@ function Graph(graphNodes, focus, highlighted) {
 
     graph.newParentOfFocus = function () {
         if (Purs.fromFocus(graph.focus) != "") {
-            newNodePos = Purs.newPositionFrom(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)])(Purs.getParents);
+            newNodePos = Purs.newParentPosition(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)]);
             graph.createNode(newNodePos.x,
                              newNodePos.y,
                              StringSet.empty(),
@@ -103,7 +103,7 @@ function Graph(graphNodes, focus, highlighted) {
     graph.createNode = function (x, y, parentIds, childIds) {
         newNodeId = Utils.uuidv4();
         newNodeBody = new GraphNodeBody(
-            newNodeId, " fing  zing", x, y, parentIds, childIds);
+            newNodeId, " ", x, y, parentIds, childIds);
 
         graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
         for (i=0; i<StringSet.cardinality(parentIds); i++) {
@@ -430,42 +430,5 @@ function Graph(graphNodes, focus, highlighted) {
         graph.replaceHighlighted(StringSet.empty());
         return graph;
     };
-
-    ///////////////////////////////////
-    //////// Node Spatial Arrangement
-
-    //graph.getNewNodePosition = function (parentId) {
-    //    // Find right-most child
-    //    children = graph.nodes[parentId].children;
-    //    if (StringSet.cardinality(children) > 0) {
-    //        rightmostChildId = StringSet.lookupIndex(
-    //            Utils.argMax(StringSet.toArray(StringSet.map(children, childId => graph.nodes[childId].x))),
-    //            children);
-    //        return graph.getNewPositionRightOf(graph.nodes[rightmostChildId]);
-    //    } else {
-    //        return graph.getNewPositionBelowOf(graph.nodes[parentId]);
-
-    //    }
-    //};
-
-    //graph.getNewPositionRightOf = function (nodeObject) {
-    //    attempt = {"x": nodeObject.x + newNodeOffset.x,
-    //               "y": nodeObject.y};
-    //    if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-    //        return graph.getNewPositionRightOf(attempt);
-    //    } else {
-    //        return attempt;
-    //    }
-    //};
-
-    //graph.getNewPositionBelowOf = function (nodeObject) {
-    //    attempt = {"x": nodeObject.x,
-    //               "y": nodeObject.y + newNodeOffset.y};
-    //    if (Utils.distanceToClosestPoint2D(attempt, Object.values(graph.nodes)) < newNodeClearenceThreshold) {
-    //        return graph.getNewPositionRightOf(attempt);
-    //    } else {
-    //        return attempt;
-    //    }
-    //};
 };
 module.exports = Graph;

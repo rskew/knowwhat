@@ -29,18 +29,17 @@ import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDec
 import Foreign.Generic.Types (SumEncoding)
 import Foreign.Object (Object, keys, values, size)
 import Foreign.Object as Object
-import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), negate, (<$>), class Functor, class Apply, apply, class Applicative, (<*>), class Monoid, mempty, (#), (>), (/=), mod, (<), (-))
+import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), class Functor, class Apply, apply, class Applicative, (<*>), class Monoid, mempty, (#), (>), (/=), mod, (<), (-))
 
 
 version :: String
-version = "0.0"
+version = "0.001"
 
 newNodeXOffset :: Number
 newNodeXOffset = 100.0
 
-newParentYOffset :: Number
-newParentYOffset = -100.0
-
+newNodeYOffset :: Number
+newNodeYOffset = 100.0
 
 newNodeInitialPos :: Point2D
 newNodeInitialPos = { x: 100.0, y: 100.0 }
@@ -520,24 +519,24 @@ traverseRight g = changeFocusLeftRight Right g
 rightmostNode :: forall f. Foldable f => f GraphNode -> Maybe GraphNode
 rightmostNode = maximumBy (comparing viewX)
 
-newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
-newPositionFrom g (GraphNode node) relations =
-  fromMaybe { x: node.x, y: node.y + newParentYOffset } do
-    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
-    pure { x: rightmostParent.x + newNodeXOffset
-         , y: rightmostParent.y }
+--newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
+--newPositionFrom g (GraphNode node) relations =
+--  fromMaybe { x: node.x, y: node.y + newParentYOffset } do
+--    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
+--    pure { x: rightmostParent.x + newNodeXOffset
+--         , y: rightmostParent.y }
 
---newChildPosition :: Graph -> GraphNode -> Point2D
---newChildPosition g (GraphNode node) =
---  fromMaybe newNodeInitialPos do
---    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
---    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
---
---newParentPosition :: Graph -> GraphNode -> Point2D
---newParentPosition g (GraphNode node) =
---  fromMaybe newNodeInitialPos do
---    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
---    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
+newChildPosition :: Graph -> GraphNode -> Point2D
+newChildPosition g (GraphNode node) =
+  fromMaybe { x: node.x, y: node.y + newNodeYOffset } do
+    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
+    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
+
+newParentPosition :: Graph -> GraphNode -> Point2D
+newParentPosition g (GraphNode node) =
+  fromMaybe { x: node.x, y: node.y - newNodeYOffset } do
+    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
+    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
 
 
 ------
