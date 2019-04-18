@@ -56791,19 +56791,6 @@ module.exports = function GraphUI(graph) {
     });
   };
 
-  graphUI.resizeWindow = function () {
-    xMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(function (node) {
-      return node.x;
-    }));
-    yMax = Math.max.apply(null, Object.values(graphUI.graph.nodes).map(function (node) {
-      return node.y;
-    }));
-
-    if (xMax && yMax) {
-      graphUI.svg.attr("width", xMax + screen.width).attr("height", yMax + screen.height);
-    }
-  };
-
   graphUI.update = function () {
     graphUI.graph.usePursGraph();
     graphUI.updateEdges();
@@ -56818,7 +56805,6 @@ module.exports = function GraphUI(graph) {
       mouseState.clickedNode = undefined;
       graphUI.update();
     });
-    graphUI.resizeWindow();
   };
 
   function dragstarted_background(d) {
@@ -57244,7 +57230,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "42963" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "33161" + '/');
 
   ws.onmessage = function (event) {
     var data = JSON.parse(event.data);
