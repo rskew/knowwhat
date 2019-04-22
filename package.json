@@ -1,5 +1,6 @@
 {
   "name": "workflow",
+  "description": "Prototype task tracking application",
   "version": "1.0.0",
   "main": "workflow.js",
   "repository": "https://github.com/rskew/workflow.git",
