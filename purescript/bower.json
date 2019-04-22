@@ -11,7 +11,9 @@
     "purescript-console": "^4.2.0",
     "purescript-effect": "^2.0.1",
     "purescript-ordered-collections": "^1.6.0",
-    "purescript-profunctor-lenses": "^5.0.0"
+    "purescript-profunctor-lenses": "^5.0.0",
+    "purescript-foreign": "^5.0.0",
+    "purescript-foreign-generic": "^9.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"

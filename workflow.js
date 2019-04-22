@@ -2,12 +2,15 @@ const Graph = require('./graph.js');
 const GraphUI = require('./graphUI.js');
 const StringSet = require('./stringSet.js');
 const Utils = require('./utils.js');
+var Purs = require('./purescript/output/Main/index.js');
+
 
 ///////////////////////////////////
 //////// Data
 
 var graphNodes = {
     "a": {
+        "id": "a",
         "text": "do all the things plz",
         "x": 100,
         "y": 100,
@@ -18,6 +21,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "b": {
+        "id": "b",
         "text": "TODO: woohoo!",
         "x": 150,
         "y": 200,
@@ -26,6 +30,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "c": {
+        "id": "c",
         "text": "today I frink",
         "x": 100,
         "y": 150,
@@ -34,6 +39,7 @@ var graphNodes = {
         "subgraphNodes": {},
     },
     "d": {
+        "id": "d",
         "text": "shopping list: ka-pow!",
         "x": 200,
         "y": 250,
@@ -43,13 +49,13 @@ var graphNodes = {
     },
 };
 
-var graph = new Graph(graphNodes, "a", StringSet.fromArray(["b"]));
+var graph = new Graph(graphNodes, Purs.FocusNode.create("a"), StringSet.fromArray(["b"]));
 var graphUI = new GraphUI(graph);
 
 function copyPursGraph(pursGraph) {
     return new Graph(Utils.deepCopyObject(pursGraph.nodes),
-                     pursGraph.focusNode,
-                     pursGraph.highlightedNodes);
+                     pursGraph.focus,
+                     pursGraph.highlighted);
 };
 
 
@@ -59,11 +65,24 @@ function copyPursGraph(pursGraph) {
 graphUI.update();
 
 // TODO: remove debugging hackz
-var purs = require('./purescript/output/Main/index.js');
-window.purs = purs;
-window.graph = graph;
+window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 
-window.graphUI.graph = copyPursGraph(purs.demo);
+window.copyPursGraph = copyPursGraph;
+window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update();
+//window.graphUI.graph.newNodeBelowFocus();
+window.graphUI.update();
+window.graphUI.graph.usePursGraph();
+window.graphUI.update();
+
+
+//const savedGraph = require("./Workflow.workflow-graph_v0.0_2019-04-05T02_32_11.381Z.json");
+//console.log(JSON.stringify(savedGraph));
+//console.log(window.graphUI.graph.nodes);
+//window.graphUI.loadGraph(JSON.stringify(savedGraph));
+//window.graphUI.update();
+//console.log(window.graphUI.graph.nodes);
+
+window.graph = window.graphUI.graph;

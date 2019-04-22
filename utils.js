@@ -1,4 +1,4 @@
-var d3 = require("./d3.js");
+var d3 = require("./libs/d3.js");
 
 var isIn = function(element, array) {
     return array.indexOf(element) > -1;
@@ -26,6 +26,11 @@ var argMax = function(array) {
     return array.map((x, i) => [x, i]).reduce((r, a) => (a[0] > r[0] ? a : r))[1];
 }
 exports.argMax = argMax;
+
+var arrayMax = function(array) {
+    return array.reduce(function(r, a) { return Math.max(r, a); });
+}
+exports.arrayMax = arrayMax;
 
 // https://gist.github.com/jed/982883
 var uuidv4 = function() {
@@ -106,3 +111,13 @@ var deepCopyObject = function (o) {
     return JSON.parse(JSON.stringify(o));
 };
 exports.deepCopyObject = deepCopyObject;
+
+var simulateClickOn = function (element) {
+    var clickEvent = new MouseEvent('click', {
+        view: window,
+        bubbles: true,
+        cancelable: true
+    });
+    element.dispatchEvent(clickEvent);
+};
+exports.simulateClickOn = simulateClickOn;
