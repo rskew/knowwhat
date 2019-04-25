@@ -1,7 +1,9 @@
 const d3 = require("./libs/d3.js");
 const Utils = require("./utils");
 const StringSet = require("./stringSet.js");
-const Purs = require('./purescript/output/Main/index.js');
+var PursCore = require('./purescript/output/Workflow.Core/index.js');
+var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
+var Purs = {...PursCore, ...PursInteraction};
 var FileSaver = require("./libs/FileSaver.min.js");
 
 
@@ -543,6 +545,8 @@ module.exports = function GraphUI(graph) {
         graphUI.graph.focus = newGraph.focus;
         graphUI.graph.highlighted = newGraph.highlighted;
         console.log(graphUI.graph.highlighted);
+        graphUI.graph.pursGraph = Purs.emptyGraph;
+        graphUI.update();
         graphUI.graph.pursGraph = newGraph;
     };
 

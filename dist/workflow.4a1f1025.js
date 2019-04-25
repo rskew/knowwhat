@@ -54023,26 +54023,20 @@ module.exports = {
   genericDecodeJSON: genericDecodeJSON,
   genericEncodeJSON: genericEncodeJSON
 };
-},{"../Control.Bind/index.js":"purescript/output/Control.Bind/index.js","../Control.Category/index.js":"purescript/output/Control.Category/index.js","../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Control.Semigroupoid/index.js":"purescript/output/Control.Semigroupoid/index.js","../Data.Functor/index.js":"purescript/output/Data.Functor/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic.Class/index.js":"purescript/output/Foreign.Generic.Class/index.js","../Foreign.Generic.Types/index.js":"purescript/output/Foreign.Generic.Types/index.js","../Foreign.JSON/index.js":"purescript/output/Foreign.JSON/index.js","../Global.Unsafe/index.js":"purescript/output/Global.Unsafe/index.js","../Prelude/index.js":"purescript/output/Prelude/index.js"}],"purescript/output/Main/index.js":[function(require,module,exports) {
+},{"../Control.Bind/index.js":"purescript/output/Control.Bind/index.js","../Control.Category/index.js":"purescript/output/Control.Category/index.js","../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Control.Semigroupoid/index.js":"purescript/output/Control.Semigroupoid/index.js","../Data.Functor/index.js":"purescript/output/Data.Functor/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic.Class/index.js":"purescript/output/Foreign.Generic.Class/index.js","../Foreign.Generic.Types/index.js":"purescript/output/Foreign.Generic.Types/index.js","../Foreign.JSON/index.js":"purescript/output/Foreign.JSON/index.js","../Global.Unsafe/index.js":"purescript/output/Global.Unsafe/index.js","../Prelude/index.js":"purescript/output/Prelude/index.js"}],"purescript/output/Workflow.Core/index.js":[function(require,module,exports) {
 "use strict";
 
 var Control_Applicative = require("../Control.Applicative/index.js");
 
-var Control_Apply = require("../Control.Apply/index.js");
-
 var Control_Bind = require("../Control.Bind/index.js");
 
 var Control_Monad_Except_Trans = require("../Control.Monad.Except.Trans/index.js");
-
-var Control_Plus = require("../Control.Plus/index.js");
 
 var Control_Semigroupoid = require("../Control.Semigroupoid/index.js");
 
 var Data_Array = require("../Data.Array/index.js");
 
 var Data_Eq = require("../Data.Eq/index.js");
-
-var Data_EuclideanRing = require("../Data.EuclideanRing/index.js");
 
 var Data_Foldable = require("../Data.Foldable/index.js");
 
@@ -54078,8 +54072,6 @@ var Data_List_Types = require("../Data.List.Types/index.js");
 
 var Data_Maybe = require("../Data.Maybe/index.js");
 
-var Data_Monoid = require("../Data.Monoid/index.js");
-
 var Data_Ord = require("../Data.Ord/index.js");
 
 var Data_Ordering = require("../Data.Ordering/index.js");
@@ -54102,8 +54094,6 @@ var Data_String_Pattern = require("../Data.String.Pattern/index.js");
 
 var Data_Symbol = require("../Data.Symbol/index.js");
 
-var Data_Traversable = require("../Data.Traversable/index.js");
-
 var Data_Tuple = require("../Data.Tuple/index.js");
 
 var Data_Unit = require("../Data.Unit/index.js");
@@ -54121,34 +54111,6 @@ var Foreign_Generic_Types = require("../Foreign.Generic.Types/index.js");
 var Foreign_Object = require("../Foreign.Object/index.js");
 
 var Prelude = require("../Prelude/index.js");
-
-var Leaf = function () {
-  function Leaf() {}
-
-  ;
-  Leaf.value = new Leaf();
-  return Leaf;
-}();
-
-var Branch = function () {
-  function Branch(value0, value1, value2) {
-    this.value0 = value0;
-    this.value1 = value1;
-    this.value2 = value2;
-  }
-
-  ;
-
-  Branch.create = function (value0) {
-    return function (value1) {
-      return function (value2) {
-        return new Branch(value0, value1, value2);
-      };
-    };
-  };
-
-  return Branch;
-}();
 
 var GraphNode = function GraphNode(x) {
   return x;
@@ -54418,72 +54380,12 @@ var UnHighlight = function () {
   return UnHighlight;
 }();
 
-var Left = function () {
-  function Left() {}
-
-  ;
-  Left.value = new Left();
-  return Left;
-}();
-
-var Right = function () {
-  function Right() {}
-
-  ;
-  Right.value = new Right();
-  return Right;
-}();
-
-var Asdf = function Asdf(x) {
-  return x;
-};
-
-var version = "0.001"; // | Order array elements to the right of a given element,
-// | not including the given element.
-
-var toRightWrapOrdering = function toRightWrapOrdering(dictOrd) {
-  return function (x) {
-    return function (getPosition) {
-      return function (xs) {
-        var isToRight = Data_Function.on(Data_Ord.lessThan(dictOrd))(getPosition)(x);
-        var xsToRight = Data_Array.sortWith(dictOrd)(getPosition)(Data_Array.filter(isToRight)(xs));
-        var isToLeft = Data_Function.on(Data_Ord.greaterThan(dictOrd))(getPosition)(x);
-        var xsToLeft = Data_Array.sortWith(dictOrd)(getPosition)(Data_Array.filter(isToLeft)(xs));
-        return Data_Semigroup.append(Data_Semigroup.semigroupArray)(xsToRight)(xsToLeft);
-      };
-    };
-  };
-};
+var version = "0.001";
 
 var nodeIdSetFromArray = function nodeIdSetFromArray(nodeIdArr) {
   return Foreign_Object.fromFoldable(Data_Foldable.foldableArray)(Data_Functor.map(Data_Functor.functorArray)(function (nodeId) {
     return new Data_Tuple.Tuple(nodeId, Data_Unit.unit);
   })(nodeIdArr));
-};
-
-var nextInGroup = function nextInGroup(dictEq) {
-  return function (v) {
-    return function (x) {
-      return function (xs) {
-        if (v instanceof Left) {
-          return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.elemIndex(dictEq)(x)(xs))(function (xIndex) {
-            return Data_Array.index(xs)(Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(xIndex + 1 | 0)(Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(xs)));
-          });
-        }
-
-        ;
-
-        if (v instanceof Right) {
-          return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.elemIndex(dictEq)(x)(xs))(function (xIndex) {
-            return Data_Array.index(xs)(Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(xIndex - 1 | 0)(Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(xs)));
-          });
-        }
-
-        ;
-        throw new Error("Failed pattern match at Main (line 464, column 1 - line 464, column 72): " + [v.constructor.name, x.constructor.name, xs.constructor.name]);
-      };
-    };
-  };
 };
 
 var newNodeYOffset = 100.0;
@@ -54496,25 +54398,6 @@ var maybe = Data_Maybe.Just.create;
 
 var insert = function insert(nodeId) {
   return Foreign_Object.insert(nodeId)(Data_Unit.unit);
-};
-
-var hasImmute = function hasImmute(v) {
-  return Asdf({
-    a: v.a,
-    s: v.s,
-    d: v.d,
-    f: {
-      a: v.f.a,
-      s: v.f.s,
-      d: v.f.d,
-      f: {
-        a: 20,
-        s: v.f.f.s,
-        d: v.f.f.d,
-        f: v.f.f.f
-      }
-    }
-  });
 };
 
 var getParents = function getParents(v) {
@@ -54553,7 +54436,7 @@ var genericFocus = new Data_Generic_Rep.Generic(function (x) {
   }
 
   ;
-  throw new Error("Failed pattern match at Main (line 137, column 8 - line 137, column 48): " + [x.constructor.name]);
+  throw new Error("Failed pattern match at Workflow.Core (line 131, column 8 - line 131, column 48): " + [x.constructor.name]);
 }, function (x) {
   if (x instanceof Data_Generic_Rep.Inl) {
     return new FocusNode(x.value0);
@@ -54572,7 +54455,7 @@ var genericFocus = new Data_Generic_Rep.Generic(function (x) {
   }
 
   ;
-  throw new Error("Failed pattern match at Main (line 137, column 8 - line 137, column 48): " + [x.constructor.name]);
+  throw new Error("Failed pattern match at Workflow.Core (line 131, column 8 - line 131, column 48): " + [x.constructor.name]);
 });
 var genericEncodeOpts = {
   unwrapSingleConstructors: true,
@@ -54584,141 +54467,9 @@ var genericEdge = new Data_Generic_Rep.Generic(function (x) {
   return x;
 }, function (x) {
   return x;
-});
-var functorTree = new Data_Functor.Functor(function (v) {
-  return function (v1) {
-    if (v1 instanceof Leaf) {
-      return Leaf.value;
-    }
-
-    ;
-
-    if (v1 instanceof Branch) {
-      return new Branch(Data_Functor.map(functorTree)(v)(v1.value0), v(v1.value1), Data_Functor.map(functorTree)(v)(v1.value2));
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 623, column 1 - line 623, column 37): " + [v.constructor.name, v1.constructor.name]);
-  };
 }); // TODO: re-export to JS using module system properly
 
-var fromMaybe = Data_Maybe.fromMaybe; // | Gives next element in array to the left or right of a given element,
-// | wrapping back around.
-
-var nextElemWrap = function nextElemWrap(dictOrd) {
-  return function (v) {
-    return function (x) {
-      return function (getPosition) {
-        return function (xs) {
-          if (v instanceof Left) {
-            var toTheLeft = Data_Array.reverse(Data_Semigroup.append(Data_Semigroup.semigroupArray)([x])(toRightWrapOrdering(dictOrd)(x)(getPosition)(xs)));
-            return fromMaybe(x)(Data_Array.index(toTheLeft)(0));
-          }
-
-          ;
-
-          if (v instanceof Right) {
-            var xsOrderedToTheRight = Data_Semigroup.append(Data_Semigroup.semigroupArray)(toRightWrapOrdering(dictOrd)(x)(getPosition)(xs))([x]);
-            return fromMaybe(x)(Data_Array.index(xsOrderedToTheRight)(0));
-          }
-
-          ;
-          throw new Error("Failed pattern match at Main (line 438, column 1 - line 438, column 82): " + [v.constructor.name, x.constructor.name, getPosition.constructor.name, xs.constructor.name]);
-        };
-      };
-    };
-  };
-};
-
-var foldableTree = new Data_Foldable.Foldable(function (dictMonoid) {
-  return function (v) {
-    return function (v1) {
-      if (v1 instanceof Leaf) {
-        return Data_Monoid.mempty(dictMonoid);
-      }
-
-      ;
-
-      if (v1 instanceof Branch) {
-        return Data_Semigroup.append(dictMonoid.Semigroup0())(Data_Semigroup.append(dictMonoid.Semigroup0())(Data_Foldable.foldMap(foldableTree)(dictMonoid)(v)(v1.value0))(v(v1.value1)))(Data_Foldable.foldMap(foldableTree)(dictMonoid)(v)(v1.value2));
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 635, column 1 - line 635, column 39): " + [v.constructor.name, v1.constructor.name]);
-    };
-  };
-}, function (v) {
-  return function (init) {
-    return function (v1) {
-      if (v1 instanceof Leaf) {
-        return init;
-      }
-
-      ;
-
-      if (v1 instanceof Branch) {
-        return Data_Foldable.foldl(foldableTree)(v)(v(Data_Foldable.foldl(foldableTree)(v)(init)(v1.value0))(v1.value1))(v1.value2);
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 635, column 1 - line 635, column 39): " + [v.constructor.name, init.constructor.name, v1.constructor.name]);
-    };
-  };
-}, function (v) {
-  return function (init) {
-    return function (v1) {
-      if (v1 instanceof Leaf) {
-        return init;
-      }
-
-      ;
-
-      if (v1 instanceof Branch) {
-        return Data_Foldable.foldr(foldableTree)(v)(v(v1.value1)(Data_Foldable.foldr(foldableTree)(v)(init)(v1.value2)))(v1.value0);
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 635, column 1 - line 635, column 39): " + [v.constructor.name, init.constructor.name, v1.constructor.name]);
-    };
-  };
-});
-var traverseTree = new Data_Traversable.Traversable(function () {
-  return foldableTree;
-}, function () {
-  return functorTree;
-}, function (dictApplicative) {
-  return function (v) {
-    if (v instanceof Leaf) {
-      return Control_Applicative.pure(dictApplicative)(Leaf.value);
-    }
-
-    ;
-
-    if (v instanceof Branch) {
-      return Control_Apply.apply(dictApplicative.Apply0())(Control_Apply.apply(dictApplicative.Apply0())(Data_Functor.map(dictApplicative.Apply0().Functor0())(Branch.create)(Data_Traversable.sequence(traverseTree)(dictApplicative)(v.value0)))(v.value1))(Data_Traversable.sequence(traverseTree)(dictApplicative)(v.value2));
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 644, column 1 - line 644, column 42): " + [v.constructor.name]);
-  };
-}, function (dictApplicative) {
-  return function (v) {
-    return function (v1) {
-      if (v1 instanceof Leaf) {
-        return Control_Applicative.pure(dictApplicative)(Leaf.value);
-      }
-
-      ;
-
-      if (v1 instanceof Branch) {
-        return Control_Apply.apply(dictApplicative.Apply0())(Control_Apply.apply(dictApplicative.Apply0())(Data_Functor.map(dictApplicative.Apply0().Functor0())(Branch.create)(Data_Traversable.traverse(traverseTree)(dictApplicative)(v)(v1.value0)))(v(v1.value1)))(Data_Traversable.traverse(traverseTree)(dictApplicative)(v)(v1.value2));
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 644, column 1 - line 644, column 42): " + [v.constructor.name, v1.constructor.name]);
-    };
-  };
-});
+var fromMaybe = Data_Maybe.fromMaybe;
 var eqGraphNode = new Data_Eq.Eq(function (x) {
   return function (y) {
     return Data_Eq.eq(Foreign_Object.eqObject(Data_Eq.eqUnit))(x.children)(y.children) && x.id === y.id && Data_Eq.eq(Foreign_Object.eqObject(Data_Eq.eqUnit))(x.parents)(y.parents) && Data_Eq.eq(Foreign_Object.eqObject(eqGraphNode))(x.subgraphNodes)(y.subgraphNodes) && x.text === y.text && x.x === y.x && x.y === y.y;
@@ -54888,51 +54639,6 @@ var graphFromJSON = function graphFromJSON(graphJSON) {
   }))(Foreign_Generic_Class.decode_Other(decodeFocus))())))(Foreign_Generic_Class.genericCountArgsArgument))(genericEncodeOpts)(graphJSON);
 };
 
-var countThrowsDesugar = function countThrowsDesugar(n) {
-  return Control_Bind.bind(Control_Bind.bindArray)(Data_Array.range(1)(6))(function (x) {
-    return Control_Bind.bind(Control_Bind.bindArray)(Data_Array.range(1)(6))(function (y) {
-      var $192 = (x + y | 0) === n;
-
-      if ($192) {
-        return Control_Applicative.pure(Control_Applicative.applicativeArray)([x, y]);
-      }
-
-      ;
-      return Control_Plus.empty(Control_Plus.plusArray);
-    });
-  });
-};
-
-var countThrowsDebind = function countThrowsDebind(n) {
-  return Data_Function.flip(Data_Array.concatMap)(Data_Array.range(1)(6))(function (x) {
-    return Data_Function.flip(Data_Array.concatMap)(Data_Array.range(1)(6))(function (y) {
-      var $193 = (x + y | 0) === n;
-
-      if ($193) {
-        return [[x, y]];
-      }
-
-      ;
-      return Control_Plus.empty(Control_Plus.plusArray);
-    });
-  });
-};
-
-var countThrows = function countThrows(n) {
-  return Control_Bind.bind(Control_Bind.bindArray)(Data_Array.range(1)(6))(function (v) {
-    return Control_Bind.bind(Control_Bind.bindArray)(Data_Array.range(1)(6))(function (v1) {
-      var $196 = (v + v1 | 0) === n;
-
-      if ($196) {
-        return Control_Applicative.pure(Control_Applicative.applicativeArray)([v, v1]);
-      }
-
-      ;
-      return Control_Plus.empty(Control_Plus.plusArray);
-    });
-  });
-};
-
 var computeEdgeId = function computeEdgeId(v) {
   return v.source + ("." + v.target);
 };
@@ -54955,57 +54661,8 @@ var fromFocus = function fromFocus(v) {
   }
 
   ;
-  throw new Error("Failed pattern match at Main (line 588, column 1 - line 588, column 29): " + [v.constructor.name]);
-}; //----
-// Purescript by example
-
-
-var combineMaybe = function combineMaybe(dictApplicative) {
-  return function (v) {
-    if (v instanceof Data_Maybe.Nothing) {
-      return Control_Applicative.pure(dictApplicative)(Data_Maybe.Nothing.value);
-    }
-
-    ;
-
-    if (v instanceof Data_Maybe.Just) {
-      return Data_Functor.map(dictApplicative.Apply0().Functor0())(Data_Maybe.Just.create)(v.value0);
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 617, column 1 - line 617, column 72): " + [v.constructor.name]);
-  };
+  throw new Error("Failed pattern match at Workflow.Core (line 384, column 1 - line 384, column 29): " + [v.constructor.name]);
 };
-
-var applyTree = new Control_Apply.Apply(function () {
-  return functorTree;
-}, function (v) {
-  return function (v1) {
-    if (v instanceof Leaf) {
-      return Leaf.value;
-    }
-
-    ;
-
-    if (v1 instanceof Leaf) {
-      return Leaf.value;
-    }
-
-    ;
-
-    if (v instanceof Branch && v1 instanceof Branch) {
-      return new Branch(Control_Apply.apply(applyTree)(v.value0)(v1.value0), v.value1(v1.value1), Control_Apply.apply(applyTree)(v.value2)(v1.value2));
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 627, column 1 - line 627, column 33): " + [v.constructor.name, v1.constructor.name]);
-  };
-});
-var applicativeTree = new Control_Applicative.Applicative(function () {
-  return applyTree;
-}, function (val) {
-  return new Branch(Leaf.value, val, Leaf.value);
-});
 
 var _y = function _y(dictStrong) {
   return Data_Lens_Record.prop(new Data_Symbol.IsSymbol(function () {
@@ -55076,22 +54733,22 @@ var _GraphNode = function _GraphNode(dictStrong) {
 };
 
 var addChild = function addChild(nodeId) {
-  return Data_Lens_Setter.over(function ($298) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($298));
+  return Data_Lens_Setter.over(function ($133) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($133));
   })(insert(nodeId));
 }; //----
 // Graph logic
 
 
 var addParent = function addParent(nodeId) {
-  return Data_Lens_Setter.over(function ($299) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($299));
+  return Data_Lens_Setter.over(function ($134) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($134));
   })(insert(nodeId));
 };
 
 var graphTitle = function graphTitle(v) {
-  var nodeTextArr = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Data_String_Common.trim)(Data_Lens_Getter.view(function ($300) {
-    return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_text(Data_Lens_Internal_Forget.strongForget)($300));
+  var nodeTextArr = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Data_String_Common.trim)(Data_Lens_Getter.view(function ($135) {
+    return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_text(Data_Lens_Internal_Forget.strongForget)($135));
   })))(Foreign_Object.values(v.nodes));
   var isTitle = Data_String_CodeUnits.contains("Title: ");
   var titles = Data_Array.filter(isTitle)(nodeTextArr);
@@ -55099,48 +54756,48 @@ var graphTitle = function graphTitle(v) {
 };
 
 var moveNode = function moveNode(pos) {
-  return function ($301) {
-    return Data_Lens_Setter.set(function ($302) {
-      return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($302));
-    })(pos.x)(Data_Lens_Setter.set(function ($303) {
-      return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($303));
-    })(pos.y)($301));
+  return function ($136) {
+    return Data_Lens_Setter.set(function ($137) {
+      return _GraphNode(Data_Profunctor_Strong.strongFn)(_x(Data_Profunctor_Strong.strongFn)($137));
+    })(pos.x)(Data_Lens_Setter.set(function ($138) {
+      return _GraphNode(Data_Profunctor_Strong.strongFn)(_y(Data_Profunctor_Strong.strongFn)($138));
+    })(pos.y)($136));
   };
 };
 
 var removeChild = function removeChild(nodeId) {
-  return Data_Lens_Setter.over(function ($304) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($304));
+  return Data_Lens_Setter.over(function ($139) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_children(Data_Profunctor_Strong.strongFn)($139));
   })($$delete(nodeId));
 };
 
 var removeParent = function removeParent(nodeId) {
-  return Data_Lens_Setter.over(function ($305) {
-    return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($305));
+  return Data_Lens_Setter.over(function ($140) {
+    return _GraphNode(Data_Profunctor_Strong.strongFn)(_parents(Data_Profunctor_Strong.strongFn)($140));
   })($$delete(nodeId));
 }; //----
 // Graph Queries
 
 
 var terminalestNode = function terminalestNode(nodes) {
-  var nParents = function nParents($306) {
-    return Foreign_Object.size(Data_Lens_Getter.view(function ($307) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($307));
-    })($306));
+  var nParents = function nParents($141) {
+    return Foreign_Object.size(Data_Lens_Getter.view(function ($142) {
+      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($142));
+    })($141));
   };
 
-  var nChildren = function nChildren($308) {
-    return Foreign_Object.size(Data_Lens_Getter.view(function ($309) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($309));
-    })($308));
+  var nChildren = function nChildren($143) {
+    return Foreign_Object.size(Data_Lens_Getter.view(function ($144) {
+      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($144));
+    })($143));
   };
 
   var isTerminal = function isTerminal(node) {
     return nChildren(node) === 0;
   };
 
-  var getY = Data_Lens_Getter.view(function ($310) {
-    return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($310));
+  var getY = Data_Lens_Getter.view(function ($145) {
+    return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_y(Data_Lens_Internal_Forget.strongForget)($145));
   });
   var lower = Data_Ord.comparing(Data_Ord.ordNumber)(getY);
 
@@ -55160,16 +54817,18 @@ var terminalestNode = function terminalestNode(nodes) {
   return Data_Foldable.maximumBy(Data_Foldable.foldableArray)(mostParentsLowest)(v);
 };
 
-var updateSubgraphNodes = Data_Lens_Setter.set(function ($311) {
-  return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($311));
+var updateSubgraphNodes = Data_Lens_Setter.set(function ($146) {
+  return _GraphNode(Data_Profunctor_Strong.strongFn)(_subgraphNodes(Data_Profunctor_Strong.strongFn)($146));
 });
-var updateText = Data_Lens_Setter.set(function ($312) {
-  return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($312));
+var updateText = Data_Lens_Setter.set(function ($147) {
+  return _GraphNode(Data_Profunctor_Strong.strongFn)(_text(Data_Profunctor_Strong.strongFn)($147));
 });
-var viewX = Data_Lens_Getter.view(function ($313) {
-  return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($313));
+var viewX = Data_Lens_Getter.view(function ($148) {
+  return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_x(Data_Lens_Internal_Forget.strongForget)($148));
 }); //----
 // Positioning
+//
+// this should go in some UI submodule
 
 var rightmostNode = function rightmostNode(dictFoldable) {
   return Data_Foldable.maximumBy(dictFoldable)(Data_Ord.comparing(Data_Ord.ordNumber)(viewX));
@@ -55187,88 +54846,88 @@ var _Graph = function _Graph(dictStrong) {
 
 var applyGraphOp = function applyGraphOp(v) {
   if (v instanceof AddNode) {
-    return Data_Lens_Setter.setJust(function ($314) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($314)));
+    return Data_Lens_Setter.setJust(function ($149) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($149)));
     })(v.value0);
   }
 
   ;
 
   if (v instanceof RemoveNode) {
-    return Data_Lens_Setter.set(function ($315) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($315)));
+    return Data_Lens_Setter.set(function ($150) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0.id)(Data_Profunctor_Strong.strongFn)($150)));
     })(Data_Maybe.Nothing.value);
   }
 
   ;
 
   if (v instanceof MoveNode) {
-    return Data_Lens_Setter.over(function ($316) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($316)));
+    return Data_Lens_Setter.over(function ($151) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($151)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(moveNode(v.value1)));
   }
 
   ;
 
   if (v instanceof AddParent) {
-    return Data_Lens_Setter.over(function ($317) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($317)));
+    return Data_Lens_Setter.over(function ($152) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($152)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(addParent(v.value1)));
   }
 
   ;
 
   if (v instanceof RemoveParent) {
-    return Data_Lens_Setter.over(function ($318) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($318)));
+    return Data_Lens_Setter.over(function ($153) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($153)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(removeParent(v.value1)));
   }
 
   ;
 
   if (v instanceof AddChild) {
-    return Data_Lens_Setter.over(function ($319) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($319)));
+    return Data_Lens_Setter.over(function ($154) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($154)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(addChild(v.value1)));
   }
 
   ;
 
   if (v instanceof RemoveChild) {
-    return Data_Lens_Setter.over(function ($320) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($320)));
+    return Data_Lens_Setter.over(function ($155) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($155)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(removeChild(v.value1)));
   }
 
   ;
 
   if (v instanceof AddEdge) {
-    return function ($321) {
-      return applyGraphOp(new AddParent(v.value0.target, v.value0.source))(applyGraphOp(new AddChild(v.value0.source, v.value0.target))($321));
+    return function ($156) {
+      return applyGraphOp(new AddParent(v.value0.target, v.value0.source))(applyGraphOp(new AddChild(v.value0.source, v.value0.target))($156));
     };
   }
 
   ;
 
   if (v instanceof RemoveEdge) {
-    return function ($322) {
-      return applyGraphOp(new RemoveParent(v.value0.target, v.value0.source))(applyGraphOp(new RemoveChild(v.value0.source, v.value0.target))($322));
+    return function ($157) {
+      return applyGraphOp(new RemoveParent(v.value0.target, v.value0.source))(applyGraphOp(new RemoveChild(v.value0.source, v.value0.target))($157));
     };
   }
 
   ;
 
   if (v instanceof UpdateText) {
-    return Data_Lens_Setter.over(function ($323) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($323)));
+    return Data_Lens_Setter.over(function ($158) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($158)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(updateText(v.value1)));
   }
 
   ;
 
   if (v instanceof UpdateSubgraphNodes) {
-    return Data_Lens_Setter.over(function ($324) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($324)));
+    return Data_Lens_Setter.over(function ($159) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_nodes(Data_Profunctor_Strong.strongFn)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(v.value0)(Data_Profunctor_Strong.strongFn)($159)));
     })(Data_Functor.map(Data_Maybe.functorMaybe)(updateSubgraphNodes(v.value1)));
   }
 
@@ -55287,59 +54946,21 @@ var applyGraphOp = function applyGraphOp(v) {
   ;
 
   if (v instanceof Highlight) {
-    return Data_Lens_Setter.over(function ($325) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($325));
+    return Data_Lens_Setter.over(function ($160) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($160));
     })(insert(v.value0));
   }
 
   ;
 
   if (v instanceof UnHighlight) {
-    return Data_Lens_Setter.over(function ($326) {
-      return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($326));
+    return Data_Lens_Setter.over(function ($161) {
+      return _Graph(Data_Profunctor_Strong.strongFn)(_highlighted(Data_Profunctor_Strong.strongFn)($161));
     })($$delete(v.value0));
   }
 
   ;
-  throw new Error("Failed pattern match at Main (line 242, column 1 - line 242, column 42): " + [v.constructor.name]);
-}; //----
-// Graph Interactions
-//| Whereas a GraphOp represents a fundamental graph operation,
-//| an GraphInteraction represents an abstract relation between
-//| the before and after affect of the operation.
-//| An GraphInteraction is used as a record of an UI operation having happened,
-//| rather than a description of an operation which is to be applied.
-//| For example, when grouping a set of nodes, the group node which is
-//| then constructed is an output of the operation, but it is recorded
-//| in the Group data so that the operation can be undone.
-//data GraphInteraction =
-//NewNode GraphNode
-//| AddEdge Edge
-//| RemoveEdge Edge
-//| MoveNode GraphNode Point2D
-//| AddHighlight NodeId
-//| RemoveHighlight NodeId
-//| Group (Object GraphNode) GraphNode
-//| UnGroup GraphNode (Object GraphNode)
-//| UngroupNode
-
-
-var deleteNode = function deleteNode(v) {
-  return function (g) {
-    var removeParentEdges = Data_Functor.map(Data_Functor.functorArray)(function (parentId) {
-      return new RemoveEdge({
-        source: parentId,
-        target: v.id
-      });
-    })(Foreign_Object.keys(v.parents));
-    var removeChildEdges = Data_Functor.map(Data_Functor.functorArray)(function (childId) {
-      return new RemoveEdge({
-        source: v.id,
-        target: childId
-      });
-    })(Foreign_Object.keys(v.children));
-    return applyGraphOp(new RemoveNode(v))(Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(g)(Data_List.fromFoldable(Data_Foldable.foldableArray)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(removeParentEdges)(removeChildEdges))));
-  };
+  throw new Error("Failed pattern match at Workflow.Core (line 236, column 1 - line 236, column 42): " + [v.constructor.name]);
 };
 
 var demo = Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(applyGraphOp))(emptyGraph)(new Data_List_Types.Cons(new UpdateFocus(new FocusEdge({
@@ -55380,19 +55001,9 @@ var demo = Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(
 
 var lookupNode = function lookupNode(g) {
   return function (nodeId) {
-    return Data_Lens_Getter.view(function ($327) {
-      return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($327)));
+    return Data_Lens_Getter.view(function ($162) {
+      return _Graph(Data_Lens_Internal_Forget.strongForget)(_nodes(Data_Lens_Internal_Forget.strongForget)(Data_Lens_At.at(Data_Lens_At.atForeignObject)(nodeId)(Data_Lens_Internal_Forget.strongForget)($162)));
     })(g);
-  };
-};
-
-var edgePosition = function edgePosition(g) {
-  return function (v) {
-    return fromMaybe(0.0)(Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.source))(function (v1) {
-      return Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.target))(function (v2) {
-        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(v1.x + v2.x);
-      });
-    }));
   };
 };
 
@@ -55417,25 +55028,13 @@ var lookupEdge = function lookupEdge(g) {
     }
 
     ;
-    throw new Error("Failed pattern match at Main (line 557, column 3 - line 559, column 64): " + [v.constructor.name]);
+    throw new Error("Failed pattern match at Workflow.Core (line 353, column 3 - line 355, column 64): " + [v.constructor.name]);
   };
 };
 
 var lookupNodes = function lookupNodes(g) {
   return function (nodeIds) {
     return Data_Array.mapMaybe(lookupNode(g))(Foreign_Object.keys(nodeIds));
-  };
-};
-
-var coparents = function coparents(g) {
-  return function (node) {
-    var childIds = Data_Lens_Getter.view(function ($328) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($328));
-    })(node);
-    var children = lookupNodes(g)(childIds);
-    return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($329) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($329));
-    }))(children);
   };
 }; //newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
 //newPositionFrom g (GraphNode node) relations =
@@ -55471,353 +55070,6 @@ var newParentPosition = function newParentPosition(g) {
       });
     }));
   };
-};
-
-var siblings = function siblings(g) {
-  return function (node) {
-    var parentIds = Data_Lens_Getter.view(function ($330) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_parents(Data_Lens_Internal_Forget.strongForget)($330));
-    })(node);
-    var parents = lookupNodes(g)(parentIds);
-    return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($331) {
-      return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_children(Data_Lens_Internal_Forget.strongForget)($331));
-    }))(parents);
-  };
-};
-
-var nextNodeWrap = function nextNodeWrap(dir) {
-  return function (g) {
-    return function (node) {
-      var siblingsAndCoparents = lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
-      return nextElemWrap(Data_Ord.ordNumber)(dir)(node)(viewX)(siblingsAndCoparents);
-    };
-  };
-};
-
-var nextEdgeGroup = function nextEdgeGroup(dir) {
-  return function (g) {
-    return function (v) {
-      var v1 = lookupNode(g)(v.source);
-
-      if (v1 instanceof Data_Maybe.Nothing) {
-        return [];
-      }
-
-      ;
-
-      if (v1 instanceof Data_Maybe.Just) {
-        var v2 = lookupNode(g)(v.target);
-
-        if (v2 instanceof Data_Maybe.Nothing) {
-          return [];
-        }
-
-        ;
-
-        if (v2 instanceof Data_Maybe.Just) {
-          var v3 = nextElemWrap(Data_Ord.ordNumber)(dir)(v1.value0)(viewX)(lookupNodes(g)(v2.value0.parents));
-          var v4 = nextElemWrap(Data_Ord.ordNumber)(dir)(v2.value0)(viewX)(lookupNodes(g)(v1.value0.children));
-          var newTargetEdge = {
-            source: v1.value0.id,
-            target: v4.id
-          };
-          var newSourceEdge = {
-            source: v3.id,
-            target: v2.value0.id
-          };
-          return Data_Array.filter(Data_Eq.notEq(eqEdge)(v))([newSourceEdge, newTargetEdge]);
-        }
-
-        ;
-        throw new Error("Failed pattern match at Main (line 451, column 7 - line 462, column 67): " + [v2.constructor.name]);
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 448, column 3 - line 462, column 67): " + [v1.constructor.name]);
-    };
-  };
-};
-
-var changeFocusLeftRight = function changeFocusLeftRight(dir) {
-  return function (g) {
-    var v = Data_Lens_Getter.view(function ($332) {
-      return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($332));
-    })(g);
-
-    if (v instanceof FocusNode) {
-      var v1 = lookupNode(g)(v.value0);
-
-      if (v1 instanceof Data_Maybe.Nothing) {
-        return g;
-      }
-
-      ;
-
-      if (v1 instanceof Data_Maybe.Just) {
-        var leftNode = nextNodeWrap(dir)(g)(v1.value0);
-        return applyGraphOp(new UpdateFocus(new FocusNode(Data_Lens_Getter.view(function ($333) {
-          return _GraphNode(Data_Lens_Internal_Forget.strongForget)(_id(Data_Lens_Internal_Forget.strongForget)($333));
-        })(leftNode))))(g);
-      }
-
-      ;
-      throw new Error("Failed pattern match at Main (line 485, column 25 - line 491, column 86): " + [v1.constructor.name]);
-    }
-
-    ;
-
-    if (v instanceof FocusEdge) {
-      var focus = function () {
-        var $264 = Data_Eq.notEq(Data_Eq.eqArray(eqEdge))(v.value1)([]);
-
-        if ($264) {
-          return new FocusEdge(nextElemWrap(Data_Ord.ordNumber)(dir)(v.value0)(edgePosition(g))(v.value1), v.value1);
-        }
-
-        ;
-        var newGroup$prime = nextEdgeGroup(dir)(g)(v.value0); // If the focus group has a single element then collapse the focus
-
-        var newGroup = function () {
-          var $265 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(newGroup$prime) === 1;
-
-          if ($265) {
-            return [];
-          }
-
-          ;
-          return newGroup$prime;
-        }();
-
-        var newFocus = fromMaybe(v.value0)(Data_Array.index(newGroup$prime)(0));
-        return new FocusEdge(newFocus, newGroup);
-      }();
-
-      return applyGraphOp(new UpdateFocus(focus))(g);
-    }
-
-    ;
-
-    if (v instanceof NoFocus) {
-      return g;
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 484, column 3 - line 507, column 17): " + [v.constructor.name]);
-  };
-};
-
-var traverseLeft = function traverseLeft(g) {
-  return changeFocusLeftRight(Left.value)(g);
-};
-
-var traverseRight = function traverseRight(g) {
-  return changeFocusLeftRight(Right.value)(g);
-};
-
-var removeFocus = function removeFocus(g) {
-  var v = Data_Lens_Getter.view(function ($334) {
-    return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($334));
-  })(g);
-
-  if (v instanceof NoFocus) {
-    return g;
-  }
-
-  ;
-
-  if (v instanceof FocusNode) {
-    var v1 = lookupNode(g)(v.value0);
-
-    if (v1 instanceof Data_Maybe.Nothing) {
-      return g;
-    }
-
-    ;
-
-    if (v1 instanceof Data_Maybe.Just) {
-      var newFocus = function () {
-        var v2 = Foreign_Object.size(v1.value0.parents);
-
-        if (v2 === 0) {
-          var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.children))(0);
-
-          if (v3 instanceof Data_Maybe.Nothing) {
-            return NoFocus.value;
-          }
-
-          ;
-
-          if (v3 instanceof Data_Maybe.Just) {
-            return new FocusNode(v3.value0);
-          }
-
-          ;
-          throw new Error("Failed pattern match at Main (line 355, column 18 - line 357, column 48): " + [v3.constructor.name]);
-        }
-
-        ;
-        var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.parents))(0);
-
-        if (v3 instanceof Data_Maybe.Nothing) {
-          return NoFocus.value;
-        }
-
-        ;
-
-        if (v3 instanceof Data_Maybe.Just) {
-          return new FocusNode(v3.value0);
-        }
-
-        ;
-        throw new Error("Failed pattern match at Main (line 358, column 26 - line 360, column 50): " + [v3.constructor.name]);
-      }();
-
-      return applyGraphOp(new UpdateFocus(newFocus))(applyGraphOp(new UnHighlight(v1.value0.id))(deleteNode(v1.value0)(g)));
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 350, column 25 - line 364, column 47): " + [v1.constructor.name]);
-  }
-
-  ;
-
-  if (v instanceof FocusEdge) {
-    return applyGraphOp(new UpdateFocus(new FocusNode(v.value0.source)))(applyGraphOp(new RemoveEdge(v.value0))(g));
-  }
-
-  ;
-  throw new Error("Failed pattern match at Main (line 348, column 3 - line 366, column 50): " + [v.constructor.name]);
-}; //----
-// Highlighting
-
-
-var toggleHighlightFocus = function toggleHighlightFocus(g) {
-  var v = Data_Lens_Getter.view(function ($335) {
-    return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($335));
-  })(g);
-
-  if (v instanceof FocusNode) {
-    var v1 = Foreign_Object.member(v.value0)(Data_Lens_Getter.view(function ($336) {
-      return _Graph(Data_Lens_Internal_Forget.strongForget)(_highlighted(Data_Lens_Internal_Forget.strongForget)($336));
-    })(g));
-
-    if (v1) {
-      return applyGraphOp(new UnHighlight(v.value0))(g);
-    }
-
-    ;
-
-    if (!v1) {
-      return applyGraphOp(new Highlight(v.value0))(g);
-    }
-
-    ;
-    throw new Error("Failed pattern match at Main (line 375, column 25 - line 377, column 49): " + [v1.constructor.name]);
-  }
-
-  ;
-
-  if (v instanceof FocusEdge) {
-    return applyGraphOp(new UpdateFocus(new FocusEdge(v.value0, [])))(g);
-  }
-
-  ;
-  return g;
-}; // TODO: remove duplicate code
-
-
-var traverseDown = function traverseDown(g) {
-  var v = Data_Lens_Getter.view(function ($337) {
-    return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($337));
-  })(g);
-
-  if (v instanceof FocusNode) {
-    return fromMaybe(g)(Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.value0))(function (v1) {
-      var downEdges$prime = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Edge)(function (v2) {
-        return {
-          source: v1.id,
-          target: v2
-        };
-      }))(Foreign_Object.keys(v1.children));
-      return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(downEdges$prime)(0))(function (v2) {
-        var downEdges = function () {
-          var $287 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(downEdges$prime) === 1;
-
-          if ($287) {
-            return [];
-          }
-
-          ;
-          return downEdges$prime;
-        }();
-
-        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(applyGraphOp(new UpdateFocus(new FocusEdge(v2, downEdges)))(g));
-      });
-    }));
-  }
-
-  ;
-
-  if (v instanceof FocusEdge) {
-    return applyGraphOp(new UpdateFocus(new FocusNode(v.value0.target)))(g);
-  }
-
-  ;
-
-  if (v instanceof NoFocus) {
-    return g;
-  }
-
-  ;
-  throw new Error("Failed pattern match at Main (line 401, column 3 - line 410, column 17): " + [v.constructor.name]);
-}; //----
-// Traversal
-
-
-var traverseUp = function traverseUp(g) {
-  var v = Data_Lens_Getter.view(function ($338) {
-    return _Graph(Data_Lens_Internal_Forget.strongForget)(_focus(Data_Lens_Internal_Forget.strongForget)($338));
-  })(g);
-
-  if (v instanceof FocusNode) {
-    return fromMaybe(g)(Control_Bind.bind(Data_Maybe.bindMaybe)(lookupNode(g)(v.value0))(function (v1) {
-      var upEdges$prime = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Edge)(function (v2) {
-        return {
-          source: v2,
-          target: v1.id
-        };
-      }))(Foreign_Object.keys(v1.parents));
-      return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(upEdges$prime)(0))(function (v2) {
-        var upEdges = function () {
-          var $294 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(upEdges$prime) === 1;
-
-          if ($294) {
-            return [];
-          }
-
-          ;
-          return upEdges$prime;
-        }();
-
-        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(applyGraphOp(new UpdateFocus(new FocusEdge(v2, upEdges)))(g));
-      });
-    }));
-  }
-
-  ;
-
-  if (v instanceof FocusEdge) {
-    return applyGraphOp(new UpdateFocus(new FocusNode(v.value0.source)))(g);
-  }
-
-  ;
-
-  if (v instanceof NoFocus) {
-    return g;
-  }
-
-  ;
-  throw new Error("Failed pattern match at Main (line 387, column 3 - line 396, column 17): " + [v.constructor.name]);
 };
 
 module.exports = {
@@ -55876,6 +55128,573 @@ module.exports = {
   updateSubgraphNodes: updateSubgraphNodes,
   applyGraphOp: applyGraphOp,
   demo: demo,
+  rightmostNode: rightmostNode,
+  newChildPosition: newChildPosition,
+  newParentPosition: newParentPosition,
+  lookupNode: lookupNode,
+  lookupNodes: lookupNodes,
+  lookupEdge: lookupEdge,
+  terminalestNode: terminalestNode,
+  fromMaybe: fromMaybe,
+  maybe: maybe,
+  fromFocus: fromFocus,
+  edgeInFocusGroup: edgeInFocusGroup,
+  getParents: getParents,
+  getChildren: getChildren,
+  graphTitle: graphTitle,
+  genericGraph: genericGraph,
+  encodeGraph: encodeGraph,
+  decodeGraph: decodeGraph,
+  genericGraphNode: genericGraphNode,
+  eqGraphNode: eqGraphNode,
+  encodeGraphNode: encodeGraphNode,
+  decodeGraphNode: decodeGraphNode,
+  genericEdge: genericEdge,
+  eqEdge: eqEdge,
+  encodeEdge: encodeEdge,
+  decodeEdge: decodeEdge,
+  genericFocus: genericFocus,
+  eqFocus: eqFocus,
+  encodeFocus: encodeFocus,
+  decodeFocus: decodeFocus
+};
+},{"../Control.Applicative/index.js":"purescript/output/Control.Applicative/index.js","../Control.Bind/index.js":"purescript/output/Control.Bind/index.js","../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Control.Semigroupoid/index.js":"purescript/output/Control.Semigroupoid/index.js","../Data.Array/index.js":"purescript/output/Data.Array/index.js","../Data.Eq/index.js":"purescript/output/Data.Eq/index.js","../Data.Foldable/index.js":"purescript/output/Data.Foldable/index.js","../Data.Function/index.js":"purescript/output/Data.Function/index.js","../Data.Functor/index.js":"purescript/output/Data.Functor/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.HeytingAlgebra/index.js":"purescript/output/Data.HeytingAlgebra/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Data.Lens/index.js":"purescript/output/Data.Lens/index.js","../Data.Lens.At/index.js":"purescript/output/Data.Lens.At/index.js","../Data.Lens.Getter/index.js":"purescript/output/Data.Lens.Getter/index.js","../Data.Lens.Internal.Forget/index.js":"purescript/output/Data.Lens.Internal.Forget/index.js","../Data.Lens.Lens/index.js":"purescript/output/Data.Lens.Lens/index.js","../Data.Lens.Record/index.js":"purescript/output/Data.Lens.Record/index.js","../Data.Lens.Setter/index.js":"purescript/output/Data.Lens.Setter/index.js","../Data.List/index.js":"purescript/output/Data.List/index.js","../Data.List.NonEmpty/index.js":"purescript/output/Data.List.NonEmpty/index.js","../Data.List.Types/index.js":"purescript/output/Data.List.Types/index.js","../Data.Maybe/index.js":"purescript/output/Data.Maybe/index.js","../Data.Ord/index.js":"purescript/output/Data.Ord/index.js","../Data.Ordering/index.js":"purescript/output/Data.Ordering/index.js","../Data.Profunctor.Strong/index.js":"purescript/output/Data.Profunctor.Strong/index.js","../Data.Ring/index.js":"purescript/output/Data.Ring/index.js","../Data.Semigroup/index.js":"purescript/output/Data.Semigroup/index.js","../Data.Semiring/index.js":"purescript/output/Data.Semiring/index.js","../Data.String/index.js":"purescript/output/Data.String/index.js","../Data.String.CodeUnits/index.js":"purescript/output/Data.String.CodeUnits/index.js","../Data.String.Common/index.js":"purescript/output/Data.String.Common/index.js","../Data.String.Pattern/index.js":"purescript/output/Data.String.Pattern/index.js","../Data.Symbol/index.js":"purescript/output/Data.Symbol/index.js","../Data.Tuple/index.js":"purescript/output/Data.Tuple/index.js","../Data.Unit/index.js":"purescript/output/Data.Unit/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic/index.js":"purescript/output/Foreign.Generic/index.js","../Foreign.Generic.Class/index.js":"purescript/output/Foreign.Generic.Class/index.js","../Foreign.Generic.Types/index.js":"purescript/output/Foreign.Generic.Types/index.js","../Foreign.Object/index.js":"purescript/output/Foreign.Object/index.js","../Prelude/index.js":"purescript/output/Prelude/index.js"}],"purescript/output/Workflow.Interaction/index.js":[function(require,module,exports) {
+// Generated by purs version 0.12.3
+"use strict";
+
+var Control_Applicative = require("../Control.Applicative/index.js");
+
+var Control_Bind = require("../Control.Bind/index.js");
+
+var Control_Monad_Except_Trans = require("../Control.Monad.Except.Trans/index.js");
+
+var Control_Semigroupoid = require("../Control.Semigroupoid/index.js");
+
+var Data_Array = require("../Data.Array/index.js");
+
+var Data_Eq = require("../Data.Eq/index.js");
+
+var Data_EuclideanRing = require("../Data.EuclideanRing/index.js");
+
+var Data_Foldable = require("../Data.Foldable/index.js");
+
+var Data_Function = require("../Data.Function/index.js");
+
+var Data_Functor = require("../Data.Functor/index.js");
+
+var Data_Generic_Rep = require("../Data.Generic.Rep/index.js");
+
+var Data_Identity = require("../Data.Identity/index.js");
+
+var Data_Lens = require("../Data.Lens/index.js");
+
+var Data_Lens_At = require("../Data.Lens.At/index.js");
+
+var Data_Lens_Getter = require("../Data.Lens.Getter/index.js");
+
+var Data_Lens_Internal_Forget = require("../Data.Lens.Internal.Forget/index.js");
+
+var Data_Lens_Record = require("../Data.Lens.Record/index.js");
+
+var Data_List = require("../Data.List/index.js");
+
+var Data_List_NonEmpty = require("../Data.List.NonEmpty/index.js");
+
+var Data_List_Types = require("../Data.List.Types/index.js");
+
+var Data_Maybe = require("../Data.Maybe/index.js");
+
+var Data_Ord = require("../Data.Ord/index.js");
+
+var Data_Ring = require("../Data.Ring/index.js");
+
+var Data_Semigroup = require("../Data.Semigroup/index.js");
+
+var Data_Semiring = require("../Data.Semiring/index.js");
+
+var Data_String = require("../Data.String/index.js");
+
+var Data_Symbol = require("../Data.Symbol/index.js");
+
+var Data_Tuple = require("../Data.Tuple/index.js");
+
+var Foreign = require("../Foreign/index.js");
+
+var Foreign_Class = require("../Foreign.Class/index.js");
+
+var Foreign_Generic = require("../Foreign.Generic/index.js");
+
+var Foreign_Generic_Types = require("../Foreign.Generic.Types/index.js");
+
+var Foreign_Object = require("../Foreign.Object/index.js");
+
+var Prelude = require("../Prelude/index.js");
+
+var Workflow_Core = require("../Workflow.Core/index.js");
+
+var Left = function () {
+  function Left() {}
+
+  ;
+  Left.value = new Left();
+  return Left;
+}();
+
+var Right = function () {
+  function Right() {}
+
+  ;
+  Right.value = new Right();
+  return Right;
+}();
+
+var traverseUp = function traverseUp(g) {
+  var v = Data_Lens_Getter.view(function ($91) {
+    return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_focus"](Data_Lens_Internal_Forget.strongForget)($91));
+  })(g);
+
+  if (v instanceof Workflow_Core.FocusNode) {
+    return Workflow_Core.fromMaybe(g)(Control_Bind.bind(Data_Maybe.bindMaybe)(Workflow_Core.lookupNode(g)(v.value0))(function (v1) {
+      var upEdges$prime = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Workflow_Core.Edge)(function (v2) {
+        return {
+          source: v2,
+          target: v1.id
+        };
+      }))(Foreign_Object.keys(v1.parents));
+      return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(upEdges$prime)(0))(function (v2) {
+        var upEdges = function () {
+          var $34 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(upEdges$prime) === 1;
+
+          if ($34) {
+            return [];
+          }
+
+          ;
+          return upEdges$prime;
+        }();
+
+        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusEdge(v2, upEdges)))(g));
+      });
+    }));
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.FocusEdge) {
+    return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusNode(v.value0.source)))(g);
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.NoFocus) {
+    return g;
+  }
+
+  ;
+  throw new Error("Failed pattern match at Workflow.Interaction (line 103, column 3 - line 112, column 17): " + [v.constructor.name]);
+};
+
+var traverseDown = function traverseDown(g) {
+  var v = Data_Lens_Getter.view(function ($92) {
+    return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_focus"](Data_Lens_Internal_Forget.strongForget)($92));
+  })(g);
+
+  if (v instanceof Workflow_Core.FocusNode) {
+    return Workflow_Core.fromMaybe(g)(Control_Bind.bind(Data_Maybe.bindMaybe)(Workflow_Core.lookupNode(g)(v.value0))(function (v1) {
+      var downEdges$prime = Data_Functor.map(Data_Functor.functorArray)(Data_Functor.map(Data_Functor.functorFn)(Workflow_Core.Edge)(function (v2) {
+        return {
+          source: v1.id,
+          target: v2
+        };
+      }))(Foreign_Object.keys(v1.children));
+      return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.index(downEdges$prime)(0))(function (v2) {
+        var downEdges = function () {
+          var $41 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(downEdges$prime) === 1;
+
+          if ($41) {
+            return [];
+          }
+
+          ;
+          return downEdges$prime;
+        }();
+
+        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusEdge(v2, downEdges)))(g));
+      });
+    }));
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.FocusEdge) {
+    return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusNode(v.value0.target)))(g);
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.NoFocus) {
+    return g;
+  }
+
+  ;
+  throw new Error("Failed pattern match at Workflow.Interaction (line 117, column 3 - line 126, column 17): " + [v.constructor.name]);
+};
+
+var toggleHighlightFocus = function toggleHighlightFocus(g) {
+  var v = Data_Lens_Getter.view(function ($93) {
+    return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_focus"](Data_Lens_Internal_Forget.strongForget)($93));
+  })(g);
+
+  if (v instanceof Workflow_Core.FocusNode) {
+    var v1 = Foreign_Object.member(v.value0)(Data_Lens_Getter.view(function ($94) {
+      return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_highlighted"](Data_Lens_Internal_Forget.strongForget)($94));
+    })(g));
+
+    if (v1) {
+      return Workflow_Core.applyGraphOp(new Workflow_Core.UnHighlight(v.value0))(g);
+    }
+
+    ;
+
+    if (!v1) {
+      return Workflow_Core.applyGraphOp(new Workflow_Core.Highlight(v.value0))(g);
+    }
+
+    ;
+    throw new Error("Failed pattern match at Workflow.Interaction (line 91, column 25 - line 93, column 49): " + [v1.constructor.name]);
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.FocusEdge) {
+    return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusEdge(v.value0, [])))(g);
+  }
+
+  ;
+  return g;
+};
+
+var toRightWrapOrdering = function toRightWrapOrdering(dictOrd) {
+  return function (x) {
+    return function (getPosition) {
+      return function (xs) {
+        var isToRight = Data_Function.on(Data_Ord.lessThan(dictOrd))(getPosition)(x);
+        var xsToRight = Data_Array.sortWith(dictOrd)(getPosition)(Data_Array.filter(isToRight)(xs));
+        var isToLeft = Data_Function.on(Data_Ord.greaterThan(dictOrd))(getPosition)(x);
+        var xsToLeft = Data_Array.sortWith(dictOrd)(getPosition)(Data_Array.filter(isToLeft)(xs));
+        return Data_Semigroup.append(Data_Semigroup.semigroupArray)(xsToRight)(xsToLeft);
+      };
+    };
+  };
+};
+
+var siblings = function siblings(g) {
+  return function (node) {
+    var parentIds = Data_Lens_Getter.view(function ($95) {
+      return Workflow_Core["_GraphNode"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_parents"](Data_Lens_Internal_Forget.strongForget)($95));
+    })(node);
+    var parents = Workflow_Core.lookupNodes(g)(parentIds);
+    return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($96) {
+      return Workflow_Core["_GraphNode"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_children"](Data_Lens_Internal_Forget.strongForget)($96));
+    }))(parents);
+  };
+};
+
+var nextInGroup = function nextInGroup(dictEq) {
+  return function (v) {
+    return function (x) {
+      return function (xs) {
+        if (v instanceof Left) {
+          return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.elemIndex(dictEq)(x)(xs))(function (xIndex) {
+            return Data_Array.index(xs)(Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(xIndex + 1 | 0)(Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(xs)));
+          });
+        }
+
+        ;
+
+        if (v instanceof Right) {
+          return Control_Bind.bind(Data_Maybe.bindMaybe)(Data_Array.elemIndex(dictEq)(x)(xs))(function (xIndex) {
+            return Data_Array.index(xs)(Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(xIndex - 1 | 0)(Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(xs)));
+          });
+        }
+
+        ;
+        throw new Error("Failed pattern match at Workflow.Interaction (line 180, column 1 - line 180, column 72): " + [v.constructor.name, x.constructor.name, xs.constructor.name]);
+      };
+    };
+  };
+};
+
+var nextElemWrap = function nextElemWrap(dictOrd) {
+  return function (v) {
+    return function (x) {
+      return function (getPosition) {
+        return function (xs) {
+          if (v instanceof Left) {
+            var toTheLeft = Data_Array.reverse(Data_Semigroup.append(Data_Semigroup.semigroupArray)([x])(toRightWrapOrdering(dictOrd)(x)(getPosition)(xs)));
+            return Workflow_Core.fromMaybe(x)(Data_Array.index(toTheLeft)(0));
+          }
+
+          ;
+
+          if (v instanceof Right) {
+            var xsOrderedToTheRight = Data_Semigroup.append(Data_Semigroup.semigroupArray)(toRightWrapOrdering(dictOrd)(x)(getPosition)(xs))([x]);
+            return Workflow_Core.fromMaybe(x)(Data_Array.index(xsOrderedToTheRight)(0));
+          }
+
+          ;
+          throw new Error("Failed pattern match at Workflow.Interaction (line 154, column 1 - line 154, column 82): " + [v.constructor.name, x.constructor.name, getPosition.constructor.name, xs.constructor.name]);
+        };
+      };
+    };
+  };
+};
+
+var nextEdgeGroup = function nextEdgeGroup(dir) {
+  return function (g) {
+    return function (v) {
+      var v1 = Workflow_Core.lookupNode(g)(v.source);
+
+      if (v1 instanceof Data_Maybe.Nothing) {
+        return [];
+      }
+
+      ;
+
+      if (v1 instanceof Data_Maybe.Just) {
+        var v2 = Workflow_Core.lookupNode(g)(v.target);
+
+        if (v2 instanceof Data_Maybe.Nothing) {
+          return [];
+        }
+
+        ;
+
+        if (v2 instanceof Data_Maybe.Just) {
+          var v3 = nextElemWrap(Data_Ord.ordNumber)(dir)(v1.value0)(Workflow_Core.viewX)(Workflow_Core.lookupNodes(g)(v2.value0.parents));
+          var v4 = nextElemWrap(Data_Ord.ordNumber)(dir)(v2.value0)(Workflow_Core.viewX)(Workflow_Core.lookupNodes(g)(v1.value0.children));
+          var newTargetEdge = {
+            source: v1.value0.id,
+            target: v4.id
+          };
+          var newSourceEdge = {
+            source: v3.id,
+            target: v2.value0.id
+          };
+          return Data_Array.filter(Data_Eq.notEq(Workflow_Core.eqEdge)(v))([newSourceEdge, newTargetEdge]);
+        }
+
+        ;
+        throw new Error("Failed pattern match at Workflow.Interaction (line 167, column 7 - line 178, column 67): " + [v2.constructor.name]);
+      }
+
+      ;
+      throw new Error("Failed pattern match at Workflow.Interaction (line 164, column 3 - line 178, column 67): " + [v1.constructor.name]);
+    };
+  };
+};
+
+var edgePosition = function edgePosition(g) {
+  return function (v) {
+    return Workflow_Core.fromMaybe(0.0)(Control_Bind.bind(Data_Maybe.bindMaybe)(Workflow_Core.lookupNode(g)(v.source))(function (v1) {
+      return Control_Bind.bind(Data_Maybe.bindMaybe)(Workflow_Core.lookupNode(g)(v.target))(function (v2) {
+        return Control_Applicative.pure(Data_Maybe.applicativeMaybe)(v1.x + v2.x);
+      });
+    }));
+  };
+};
+
+var deleteNode = function deleteNode(v) {
+  return function (g) {
+    var removeParentEdges = Data_Functor.map(Data_Functor.functorArray)(function (parentId) {
+      return new Workflow_Core.RemoveEdge({
+        source: parentId,
+        target: v.id
+      });
+    })(Foreign_Object.keys(v.parents));
+    var removeChildEdges = Data_Functor.map(Data_Functor.functorArray)(function (childId) {
+      return new Workflow_Core.RemoveEdge({
+        source: v.id,
+        target: childId
+      });
+    })(Foreign_Object.keys(v.children));
+    return Workflow_Core.applyGraphOp(new Workflow_Core.RemoveNode(v))(Data_Foldable.foldl(Data_List_Types.foldableList)(Data_Function.flip(Workflow_Core.applyGraphOp))(g)(Data_List.fromFoldable(Data_Foldable.foldableArray)(Data_Semigroup.append(Data_Semigroup.semigroupArray)(removeParentEdges)(removeChildEdges))));
+  };
+};
+
+var removeFocus = function removeFocus(g) {
+  var v = Data_Lens_Getter.view(function ($97) {
+    return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_focus"](Data_Lens_Internal_Forget.strongForget)($97));
+  })(g);
+
+  if (v instanceof Workflow_Core.NoFocus) {
+    return g;
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.FocusNode) {
+    var v1 = Workflow_Core.lookupNode(g)(v.value0);
+
+    if (v1 instanceof Data_Maybe.Nothing) {
+      return g;
+    }
+
+    ;
+
+    if (v1 instanceof Data_Maybe.Just) {
+      var newFocus = function () {
+        var v2 = Foreign_Object.size(v1.value0.parents);
+
+        if (v2 === 0) {
+          var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.children))(0);
+
+          if (v3 instanceof Data_Maybe.Nothing) {
+            return Workflow_Core.NoFocus.value;
+          }
+
+          ;
+
+          if (v3 instanceof Data_Maybe.Just) {
+            return new Workflow_Core.FocusNode(v3.value0);
+          }
+
+          ;
+          throw new Error("Failed pattern match at Workflow.Interaction (line 71, column 18 - line 73, column 48): " + [v3.constructor.name]);
+        }
+
+        ;
+        var v3 = Data_Array.index(Foreign_Object.keys(v1.value0.parents))(0);
+
+        if (v3 instanceof Data_Maybe.Nothing) {
+          return Workflow_Core.NoFocus.value;
+        }
+
+        ;
+
+        if (v3 instanceof Data_Maybe.Just) {
+          return new Workflow_Core.FocusNode(v3.value0);
+        }
+
+        ;
+        throw new Error("Failed pattern match at Workflow.Interaction (line 74, column 26 - line 76, column 50): " + [v3.constructor.name]);
+      }();
+
+      return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(newFocus))(Workflow_Core.applyGraphOp(new Workflow_Core.UnHighlight(v1.value0.id))(deleteNode(v1.value0)(g)));
+    }
+
+    ;
+    throw new Error("Failed pattern match at Workflow.Interaction (line 66, column 25 - line 80, column 47): " + [v1.constructor.name]);
+  }
+
+  ;
+
+  if (v instanceof Workflow_Core.FocusEdge) {
+    return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusNode(v.value0.source)))(Workflow_Core.applyGraphOp(new Workflow_Core.RemoveEdge(v.value0))(g));
+  }
+
+  ;
+  throw new Error("Failed pattern match at Workflow.Interaction (line 64, column 3 - line 82, column 50): " + [v.constructor.name]);
+};
+
+var coparents = function coparents(g) {
+  return function (node) {
+    var childIds = Data_Lens_Getter.view(function ($98) {
+      return Workflow_Core["_GraphNode"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_children"](Data_Lens_Internal_Forget.strongForget)($98));
+    })(node);
+    var children = Workflow_Core.lookupNodes(g)(childIds);
+    return Data_Foldable.foldMap(Data_Foldable.foldableArray)(Foreign_Object.monoidObject(Data_Semigroup.semigroupUnit))(Data_Lens_Getter.view(function ($99) {
+      return Workflow_Core["_GraphNode"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_parents"](Data_Lens_Internal_Forget.strongForget)($99));
+    }))(children);
+  };
+};
+
+var nextNodeWrap = function nextNodeWrap(dir) {
+  return function (g) {
+    return function (node) {
+      var siblingsAndCoparents = Workflow_Core.lookupNodes(g)(Data_Semigroup.append(Foreign_Object.semigroupObject(Data_Semigroup.semigroupUnit))(siblings(g)(node))(coparents(g)(node)));
+      return nextElemWrap(Data_Ord.ordNumber)(dir)(node)(Workflow_Core.viewX)(siblingsAndCoparents);
+    };
+  };
+};
+
+var changeFocusLeftRight = function changeFocusLeftRight(dir) {
+  return function (g) {
+    var v = Data_Lens_Getter.view(function ($100) {
+      return Workflow_Core["_Graph"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_focus"](Data_Lens_Internal_Forget.strongForget)($100));
+    })(g);
+
+    if (v instanceof Workflow_Core.FocusNode) {
+      var v1 = Workflow_Core.lookupNode(g)(v.value0);
+
+      if (v1 instanceof Data_Maybe.Nothing) {
+        return g;
+      }
+
+      ;
+
+      if (v1 instanceof Data_Maybe.Just) {
+        var leftNode = nextNodeWrap(dir)(g)(v1.value0);
+        return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(new Workflow_Core.FocusNode(Data_Lens_Getter.view(function ($101) {
+          return Workflow_Core["_GraphNode"](Data_Lens_Internal_Forget.strongForget)(Workflow_Core["_id"](Data_Lens_Internal_Forget.strongForget)($101));
+        })(leftNode))))(g);
+      }
+
+      ;
+      throw new Error("Failed pattern match at Workflow.Interaction (line 201, column 25 - line 207, column 86): " + [v1.constructor.name]);
+    }
+
+    ;
+
+    if (v instanceof Workflow_Core.FocusEdge) {
+      var focus = function () {
+        var $87 = Data_Eq.notEq(Data_Eq.eqArray(Workflow_Core.eqEdge))(v.value1)([]);
+
+        if ($87) {
+          return new Workflow_Core.FocusEdge(nextElemWrap(Data_Ord.ordNumber)(dir)(v.value0)(edgePosition(g))(v.value1), v.value1);
+        }
+
+        ;
+        var newGroup$prime = nextEdgeGroup(dir)(g)(v.value0);
+
+        var newGroup = function () {
+          var $88 = Data_Foldable.length(Data_Foldable.foldableArray)(Data_Semiring.semiringInt)(newGroup$prime) === 1;
+
+          if ($88) {
+            return [];
+          }
+
+          ;
+          return newGroup$prime;
+        }();
+
+        var newFocus = Workflow_Core.fromMaybe(v.value0)(Data_Array.index(newGroup$prime)(0));
+        return new Workflow_Core.FocusEdge(newFocus, newGroup);
+      }();
+
+      return Workflow_Core.applyGraphOp(new Workflow_Core.UpdateFocus(focus))(g);
+    }
+
+    ;
+
+    if (v instanceof Workflow_Core.NoFocus) {
+      return g;
+    }
+
+    ;
+    throw new Error("Failed pattern match at Workflow.Interaction (line 200, column 3 - line 223, column 17): " + [v.constructor.name]);
+  };
+};
+
+var traverseLeft = function traverseLeft(g) {
+  return changeFocusLeftRight(Left.value)(g);
+};
+
+var traverseRight = function traverseRight(g) {
+  return changeFocusLeftRight(Right.value)(g);
+};
+
+module.exports = {
   deleteNode: deleteNode,
   removeFocus: removeFocus,
   toggleHighlightFocus: toggleHighlightFocus,
@@ -55893,56 +55712,22 @@ module.exports = {
   edgePosition: edgePosition,
   changeFocusLeftRight: changeFocusLeftRight,
   traverseLeft: traverseLeft,
-  traverseRight: traverseRight,
-  rightmostNode: rightmostNode,
-  newChildPosition: newChildPosition,
-  newParentPosition: newParentPosition,
-  lookupNode: lookupNode,
-  lookupNodes: lookupNodes,
-  lookupEdge: lookupEdge,
-  terminalestNode: terminalestNode,
-  fromMaybe: fromMaybe,
-  maybe: maybe,
-  fromFocus: fromFocus,
-  edgeInFocusGroup: edgeInFocusGroup,
-  getParents: getParents,
-  getChildren: getChildren,
-  graphTitle: graphTitle,
-  combineMaybe: combineMaybe,
-  Leaf: Leaf,
-  Branch: Branch,
-  countThrows: countThrows,
-  countThrowsDesugar: countThrowsDesugar,
-  countThrowsDebind: countThrowsDebind,
-  Asdf: Asdf,
-  hasImmute: hasImmute,
-  genericGraph: genericGraph,
-  encodeGraph: encodeGraph,
-  decodeGraph: decodeGraph,
-  genericGraphNode: genericGraphNode,
-  eqGraphNode: eqGraphNode,
-  encodeGraphNode: encodeGraphNode,
-  decodeGraphNode: decodeGraphNode,
-  genericEdge: genericEdge,
-  eqEdge: eqEdge,
-  encodeEdge: encodeEdge,
-  decodeEdge: decodeEdge,
-  genericFocus: genericFocus,
-  eqFocus: eqFocus,
-  encodeFocus: encodeFocus,
-  decodeFocus: decodeFocus,
-  functorTree: functorTree,
-  applyTree: applyTree,
-  applicativeTree: applicativeTree,
-  foldableTree: foldableTree,
-  traverseTree: traverseTree
+  traverseRight: traverseRight
 };
-},{"../Control.Applicative/index.js":"purescript/output/Control.Applicative/index.js","../Control.Apply/index.js":"purescript/output/Control.Apply/index.js","../Control.Bind/index.js":"purescript/output/Control.Bind/index.js","../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Control.Plus/index.js":"purescript/output/Control.Plus/index.js","../Control.Semigroupoid/index.js":"purescript/output/Control.Semigroupoid/index.js","../Data.Array/index.js":"purescript/output/Data.Array/index.js","../Data.Eq/index.js":"purescript/output/Data.Eq/index.js","../Data.EuclideanRing/index.js":"purescript/output/Data.EuclideanRing/index.js","../Data.Foldable/index.js":"purescript/output/Data.Foldable/index.js","../Data.Function/index.js":"purescript/output/Data.Function/index.js","../Data.Functor/index.js":"purescript/output/Data.Functor/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.HeytingAlgebra/index.js":"purescript/output/Data.HeytingAlgebra/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Data.Lens/index.js":"purescript/output/Data.Lens/index.js","../Data.Lens.At/index.js":"purescript/output/Data.Lens.At/index.js","../Data.Lens.Getter/index.js":"purescript/output/Data.Lens.Getter/index.js","../Data.Lens.Internal.Forget/index.js":"purescript/output/Data.Lens.Internal.Forget/index.js","../Data.Lens.Lens/index.js":"purescript/output/Data.Lens.Lens/index.js","../Data.Lens.Record/index.js":"purescript/output/Data.Lens.Record/index.js","../Data.Lens.Setter/index.js":"purescript/output/Data.Lens.Setter/index.js","../Data.List/index.js":"purescript/output/Data.List/index.js","../Data.List.NonEmpty/index.js":"purescript/output/Data.List.NonEmpty/index.js","../Data.List.Types/index.js":"purescript/output/Data.List.Types/index.js","../Data.Maybe/index.js":"purescript/output/Data.Maybe/index.js","../Data.Monoid/index.js":"purescript/output/Data.Monoid/index.js","../Data.Ord/index.js":"purescript/output/Data.Ord/index.js","../Data.Ordering/index.js":"purescript/output/Data.Ordering/index.js","../Data.Profunctor.Strong/index.js":"purescript/output/Data.Profunctor.Strong/index.js","../Data.Ring/index.js":"purescript/output/Data.Ring/index.js","../Data.Semigroup/index.js":"purescript/output/Data.Semigroup/index.js","../Data.Semiring/index.js":"purescript/output/Data.Semiring/index.js","../Data.String/index.js":"purescript/output/Data.String/index.js","../Data.String.CodeUnits/index.js":"purescript/output/Data.String.CodeUnits/index.js","../Data.String.Common/index.js":"purescript/output/Data.String.Common/index.js","../Data.String.Pattern/index.js":"purescript/output/Data.String.Pattern/index.js","../Data.Symbol/index.js":"purescript/output/Data.Symbol/index.js","../Data.Traversable/index.js":"purescript/output/Data.Traversable/index.js","../Data.Tuple/index.js":"purescript/output/Data.Tuple/index.js","../Data.Unit/index.js":"purescript/output/Data.Unit/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic/index.js":"purescript/output/Foreign.Generic/index.js","../Foreign.Generic.Class/index.js":"purescript/output/Foreign.Generic.Class/index.js","../Foreign.Generic.Types/index.js":"purescript/output/Foreign.Generic.Types/index.js","../Foreign.Object/index.js":"purescript/output/Foreign.Object/index.js","../Prelude/index.js":"purescript/output/Prelude/index.js"}],"graph.js":[function(require,module,exports) {
+},{"../Control.Applicative/index.js":"purescript/output/Control.Applicative/index.js","../Control.Bind/index.js":"purescript/output/Control.Bind/index.js","../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Control.Semigroupoid/index.js":"purescript/output/Control.Semigroupoid/index.js","../Data.Array/index.js":"purescript/output/Data.Array/index.js","../Data.Eq/index.js":"purescript/output/Data.Eq/index.js","../Data.EuclideanRing/index.js":"purescript/output/Data.EuclideanRing/index.js","../Data.Foldable/index.js":"purescript/output/Data.Foldable/index.js","../Data.Function/index.js":"purescript/output/Data.Function/index.js","../Data.Functor/index.js":"purescript/output/Data.Functor/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Data.Lens/index.js":"purescript/output/Data.Lens/index.js","../Data.Lens.At/index.js":"purescript/output/Data.Lens.At/index.js","../Data.Lens.Getter/index.js":"purescript/output/Data.Lens.Getter/index.js","../Data.Lens.Internal.Forget/index.js":"purescript/output/Data.Lens.Internal.Forget/index.js","../Data.Lens.Record/index.js":"purescript/output/Data.Lens.Record/index.js","../Data.List/index.js":"purescript/output/Data.List/index.js","../Data.List.NonEmpty/index.js":"purescript/output/Data.List.NonEmpty/index.js","../Data.List.Types/index.js":"purescript/output/Data.List.Types/index.js","../Data.Maybe/index.js":"purescript/output/Data.Maybe/index.js","../Data.Ord/index.js":"purescript/output/Data.Ord/index.js","../Data.Ring/index.js":"purescript/output/Data.Ring/index.js","../Data.Semigroup/index.js":"purescript/output/Data.Semigroup/index.js","../Data.Semiring/index.js":"purescript/output/Data.Semiring/index.js","../Data.String/index.js":"purescript/output/Data.String/index.js","../Data.Symbol/index.js":"purescript/output/Data.Symbol/index.js","../Data.Tuple/index.js":"purescript/output/Data.Tuple/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic/index.js":"purescript/output/Foreign.Generic/index.js","../Foreign.Generic.Types/index.js":"purescript/output/Foreign.Generic.Types/index.js","../Foreign.Object/index.js":"purescript/output/Foreign.Object/index.js","../Prelude/index.js":"purescript/output/Prelude/index.js","../Workflow.Core/index.js":"purescript/output/Workflow.Core/index.js"}],"graph.js":[function(require,module,exports) {
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 var Utils = require('./utils.js');
 
 var StringSet = require('./stringSet.js');
 
-var Purs = require('./purescript/output/Main/index.js');
+var PursCore = require('./purescript/output/Workflow.Core/index.js');
+
+var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
+
+var Purs = _objectSpread({}, PursCore, PursInteraction);
 
 function GraphNodeBody(id, text, x, y, parents, children) {
   this.id = id;
@@ -56361,7 +56146,7 @@ function Graph(graphNodes, focus, highlighted) {
 
 ;
 module.exports = Graph;
-},{"./utils.js":"utils.js","./stringSet.js":"stringSet.js","./purescript/output/Main/index.js":"purescript/output/Main/index.js"}],"libs/FileSaver.min.js":[function(require,module,exports) {
+},{"./utils.js":"utils.js","./stringSet.js":"stringSet.js","./purescript/output/Workflow.Core/index.js":"purescript/output/Workflow.Core/index.js","./purescript/output/Workflow.Interaction/index.js":"purescript/output/Workflow.Interaction/index.js"}],"libs/FileSaver.min.js":[function(require,module,exports) {
 var define;
 var global = arguments[3];
 function _typeof(obj) { if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
@@ -56447,13 +56232,21 @@ function _typeof(obj) { if (typeof Symbol === "function" && typeof Symbol.iterat
   f.saveAs = a.saveAs = a, "undefined" != typeof module && (module.exports = a);
 });
 },{}],"graphUI.js":[function(require,module,exports) {
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 var d3 = require("./libs/d3.js");
 
 var Utils = require("./utils");
 
 var StringSet = require("./stringSet.js");
 
-var Purs = require('./purescript/output/Main/index.js');
+var PursCore = require('./purescript/output/Workflow.Core/index.js');
+
+var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
+
+var Purs = _objectSpread({}, PursCore, PursInteraction);
 
 var FileSaver = require("./libs/FileSaver.min.js");
 
@@ -56962,6 +56755,8 @@ module.exports = function GraphUI(graph) {
     graphUI.graph.focus = newGraph.focus;
     graphUI.graph.highlighted = newGraph.highlighted;
     console.log(graphUI.graph.highlighted);
+    graphUI.graph.pursGraph = Purs.emptyGraph;
+    graphUI.update();
     graphUI.graph.pursGraph = newGraph;
   };
 
@@ -57123,7 +56918,229 @@ module.exports = function GraphUI(graph) {
     }
   };
 };
-},{"./libs/d3.js":"libs/d3.js","./utils":"utils.js","./stringSet.js":"stringSet.js","./purescript/output/Main/index.js":"purescript/output/Main/index.js","./libs/FileSaver.min.js":"libs/FileSaver.min.js"}],"workflow.js":[function(require,module,exports) {
+},{"./libs/d3.js":"libs/d3.js","./utils":"utils.js","./stringSet.js":"stringSet.js","./purescript/output/Workflow.Core/index.js":"purescript/output/Workflow.Core/index.js","./purescript/output/Workflow.Interaction/index.js":"purescript/output/Workflow.Interaction/index.js","./libs/FileSaver.min.js":"libs/FileSaver.min.js"}],"purescript/output/Graphputer/index.js":[function(require,module,exports) {
+"use strict";
+
+var Control_Monad_Except_Trans = require("../Control.Monad.Except.Trans/index.js");
+
+var Data_Eq = require("../Data.Eq/index.js");
+
+var Data_Generic_Rep = require("../Data.Generic.Rep/index.js");
+
+var Data_HeytingAlgebra = require("../Data.HeytingAlgebra/index.js");
+
+var Data_Identity = require("../Data.Identity/index.js");
+
+var Data_List_NonEmpty = require("../Data.List.NonEmpty/index.js");
+
+var Data_Symbol = require("../Data.Symbol/index.js");
+
+var Foreign = require("../Foreign/index.js");
+
+var Foreign_Class = require("../Foreign.Class/index.js");
+
+var Foreign_Generic = require("../Foreign.Generic/index.js");
+
+var Foreign_Generic_Class = require("../Foreign.Generic.Class/index.js");
+
+var Workflow_Core = require("../Workflow.Core/index.js");
+
+var PythonValue = function () {
+  function PythonValue(value0) {
+    this.value0 = value0;
+  }
+
+  ;
+
+  PythonValue.create = function (value0) {
+    return new PythonValue(value0);
+  };
+
+  return PythonValue;
+}();
+
+var PythonFunction = function () {
+  function PythonFunction(value0) {
+    this.value0 = value0;
+  }
+
+  ;
+
+  PythonFunction.create = function (value0) {
+    return new PythonFunction(value0);
+  };
+
+  return PythonFunction;
+}();
+
+var PythonFunctionAnnotation = function () {
+  function PythonFunctionAnnotation(value0) {
+    this.value0 = value0;
+  }
+
+  ;
+
+  PythonFunctionAnnotation.create = function (value0) {
+    return new PythonFunctionAnnotation(value0);
+  };
+
+  return PythonFunctionAnnotation;
+}();
+
+var genericPythonNode = new Data_Generic_Rep.Generic(function (x) {
+  if (x instanceof PythonValue) {
+    return new Data_Generic_Rep.Inl(x.value0);
+  }
+
+  ;
+
+  if (x instanceof PythonFunction) {
+    return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0));
+  }
+
+  ;
+
+  if (x instanceof PythonFunctionAnnotation) {
+    return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(x.value0));
+  }
+
+  ;
+  throw new Error("Failed pattern match at Graphputer (line 24, column 8 - line 24, column 58): " + [x.constructor.name]);
+}, function (x) {
+  if (x instanceof Data_Generic_Rep.Inl) {
+    return new PythonValue(x.value0);
+  }
+
+  ;
+
+  if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inl) {
+    return new PythonFunction(x.value0.value0);
+  }
+
+  ;
+
+  if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inr) {
+    return new PythonFunctionAnnotation(x.value0.value0);
+  }
+
+  ;
+  throw new Error("Failed pattern match at Graphputer (line 24, column 8 - line 24, column 58): " + [x.constructor.name]);
+});
+
+var pythonNodeFromJSON = function pythonNodeFromJSON(pyNodeJSON) {
+  return Foreign_Generic.genericDecodeJSON(genericPythonNode)(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonValue";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode)))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunction";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode)))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunctionAnnotation";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "setupCode";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "outputType";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "name";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "inputType";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())))(Foreign_Generic_Class.genericCountArgsArgument))))(Workflow_Core.genericEncodeOpts)(pyNodeJSON);
+}; //-----
+// Parsing type annotations
+// | Type annotations can be written:
+// | some_int : Int
+// | some_function : Int -> String
+// | some_string : String
+
+
+var pythonNodeToJSON = function pythonNodeToJSON(pyNode) {
+  return Foreign_Generic.genericEncodeJSON(genericPythonNode)(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonValue";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunction";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunctionAnnotation";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "setupCode";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "outputType";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "name";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "inputType";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))))))(Workflow_Core.genericEncodeOpts)(pyNode);
+};
+
+var eqPythonNode = new Data_Eq.Eq(function (x) {
+  return function (y) {
+    if (x instanceof PythonValue && y instanceof PythonValue) {
+      return x.value0 === y.value0;
+    }
+
+    ;
+
+    if (x instanceof PythonFunction && y instanceof PythonFunction) {
+      return x.value0 === y.value0;
+    }
+
+    ;
+
+    if (x instanceof PythonFunctionAnnotation && y instanceof PythonFunctionAnnotation) {
+      return x.value0.inputType === y.value0.inputType && x.value0.name === y.value0.name && x.value0.outputType === y.value0.outputType && x.value0.setupCode === y.value0.setupCode;
+    }
+
+    ;
+    return false;
+  };
+});
+var encodePythonNode = new Foreign_Class.Encode(function (pyNode) {
+  return Foreign_Generic.genericEncode(genericPythonNode)(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonValue";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))(Foreign_Generic_Class.genericEncodeSum(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunction";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))(Foreign_Generic_Class.genericEncodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunctionAnnotation";
+  }))(Foreign_Generic_Class.genericEncodeArgsArgument(Foreign_Generic_Class.encode_Record()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordCons()(Foreign_Generic_Class.encodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "setupCode";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "outputType";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "name";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode)))(new Data_Symbol.IsSymbol(function () {
+    return "inputType";
+  }))(Foreign_Generic_Class.encode_Other(Foreign_Class.stringEncode))))))))(Workflow_Core.genericEncodeOpts)(pyNode);
+});
+var decodePythonNode = new Foreign_Class.Decode(function (pyNode) {
+  return Foreign_Generic.genericDecode(genericPythonNode)(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonValue";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode)))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeSum(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunction";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode)))(Foreign_Generic_Class.genericCountArgsArgument))(Foreign_Generic_Class.genericDecodeConstructor(new Data_Symbol.IsSymbol(function () {
+    return "PythonFunctionAnnotation";
+  }))(Foreign_Generic_Class.genericDecodeArgsArgument(Foreign_Generic_Class.decode_Record()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordCons()(Foreign_Generic_Class.decodeRecordNil)(new Data_Symbol.IsSymbol(function () {
+    return "setupCode";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "outputType";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "name";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())(new Data_Symbol.IsSymbol(function () {
+    return "inputType";
+  }))(Foreign_Generic_Class.decode_Other(Foreign_Class.stringDecode))())))(Foreign_Generic_Class.genericCountArgsArgument))))(Workflow_Core.genericEncodeOpts)(pyNode);
+});
+module.exports = {
+  PythonValue: PythonValue,
+  PythonFunction: PythonFunction,
+  PythonFunctionAnnotation: PythonFunctionAnnotation,
+  pythonNodeToJSON: pythonNodeToJSON,
+  pythonNodeFromJSON: pythonNodeFromJSON,
+  genericPythonNode: genericPythonNode,
+  eqPythonNode: eqPythonNode,
+  encodePythonNode: encodePythonNode,
+  decodePythonNode: decodePythonNode
+};
+},{"../Control.Monad.Except.Trans/index.js":"purescript/output/Control.Monad.Except.Trans/index.js","../Data.Eq/index.js":"purescript/output/Data.Eq/index.js","../Data.Generic.Rep/index.js":"purescript/output/Data.Generic.Rep/index.js","../Data.HeytingAlgebra/index.js":"purescript/output/Data.HeytingAlgebra/index.js","../Data.Identity/index.js":"purescript/output/Data.Identity/index.js","../Data.List.NonEmpty/index.js":"purescript/output/Data.List.NonEmpty/index.js","../Data.Symbol/index.js":"purescript/output/Data.Symbol/index.js","../Foreign/index.js":"purescript/output/Foreign/index.js","../Foreign.Class/index.js":"purescript/output/Foreign.Class/index.js","../Foreign.Generic/index.js":"purescript/output/Foreign.Generic/index.js","../Foreign.Generic.Class/index.js":"purescript/output/Foreign.Generic.Class/index.js","../Workflow.Core/index.js":"purescript/output/Workflow.Core/index.js"}],"workflow.js":[function(require,module,exports) {
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i] != null ? arguments[i] : {}; var ownKeys = Object.keys(source); if (typeof Object.getOwnPropertySymbols === 'function') { ownKeys = ownKeys.concat(Object.getOwnPropertySymbols(source).filter(function (sym) { return Object.getOwnPropertyDescriptor(source, sym).enumerable; })); } ownKeys.forEach(function (key) { _defineProperty(target, key, source[key]); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 var Graph = require('./graph.js');
 
 var GraphUI = require('./graphUI.js');
@@ -57132,7 +57149,13 @@ var StringSet = require('./stringSet.js');
 
 var Utils = require('./utils.js');
 
-var Purs = require('./purescript/output/Main/index.js'); ///////////////////////////////////
+var PursCore = require('./purescript/output/Workflow.Core/index.js');
+
+var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
+
+var Purs = _objectSpread({}, PursCore, PursInteraction);
+
+var Graphputer = require('./purescript/output/Graphputer/index.js'); ///////////////////////////////////
 //////// Data
 
 
@@ -57189,6 +57212,7 @@ graphUI.update(); // TODO: remove debugging hackz
 window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
+window.Graphputer = Graphputer;
 window.copyPursGraph = copyPursGraph;
 window.graphUI.graph = copyPursGraph(Purs.demo);
 window.graphUI.update(); //window.graphUI.graph.newNodeBelowFocus();
@@ -57203,7 +57227,7 @@ window.graphUI.update(); //const savedGraph = require("./Workflow.workflow-graph
 //console.log(window.graphUI.graph.nodes);
 
 window.graph = window.graphUI.graph;
-},{"./graph.js":"graph.js","./graphUI.js":"graphUI.js","./stringSet.js":"stringSet.js","./utils.js":"utils.js","./purescript/output/Main/index.js":"purescript/output/Main/index.js"}],"../../../../nix/store/alsi7mp4asi7v16wlrrhb14l3vzy7b5h-node-parcel-bundler-1.11.0/lib/node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
+},{"./graph.js":"graph.js","./graphUI.js":"graphUI.js","./stringSet.js":"stringSet.js","./utils.js":"utils.js","./purescript/output/Workflow.Core/index.js":"purescript/output/Workflow.Core/index.js","./purescript/output/Workflow.Interaction/index.js":"purescript/output/Workflow.Interaction/index.js","./purescript/output/Graphputer/index.js":"purescript/output/Graphputer/index.js"}],"../../../../nix/store/alsi7mp4asi7v16wlrrhb14l3vzy7b5h-node-parcel-bundler-1.11.0/lib/node_modules/parcel-bundler/src/builtins/hmr-runtime.js":[function(require,module,exports) {
 var global = arguments[3];
 var OVERLAY_ID = '__parcel__error__overlay__';
 var OldModule = module.bundle.Module;
@@ -57230,7 +57254,7 @@ var parent = module.bundle.parent;
 if ((!parent || !parent.isParcelRequire) && typeof WebSocket !== 'undefined') {
   var hostname = "" || location.hostname;
   var protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  var ws = new WebSocket(protocol + '://' + hostname + ':' + "33161" + '/');
+  var ws = new WebSocket(protocol + '://' + hostname + ':' + "39509" + '/');
 
   ws.onmessage = function (event) {
     var data = JSON.parse(event.data);

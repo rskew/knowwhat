@@ -1,6 +1,8 @@
 const Utils = require('./utils.js');
 const StringSet = require('./stringSet.js');
-const Purs = require('./purescript/output/Main/index.js');
+var PursCore = require('./purescript/output/Workflow.Core/index.js');
+var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
+var Purs = {...PursCore, ...PursInteraction};
 
 function GraphNodeBody(id, text, x, y, parents, children) {
     this.id = id;
