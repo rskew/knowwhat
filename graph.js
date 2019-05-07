@@ -7,6 +7,7 @@ var Purs = {...PursCore, ...PursInteraction};
 function GraphNodeBody(id, text, x, y, parents, children) {
     this.id = id;
     this.text = text;
+    this.valid = true;
     this.x = x;
     this.y = y;
     this.parents = parents;
@@ -147,6 +148,11 @@ function Graph(graphNodes, focus, highlighted) {
 
     graph.moveNode = function (nodeId, newPos) {
         graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
+        return graph;
+    };
+
+    graph.updateValidity = function (nodeId, validity) {
+        graph.updatePurs(Purs.UpdateNodeValidity.create(nodeId)(validity));
         return graph;
     };
 

@@ -1,3 +1,4 @@
 .#*
 TAGS
 .cache/*
+dist/*

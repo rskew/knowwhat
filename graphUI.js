@@ -8,15 +8,29 @@ var FileSaver = require("./libs/FileSaver.min.js");
 
 
 module.exports = function GraphUI(graph) {
-    ///////////////////////////////////
-    //////// Explicit state
 
     var graphUI = this;
     graphUI.graph = graph;
 
-    var mouseState = {
+    ///////////////////////////////////
+    //////// Actual External API (work in progress)
+
+    graphUI.registerNodeValidHook = function (hookFn) {
+        graphUI.nodeValidHook = hookFn;
+    };
+
+    graphUI.registerEdgeValidHook = function (hookFn) {
+        graphUI.edgeValidHook = hookFn;
+    };
+
+
+    ///////////////////////////////////
+    //////// Explicit state
+
+    graphUI.mouseState = {
         "clickedNode": undefined,
         "drawingEdge": [],
+        "drawingEdgeValid": true,
         "mouseoverNode": undefined,
     };
 
@@ -25,6 +39,16 @@ module.exports = function GraphUI(graph) {
 
     // Keyboard modes: normal, insert, visual
     graphUI.keyboardMode = "normal";
+
+    // Hooks
+    graphUI.nodeValidHook = function (graph, node) {
+        console.log(node);
+        return {"isValid": true, "allow": true};
+    };
+
+    graphUI.edgeValidHook = function (graph, parentNode, childNode) {
+        return {"isValid": false, "allow": true};
+    };
 
 
     ///////////////////////////////////
@@ -190,6 +214,11 @@ module.exports = function GraphUI(graph) {
                     .attr("stroke-linecap", "butt")
                     .classed("focusGroup", edgeNode => Purs.edgeInFocusGroup(graphUI.graph.pursGraph)(
                         {"source": edgeNode.source.id, "target": edgeNode.target.id}))
+                    .classed("invalid", function (edgeNodes) {
+                        var validity = graphUI.edgeValidHook(
+                            graphUI.graph, edgeNodes.source, edgeNodes.target);
+                        return validity.isValid;
+                    })
                     .on("click", function(edgeNodes) {
                         graphUI.graph.focusOnEdge({"source": edgeNodes.source.id, "target": edgeNodes.target.id});
                         graphUI.update();
@@ -198,7 +227,8 @@ module.exports = function GraphUI(graph) {
                         Utils.fadeIn(this, graphUI.fadeSpeed);
                     })
                     .on("mouseout", function (d) {
-                        if (!d3.select(this).classed("grouped") && !d3.select(this).classed("focusGroup")) {
+                        if (!d3.select(this).classed("grouped") && !d3.select(this).classed("focusGroup")
+                            && !d3.select(this).classed("invalid")) {
                             Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     }),
@@ -209,8 +239,17 @@ module.exports = function GraphUI(graph) {
                     .attr("y2", edgeNodes => edgeNodes.target.y + graphUI.background_origin.y)
                     .classed("focusGroup", edgeNode => Purs.edgeInFocusGroup(graphUI.graph.pursGraph)(
                         {"source": edgeNode.source.id, "target": edgeNode.target.id}))
+                    // TODO: This is really slow, need to do this better
+                    // such as representing edge validity in the model directly so it
+                    // doesn't need to be constantly recomputed
+                    .classed("invalid", function (edgeNodes) {
+                        var validity = graphUI.edgeValidHook(
+                            graphUI.graph, edgeNodes.source, edgeNodes.target);
+                        return !validity.isValid;
+                    })
                     .each(function () {
-                        if (d3.select(this).classed("focusGroup")) {
+                        if (d3.select(this).classed("focusGroup") ||
+                            d3.select(this).classed("invalid")) {
                             Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
                             Utils.fadeOut(this, graphUI.fadeSpeed);
@@ -221,7 +260,7 @@ module.exports = function GraphUI(graph) {
 
     graphUI.updateDrawingEdge = function () {
         graphUI.svg.select("#edges").selectAll("line").filter(".drawing")
-            .data(mouseState.drawingEdge)
+            .data(graphUI.mouseState.drawingEdge)
             .join(
                 enter => enter.append("line")
                     .classed("drawing", true)
@@ -229,10 +268,13 @@ module.exports = function GraphUI(graph) {
                     .attr("y1", d => d.source.y)
                     .attr("x2", d => d.target.x - graphUI.background_origin.x)
                     .attr("y2", d => d.target.y - graphUI.background_origin.y)
+                    .classed("invalid", d => (graphUI.mouseState.mouseoverNode != undefined) && !graphUI.mouseState.drawingEdgeValid)
                     .attr("marker-end", "url(#drawing-arrow)"),
                 update => update
                     .attr("x2", d => d.target.x - graphUI.background_origin.x)
                     .attr("y2", d => d.target.y - graphUI.background_origin.y)
+                    .classed("invalid", d => (graphUI.mouseState.mouseoverNode != undefined)
+                                              && !graphUI.mouseState.drawingEdgeValid)
             );
     };
 
@@ -250,9 +292,16 @@ module.exports = function GraphUI(graph) {
                     .append('xhtml:div')
                     .append('div')
                     .attr("contentEditable", true)
-                    .each(function (d) {this.innerText = d[1].text})
+                    .each(function (d) {this.innerText = d[1].text;})
                     .on("keyup", function (d) {
-                        graphUI.graph.updateText(d[0], this.innerText);
+                        var validity = graphUI.nodeValidHook(graphUI.graph, {"text": this.innerText});
+                        if (validity.allow) {
+                            graphUI.graph.updateText(d[0], this.innerText);
+                        } else {
+                            this.innerText = d[1].text;
+                        }
+                        graphUI.graph.updateValidity(d[0], validity.isValid);
+                        graphUI.update();
                     });},
                 update => update
                     .attr("x", d => d[1].x + 20 + graphUI.background_origin.x)
@@ -296,7 +345,7 @@ module.exports = function GraphUI(graph) {
 
     graphUI.updateNodeBorders = function () {
         borders = graphUI.svg.select("#nodeBorders").selectAll("circle").filter(".nodeBorder")
-            .data(Object.entries(graphUI.graph.nodes), d => d[0] + d[1].x + d[1].y)
+            .data(Object.entries(graphUI.graph.nodes), d => d[0])
             .join(
                 enter => enter.append("circle")
                     .classed("nodeBorder", true)
@@ -304,22 +353,25 @@ module.exports = function GraphUI(graph) {
                     .attr("cx", d => d[1].x + graphUI.background_origin.x)
                     .attr("cy", d => d[1].y + graphUI.background_origin.y)
                     .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
+                    .classed("invalid", d => !d[1].valid)
                     .call(d3.drag()
                           .on("start", dragstarted_node)
                           .on("drag", dragged_node)
                           .on("end", dragended_node))
                     .on("mouseover", function (d) {
-                        mouseState.mouseoverNode = d[0];
+                        graphUI.mouseState.mouseoverNode = d[0];
                         Utils.fadeIn(this, graphUI.fadeSpeed);
                     })
                     .on("mouseout", function (d) {
-                        mouseState.mouseoverNode = undefined;
-                        if (!d3.select(this).classed("grouped")) {
+                        graphUI.mouseState.mouseoverNode = undefined;
+                        if (!d3.select(this).classed("grouped") &&
+                            !d3.select(this).classed("invalid")) {
                             Utils.fadeOut(this, graphUI.fadeSpeed);
                         }
                     })
                     .each(function () {
-                        if (d3.select(this).classed("grouped")) {
+                        if (d3.select(this).classed("grouped") ||
+                            d3.select(this).classed("invalid")) {
                             Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
                             Utils.fadeOut(this, graphUI.fadeSpeed);
@@ -329,8 +381,10 @@ module.exports = function GraphUI(graph) {
                     .attr("cx", d => d[1].x + graphUI.background_origin.x)
                     .attr("cy", d => d[1].y + graphUI.background_origin.y)
                     .classed("grouped", d => StringSet.isIn(d[0], graphUI.graph.highlighted))
+                    .classed("invalid", d => !d[1].valid)
                     .each(function () {
-                        if (d3.select(this).classed("grouped")) {
+                        if (d3.select(this).classed("grouped") ||
+                            d3.select(this).classed("invalid")) {
                             Utils.fadeIn(this, graphUI.fadeSpeed);
                         } else {
                             Utils.fadeOut(this, graphUI.fadeSpeed);
@@ -349,21 +403,28 @@ module.exports = function GraphUI(graph) {
                     .attr("cx", d => d[1].x + graphUI.background_origin.x)
                     .attr("cy", d => d[1].y + graphUI.background_origin.y)
                     .on("mousedown", function (d) {
-                        mouseState.clickedNode = d[0];
+                        graphUI.mouseState.clickedNode = d[0];
                     })
                     .on("mouseover", function (d) {
-                        mouseState.mouseoverNode = d[0];
+                        graphUI.mouseState.mouseoverNode = d[0];
                         d3.select(this).classed("ready", false);
-                        if (mouseState.clickedNode != undefined &&
-                            mouseState.clickedNode != mouseState.mouseoverNode &&
-                            !StringSet.isIn(d[0], graphUI.graph.nodes[mouseState.clickedNode].children)) {
-                            d3.select(this).classed("ready", true);
+                        d3.select(this).classed("invalid", false);
+                        var edgeProposed = validEdgeIsProposed();
+                        if (edgeProposed.edgeIsProposed) {
+                            if (edgeProposed.validity.isValid) {
+                                d3.select(this).classed("ready", true);
+                                graphUI.mouseState.drawingEdgeValid = true;
+                            } else {
+                                graphUI.mouseState.drawingEdgeValid = false;
+                                console.log("Invalid edge!!");
+                                d3.select(this).classed("invalid", true);
+                            }
                         }
                         Utils.fadeIn(this, graphUI.fadeSpeed);
                         graphUI.update();
                     })
                     .on("mouseout", function () {
-                        mouseState.mouseoverNode = undefined;
+                        graphUI.mouseState.mouseoverNode = undefined;
                         Utils.fadeOut(this, graphUI.fadeSpeed);
                     })
                     .call(d3.drag()
@@ -395,8 +456,11 @@ module.exports = function GraphUI(graph) {
 
         // Reset states
         graphUI.svg.on("mouseup", function () {
-            mouseState.clickedNode = undefined;
             graphUI.update();
+            graphUI.mouseState.clickedNode = undefined;
+            graphUI.mouseState.mouseoverNode = undefined;
+            graphUI.mouseState.drawingEdge = [];
+            console.log(graphUI.mouseState);
         });
     };
 
@@ -445,7 +509,7 @@ module.exports = function GraphUI(graph) {
 
     function dragstarted_halo(d) {
         d3.select(this).style("pointer-events", "none");
-        mouseState.drawingEdge = [{"source": {"x": d[1].x + graphUI.background_origin.x,
+        graphUI.mouseState.drawingEdge = [{"source": {"x": d[1].x + graphUI.background_origin.x,
                                               "y": d[1].y + graphUI.background_origin.y},
                                    "target": {"x": d3.event.x + graphUI.background_origin.x,
                                               "y": d3.event.y + graphUI.background_origin.y}}];
@@ -453,7 +517,7 @@ module.exports = function GraphUI(graph) {
     }
 
     function dragged_halo(d) {
-        mouseState.drawingEdge = [{"source": {"x": d[1].x + graphUI.background_origin.x,
+        graphUI.mouseState.drawingEdge = [{"source": {"x": d[1].x + graphUI.background_origin.x,
                                               "y": d[1].y + graphUI.background_origin.y},
                                    "target": {"x": d3.event.x + graphUI.background_origin.x,
                                               "y": d3.event.y + graphUI.background_origin.y}}];
@@ -462,24 +526,43 @@ module.exports = function GraphUI(graph) {
 
     function dragended_halo(d) {
         d3.select(this).style("pointer-events", "all");
-        create_edge_if_possible();
-        mouseState.drawingEdge = [];
+        var edgeProposed = validEdgeIsProposed();
+        if (edgeProposed.edgeIsProposed) {
+            if (edgeProposed.validity.allow) {
+                create_edge_if_possible();
+            }
+        }
+        graphUI.mouseState.drawingEdge = [];
         graphUI.update();
-        mouseState.clickedNode = undefined;
+        graphUI.mouseState.clickedNode = undefined;
         d3.selectAll("*").classed("ready", false);
         graphUI.update();
     }
 
     function create_edge_if_possible() {
-        if (mouseState.clickedNode != undefined &&
-            mouseState.clickedNode != mouseState.mouseoverNode &&
-            mouseState.mouseoverNode != undefined) {
-            graphUI.graph.addEdge(mouseState.clickedNode, mouseState.mouseoverNode);
-            graphUI.graph.focusOnNode(mouseState.mouseoverNode);
-            mouseState.clickedNode = undefined;
-            mouseState.mouseoverNode = undefined;
+        if (graphUI.mouseState.clickedNode != undefined &&
+            graphUI.mouseState.clickedNode != graphUI.mouseState.mouseoverNode &&
+            graphUI.mouseState.mouseoverNode != undefined) {
+
+            graphUI.graph.addEdge(graphUI.mouseState.clickedNode, graphUI.mouseState.mouseoverNode);
+            graphUI.graph.focusOnNode(graphUI.mouseState.mouseoverNode);
         };
     }
+
+    function validEdgeIsProposed() {
+        var edgeIsProposed =
+            graphUI.mouseState.clickedNode != undefined &&
+            graphUI.mouseState.mouseoverNode != undefined &&
+            graphUI.mouseState.clickedNode != graphUI.mouseState.mouseoverNode &&
+            !StringSet.isIn(graphUI.mouseState.mouseoverNode, graphUI.graph.nodes[graphUI.mouseState.clickedNode].children);
+        if (edgeIsProposed) {
+            var sourceNode = graphUI.graph.nodes[graphUI.mouseState.clickedNode];
+            var targetNode = graphUI.graph.nodes[graphUI.mouseState.mouseoverNode];
+            var validity = graphUI.edgeValidHook(graphUI.graph, sourceNode, targetNode);
+            return { "edgeIsProposed": true, "validity": validity};
+        }
+        return {"edgeIsProposed": false, "validity": {}};
+    };
 
     graphUI.moveFocusDown = function () {
         focusNodeId = Purs.fromFocus(graphUI.graph.focus);

@@ -5,7 +5,8 @@ const Utils = require('./utils.js');
 var PursCore = require('./purescript/output/Workflow.Core/index.js');
 var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
 var Purs = {...PursCore, ...PursInteraction};
-var Graphputer = require('./purescript/output/Graphputer/index.js');
+var Graphputer = require('./purescript/output/Graphputer.Core/index.js');
+var GraphputerParser = require('./purescript/output/Graphputer.Parser/index.js');
 
 
 ///////////////////////////////////
@@ -15,6 +16,7 @@ var graphNodes = {
     "a": {
         "id": "a",
         "text": "do all the things plz",
+        "valid": true,
         "x": 100,
         "y": 100,
         "parents": StringSet.empty(),
@@ -26,6 +28,7 @@ var graphNodes = {
     "b": {
         "id": "b",
         "text": "TODO: woohoo!",
+        "valid": true,
         "x": 150,
         "y": 200,
         "parents": StringSet.fromArray(["a"]),
@@ -35,6 +38,7 @@ var graphNodes = {
     "c": {
         "id": "c",
         "text": "today I frink",
+        "valid": true,
         "x": 100,
         "y": 150,
         "parents": StringSet.fromArray(["a"]),
@@ -44,6 +48,7 @@ var graphNodes = {
     "d": {
         "id": "d",
         "text": "shopping list: ka-pow!",
+        "valid": true,
         "x": 200,
         "y": 250,
         "parents": StringSet.empty(),
@@ -72,6 +77,27 @@ window.Purs = Purs;
 window.graphUI = graphUI;
 window.StringSet = StringSet;
 window.Graphputer = Graphputer;
+window.GraphputerParser = GraphputerParser;
+
+window.graphUI.registerNodeValidHook(function (graph, node) {
+    var valid = window.GraphputerParser.canParseNodeText(node.text.trim());
+    console.log(node.text, valid);
+    console.log(node.text.length);
+    console.log(node.text.trim().length);
+    return {"isValid": valid,
+            "allow": true};
+});
+
+window.graphUI.registerEdgeValidHook(function (graph, sourceNode, targetNode) {
+    var valid =
+        window.GraphputerParser.canApply(
+            targetNode.text.trim())(
+            sourceNode.text.trim());
+    console.log(sourceNode.text, valid);
+    console.log(targetNode.text, valid);
+    return {"isValid": valid,
+            "allow": valid};
+});
 
 window.copyPursGraph = copyPursGraph;
 window.graphUI.graph = copyPursGraph(Purs.demo);

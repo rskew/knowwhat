@@ -1,17 +1,21 @@
 module Test.Main where
 
-import Prelude (Unit, discard, class Eq, class Show, (<>), show, (==))
-import Effect (Effect)
-import Effect.Console (logShow)
-import Text.Parsing.Parser (Parser, runParser)
-import Data.Either (Either(..))
-import Test.Assert (assert')
-import Data.List (List(..), (:))
-import Data.Tuple (Tuple(..))
-
-import Graphputer.Parser
 import Graphputer.Core
+import Graphputer.Parser
 
+import Data.Either (Either(..))
+import Data.Tuple (Tuple(..))
+import Effect (Effect)
+import Data.Maybe (Maybe(..))
+import Effect.Console (logShow, log)
+import Prelude (Unit, discard, class Eq, class Show, (<>), show, (==), ($), map)
+import Test.Assert (assert')
+import Text.Parsing.Parser (Parser, parseErrorPosition, runParser)
+import Text.Parsing.Parser.Pos (Position(..))
+
+main :: Effect Unit
+main = do
+  testParser
 
 -- From purescript-parsing test/Main.purs
 parseTest :: forall s a. Show a => Eq a => s -> a -> Parser s a -> Effect Unit
@@ -21,41 +25,83 @@ parseTest input expected p = case runParser input p of
     logShow actual
   Left err -> assert' ("error: " <> show err) false
 
+parseErrorTestPosition :: forall s a. Show a => Parser s a -> s -> Position -> Effect Unit
+parseErrorTestPosition p input expected = case runParser input p of
+  Right _ -> assert' "error: ParseError expected!" false
+  Left err -> do
+    let pos = parseErrorPosition err
+    assert' ("expected: " <> show expected <> ", pos: " <> show pos) (expected == pos)
+    logShow expected
 
-main :: Effect Unit
-main = do
+mkPos :: Int -> Position
+mkPos n = mkPos' n 1
+
+mkPos' :: Int -> Int -> Position
+mkPos' column line = Position { column: column, line: line }
+
+applyTest :: PyType -> PyType -> PyType -> Effect Unit
+applyTest funcType argType expected = case pyApply funcType argType of
+  Just actual -> do
+    assert' ("expected " <> show expected <> ", actual " <> show actual) $ expected == actual
+    log $ "( " <> show funcType <> " ) " <> show argType <> " == " <> show expected
+  Nothing -> do
+    assert' ("failure to apply " <> show funcType <> " to " <> show argType) false
+
+
+testParser :: Effect Unit
+testParser = do
+  parseTest "String" PyString pyType
+  parseTest "Float" PyFloat pyType
+  parseTest "Int" PyInt pyType
+  parseTest "Bool" PyBool pyType
+  parseTest "()" PyUnit pyType
+  parseTest "String" PyString pyType
   parseTest "List String" (PyList PyString) pyType
-
   parseTest "List List Float" (PyList (PyList PyFloat)) pyType
 
-  parseTest "Int -> String -> List Float" (Tuple (PyInt : PyString : Nil) (PyList PyFloat)) functionType
+  parseErrorTestPosition pyType "[String]" $ mkPos 1
+  parseErrorTestPosition pyType "List" $ mkPos 5
 
-  parseTest "var :: Int" (AnnotatedVariable "var" PyInt "") pyNode
+  parseTest "Int -> String -> List Float" (PyFunc [PyInt, PyString] (PyList PyFloat)) pyType
+  parseErrorTestPosition pyTypeFunction "List -> String" $ mkPos 1
+  parseErrorTestPosition pyTypeFunction "Float -> -> String" $ mkPos 10
+  parseErrorTestPosition pyTypeFunction "Float ->> String" $ mkPos 9
+  parseErrorTestPosition pyTypeFunction "Float - String" $ mkPos 1
+  parseErrorTestPosition pyTypeFunction "Float > String" $ mkPos 1
+
+  parseTest "var :: Int" (Annotation "var" PyInt "") annotation
+  parseErrorTestPosition pyNode "var :: List" $ mkPos 12
 
   parseTest
     "func :: Int -> List String"
-    (AnnotatedFunction "func" (PyInt : Nil) (PyList PyString) "")
-    pyNode
+    (Annotation "func" (PyFunc [PyInt] (PyList PyString)) "")
+    annotation
+  parseErrorTestPosition pyNode "func :: List -> Int" $ mkPos 14
+  parseErrorTestPosition pyNode "func : Float -> Int" $ mkPos 6
+  parseErrorTestPosition pyNode "func :: Float - Int" $ mkPos 14
 
-  parseTest
-    "asdf = fdsa"
-    (Tuple "asdf" "fdsa")
-    assignment
+  parseTest "asdf = fdsa" (Tuple "asdf" "fdsa") assignment
+  parseTest "asdf = fdsa == qwer" (Tuple "asdf" "fdsa == qwer") assignment
+  parseErrorTestPosition assignment "asdf == fdsa" $ mkPos 7
+  parseErrorTestPosition assignment "asdf  fdsa" $ mkPos 7
+  parseErrorTestPosition assignment "var :: Int" $ mkPos 5
 
   parseTest
     "assigned_var = rhs :: List String"
-    (AnnotatedVariable "assigned_var" (PyList PyString) "assigned_var = rhs")
-    pyNode
+    (Annotation "assigned_var" (PyList PyString) "assigned_var = rhs")
+    annotation
+  parseErrorTestPosition pyNode "assigned_var = rhs : List String" $ mkPos 14
+  parseErrorTestPosition pyNode "assigned_var == rhs :: List String" $ mkPos 14
 
   parseTest
     "assigned_func = rhs :: Int -> List String -> Float"
-    (AnnotatedFunction "assigned_func" (PyInt : PyList PyString : Nil) PyFloat "assigned_func = rhs")
-    pyNode
+    (Annotation "assigned_func" (PyFunc [PyInt, PyList PyString] PyFloat) "assigned_func = rhs")
+    annotation
 
   parseTest
     "func_does_IO :: Int -> List String -> IO ()"
-    (AnnotatedFunction "func_does_IO" (PyInt : PyList PyString : Nil) PyUnit "")
-    pyNode
+    (Annotation "func_does_IO" (PyFunc [PyInt, PyList PyString] PyUnit) "")
+    annotation
 
   parseTest
     "def some_func(a, b, c):\n\
@@ -75,3 +121,7 @@ main = do
   --  \    return print(\"this code DOES have the type annotation delimiter in it:: {}\"\\\n\
   --  \        .format({\"a\": a, \"b\": b, \"c\": c))"
   --  pythonCode
+
+  assert' ("Can't compare python types???") $ PyInt == PyInt
+  assert' ("Can't compare python types???") $ PyFloat == PyFloat
+  applyTest (PyFunc [PyInt] PyFloat) PyInt PyFloat

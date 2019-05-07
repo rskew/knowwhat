@@ -92,6 +92,7 @@ emptyGraph = Graph
 
 newtype GraphNode = GraphNode
   { text :: String
+  , valid :: Boolean
   , id :: NodeId
   , x :: Number
   , y :: Number
@@ -141,7 +142,6 @@ instance decodeFocus :: Decode Focus where
 data GraphOp =
   AddNode GraphNode
   | RemoveNode GraphNode
-  --| UpdatePosition GraphNode Point2D
   | MoveNode NodeId Point2D
   | AddParent NodeId NodeId
   | RemoveParent NodeId NodeId
@@ -154,6 +154,7 @@ data GraphOp =
   | UpdateFocus Focus
   | Highlight NodeId
   | UnHighlight NodeId
+  | UpdateNodeValidity NodeId Boolean
 
 ------
 -- Lens boilerplate
@@ -170,6 +171,7 @@ _highlighted :: forall r. Lens' { highlighted :: NodeIdSet | r } NodeIdSet
 _highlighted = prop (SProxy :: SProxy "highlighted")
 
 _GraphNode :: Lens' GraphNode { text :: String
+                              , valid :: Boolean
                               , id :: NodeId
                               , x :: Number
                               , y :: Number
@@ -196,6 +198,9 @@ _y = prop (SProxy :: SProxy "y")
 
 _text :: forall r. Lens' { text :: String | r } String
 _text = prop (SProxy :: SProxy "text")
+
+_valid :: forall r. Lens' { valid :: Boolean | r } Boolean
+_valid = prop (SProxy :: SProxy "valid")
 
 _id :: forall r. Lens' { id :: String | r } String
 _id = prop (SProxy :: SProxy "id")
@@ -266,6 +271,8 @@ applyGraphOp (Highlight nodeId) =
   over (_Graph <<< _highlighted) (insert nodeId)
 applyGraphOp (UnHighlight nodeId) =
   over (_Graph <<< _highlighted) (delete nodeId)
+applyGraphOp (UpdateNodeValidity nodeId validity) =
+  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ set (_GraphNode <<< _valid) validity
 
 
 
@@ -277,6 +284,7 @@ demo = foldl (flip applyGraphOp) emptyGraph $
                                Edge {"source": "thingo", "target": "goofus"}])
        : AddNode (GraphNode
            { text: "Title: Workflow"
+           , valid: true
            , id : "title"
            , x : 205.0
            , y : 150.0
@@ -287,6 +295,7 @@ demo = foldl (flip applyGraphOp) emptyGraph $
        : Highlight "thingo"
        : AddNode (GraphNode
            { text: "thingo"
+           , valid: false
            , id : "thingo"
            , x : 205.0
            , y : 100.0
@@ -296,6 +305,7 @@ demo = foldl (flip applyGraphOp) emptyGraph $
            })
        : AddNode (GraphNode
            { text: "asdf"
+           , valid: true
            , id : "goofus"
            , x: 450.0
            , y: 270.0

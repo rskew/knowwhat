@@ -1,9 +1,12 @@
 module Graphputer.Core where
 
 import Data.List (List)
+import Data.Array (head, tail)
+import Data.String (joinWith)
 import Data.Tuple (Tuple)
-import Prelude (class Show, (<>), show)
+import Prelude (class Show, (<>), show, ($), (==), map)
 import Data.Eq (class Eq)
+import Data.Maybe (Maybe(..))
 
 --import Workflow.Core
 
@@ -16,7 +19,10 @@ data PyType
   | PyFloat
   | PyList PyType
   | PyDict PyRow
+  | PyFunc (Array PyType) PyType
+
 derive instance eqPyType :: Eq PyType
+
 instance showPyType :: Show PyType where
   show PyUnit = "Unit"
   show PyBool = "Bool"
@@ -25,16 +31,36 @@ instance showPyType :: Show PyType where
   show PyFloat = "Float"
   show (PyList pyType) = "List " <> show pyType
   show (PyDict pyRow) = "Dict " <> show pyRow
+  show (PyFunc inputs output) = joinWith " -> " $ map show $ inputs <> [output]
 
 type PyRow = List (Tuple String PyType)
 
-data PyNode
-  = AnnotatedVariable String PyType SetupCode
-  | AnnotatedFunction String (List PyType) PyType SetupCode
-derive instance eqPyNode :: Eq PyNode
-instance showPyNode :: Show PyNode where
-  show (AnnotatedVariable name varType setup) = name <> " :: " <> show varType <> "\nsetup code: " <> setup
-  show (AnnotatedFunction name inputTypes outputType setup) =
-    name <> " :: " <> show inputTypes <> " -> " <> show outputType <> "\nsetup code: " <> setup
-
 type SetupCode = String
+
+data Annotation = Annotation String PyType SetupCode
+derive instance eqAnnotation :: Eq Annotation
+instance showAnnotation :: Show Annotation where
+  show (Annotation name varType setup) = name <> " :: " <> show varType <> "\nsetup code: " <> setup
+
+data PyNode
+  = FlowNode Annotation
+  | DeclarationNode SetupCode
+
+derive instance eqPyNode :: Eq PyNode
+
+instance showPyNode :: Show PyNode where
+  show (FlowNode annotation) = show annotation
+  show (DeclarationNode setupCode) = setupCode
+
+pyApply :: PyType -> PyType -> Maybe PyType
+pyApply func arg = case func of
+  PyFunc inputs output -> case head inputs of
+    Nothing -> Nothing
+    Just firstInput ->
+      if firstInput == arg
+         then case tail inputs of
+           Nothing -> Just output
+           Just [] -> Just output
+           Just restInputs -> Just $ PyFunc restInputs output
+         else Nothing
+  _ -> Nothing

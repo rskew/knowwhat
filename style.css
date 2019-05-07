@@ -32,6 +32,11 @@ circle.node.focused.move {
     opacity: 1.0;
 }
 
+.nodeBorder.invalid {
+    fill: #f662;
+    opacity: 1.0;
+}
+
 .halo {
     fill: #fff0;
     stroke: #0001;
@@ -43,8 +48,17 @@ circle.node.focused.move {
     stroke: #fb07;
 }
 
+.halo.invalid {
+    stroke: #f667;
+}
+
 line {
     stroke: #666;
+    stroke-width: 1.5px;
+}
+
+line.invalid {
+    stroke: #f66;
     stroke-width: 1.5px;
 }
 
@@ -62,7 +76,11 @@ line.focused {
 .edgeBorder.focusGroup {
     stroke: #08f2;
     stroke-width: 25px;
-    opacity: 1.0;
+}
+
+.edgeBorder.invalid {
+    stroke: #f662;
+    stroke-width: 25px;
 }
 
 line.drawing {
