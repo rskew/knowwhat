@@ -622,6 +622,7 @@ module.exports = function GraphUI(graph) {
         // TODO: fix types n stuff to remove ".value0"
         graphJSON = JSON.parse(savedGraphJSON).graph;
         metadata = JSON.parse(savedGraphJSON).metadata;
+        console.log('graphJSON: ', graphJSON);
         newGraph = Purs.graphFromJSON(graphJSON).value0;
         console.log('newgraph: ', newGraph);
         graphUI.graph.nodes = Utils.deepCopyObject(newGraph.nodes);

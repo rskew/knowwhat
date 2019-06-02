@@ -1,7 +1,8 @@
 module Workflow.Core where
 
 import Control.Monad.Except.Trans (ExceptT)
-import Data.Array (mapMaybe, filter, (!!))
+import Data.Array (filter, mapMaybe, (!!))
+import Data.Array as Array
 import Data.Eq (class Eq)
 import Data.Foldable (class Foldable, all, elem, foldl, maximumBy)
 import Data.Generic.Rep (class Generic)
@@ -17,14 +18,18 @@ import Data.Ord (comparing)
 import Data.String (Pattern(..), split, contains, stripPrefix, trim)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
+import Data.UUID (genUUID)
+--import Data.UUID (UUID, genUUID, parseUUID)
+--import Data.Newtype (unwrap, class Newtype)
+import Effect (Effect)
+--import Foreign (unsafeToForeign, ForeignError(..), readString, Foreign, F)
 import Foreign (ForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
 import Foreign.Generic.Types (SumEncoding)
 import Foreign.Object (Object, keys, values, size)
 import Foreign.Object as Object
-import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), (-))
-
+import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), (-), show)
 
 version :: String
 version = "0.001"
@@ -82,7 +87,6 @@ graphToJSON g =
 graphFromJSON :: String -> ExceptT (NonEmptyList ForeignError) Identity Graph
 graphFromJSON graphJSON = genericDecodeJSON genericEncodeOpts graphJSON
 
-
 emptyGraph :: Graph
 emptyGraph = Graph
   { nodes: Object.empty
@@ -103,14 +107,43 @@ newtype GraphNode = GraphNode
 derive instance genericGraphNode :: Generic GraphNode _
 derive instance eqGraphNode :: Eq GraphNode
 
+-- TODO: use type-safe UUIDs when refactoring is easy (when js is gone)
+--newtype NodeId = NodeId UUID
+--derive instance newtypeNodeId :: Newtype NodeId _
+--derive instance eqNodeId :: Eq NodeId
+
+--instance encodeUUID :: Encode NodeId where
+--  encode = unwrap >>> show >>> unsafeToForeign
+--
+--instance decodeUUID :: Decode NodeId where
+--  decode foreignUUID= do
+--    str <- readString foreignUUID
+--    let maybeUUID = parseUUID str
+--    case maybeUUID of
+--      Nothing -> ForeignError "Can't parse UUID"
+--      Just uuid -> pure NodeId uuid
+
 instance encodeGraphNode :: Encode GraphNode where
   encode node = genericEncode genericEncodeOpts node
 
 instance decodeGraphNode :: Decode GraphNode where
   decode node = genericDecode genericEncodeOpts node
 
-
 type Point2D = { x :: Number, y :: Number }
+
+createGraphNode :: Point2D -> NodeIdSet -> NodeIdSet -> Effect GraphNode
+createGraphNode xyPos parentIds childIds = do
+   nodeId <- genUUID
+   pure $ GraphNode
+      { text : ""
+      , valid : true
+      , id : show nodeId
+      , x : xyPos.x
+      , y : xyPos.y
+      , children : childIds
+      , parents : parentIds
+      , subgraphNodes : Object.empty
+      }
 
 newtype Edge = Edge { source :: NodeId, target :: NodeId }
 derive instance genericEdge :: Generic Edge _
@@ -236,7 +269,6 @@ updateText = set (_GraphNode <<< _text)
 
 updateSubgraphNodes :: Object GraphNode -> GraphNode -> GraphNode
 updateSubgraphNodes = set (_GraphNode <<< _subgraphNodes)
-
 
 applyGraphOp :: GraphOp -> Graph -> Graph
 applyGraphOp (AddNode (GraphNode nodeBody)) =
@@ -415,3 +447,16 @@ graphTitle (Graph g) = titles !! 0 >>= stripPrefix titlePattern
     nodeTextArr = trim <$> (view (_GraphNode <<< _text)) <$> values g.nodes
     isTitle = contains titlePattern
     titles = filter isTitle nodeTextArr
+
+
+ -- Purescript by example chapter 8
+third :: forall a. Array a -> Maybe a
+--third arr = do
+--  tail' <- Array.tail arr
+--  tail'' <- Array.tail tail'
+--  Array.head tail''
+third arr = Array.tail arr >>= Array.tail >>= Array.head
+
+
+sums :: Array Int -> Array Int
+sums = Array.sort <<< Array.nub <<< Array.foldM (\acc i -> [acc, acc + i]) 0

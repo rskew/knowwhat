@@ -1,32 +1,18 @@
 module Workflow.Interaction where
 
-import Control.Monad.Except.Trans (ExceptT)
-import Data.Array (mapMaybe, filter, sortWith, (!!))
+import Data.Array (filter, sortWith, (!!))
 import Data.Array as Array
 import Data.Eq (class Eq)
-import Data.Foldable (class Foldable, all, elem, foldMap, foldl, length, maximumBy)
+import Data.Foldable (foldMap, foldl, length)
 import Data.Function (on)
-import Data.Generic.Rep (class Generic)
-import Data.Identity (Identity)
-import Data.Lens (Lens', lens, view, over, set, setJust)
-import Data.Lens.At (at)
-import Data.Lens.Record (prop)
-import Data.List (List(..), (:))
+import Data.Lens (view)
 import Data.List as List
-import Data.List.NonEmpty (NonEmptyList)
-import Data.Maybe (Maybe(..), isJust)
-import Data.Maybe as Maybe
-import Data.Ord (class Ord, comparing)
-import Data.String (Pattern(..), split, contains, stripPrefix, trim)
-import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple(..))
-import Foreign (ForeignError)
-import Foreign.Class (class Encode, class Decode)
-import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
-import Foreign.Generic.Types (SumEncoding)
-import Foreign.Object (Object, keys, values, size)
+import Data.Maybe (Maybe(..))
+import Data.Ord (class Ord)
+import Foreign.Object (keys, size)
 import Foreign.Object as Object
-import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-))
+import Prelude (($), (<<<), map, flip, (==), (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-))
+import Effect (Effect)
 
 import Workflow.Core
 
@@ -49,6 +35,17 @@ import Workflow.Core
   --| Group (Object GraphNode) GraphNode
   --| UnGroup GraphNode (Object GraphNode)
   --| UngroupNode
+
+-- TODO: add to interaction typeclass interface
+addNode :: Point2D -> NodeIdSet -> NodeIdSet -> Graph -> Effect Graph
+addNode xyPos parentIds childIds g = do
+  newNode <- createGraphNode xyPos parentIds childIds
+  let newNodeId = (view (_GraphNode <<< _id) newNode)
+  let addParentEdges = map (\parentId -> AddChild parentId newNodeId) $ keys parentIds
+  let addChildEdges = map (\childId -> AddParent childId newNodeId) $ keys childIds
+  pure $ foldl (flip applyGraphOp) g
+    $ [AddNode newNode] <> addParentEdges <> addChildEdges
+    <> [UpdateFocus (FocusNode newNodeId)]
 
 
 deleteNode :: GraphNode -> Graph -> Graph

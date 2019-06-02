@@ -23,14 +23,18 @@ canParseNodeText nodeText = case runParser nodeText pyNode of
   Right _ -> true
   Left _ -> false
 
-canApply :: String -> String -> Boolean
-canApply funcStr argStr = case ( do
+canCompose :: String -> String -> Boolean
+canCompose funcStr argStr = case ( do
   Annotation _ funcType _  <- runParser funcStr annotation
   Annotation _ argType _ <- runParser argStr annotation
-  pure $ isJust $ pyApply funcType argType
+  case argType of
+    PyFunc _ outputType ->
+      pure $ isJust $ pyApply funcType outputType
+    _ ->
+      pure $ isJust $ pyApply funcType argType
   ) of
-    Right ap -> ap
-    Left _ -> false
+  Right ap -> ap
+  Left _ -> false
 
 pyNode :: Parser String PyNode
 pyNode =

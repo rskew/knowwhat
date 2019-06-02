@@ -82,21 +82,17 @@ window.GraphputerParser = GraphputerParser;
 window.graphUI.registerNodeValidHook(function (graph, node) {
     var valid = window.GraphputerParser.canParseNodeText(node.text.trim());
     console.log(node.text, valid);
-    console.log(node.text.length);
-    console.log(node.text.trim().length);
     return {"isValid": valid,
             "allow": true};
 });
 
 window.graphUI.registerEdgeValidHook(function (graph, sourceNode, targetNode) {
     var valid =
-        window.GraphputerParser.canApply(
+        window.GraphputerParser.canCompose(
             targetNode.text.trim())(
             sourceNode.text.trim());
-    console.log(sourceNode.text, valid);
-    console.log(targetNode.text, valid);
     return {"isValid": valid,
-            "allow": valid};
+            "allow": true};
 });
 
 window.copyPursGraph = copyPursGraph;

@@ -104,23 +104,8 @@ function Graph(graphNodes, focus, highlighted) {
     };
 
     graph.createNode = function (x, y, parentIds, childIds) {
-        newNodeId = Utils.uuidv4();
-        newNodeBody = new GraphNodeBody(
-            newNodeId, " ", x, y, parentIds, childIds);
-
-        graph.updatePurs(Purs.AddNode.create(graph.copyNode(newNodeBody)));
-        for (i=0; i<StringSet.cardinality(parentIds); i++) {
-            graph.updatePurs(Purs.AddEdge.create(
-                {"source": StringSet.lookupIndex(i, parentIds), "target": newNodeId}));
-        }
-        for (i=0; i<StringSet.cardinality(childIds); i++) {
-            graph.updatePurs(Purs.AddEdge.create(
-                {"source": newNodeId, "target":   StringSet.lookupIndex(i, childIds)}));
-        }
-
-        graph.focusOnNode(newNodeId);
-
-        return newNodeId;
+        graph.pursGraph = Purs.addNode({"x": x, "y": y})(parentIds)(childIds)(graph.pursGraph)();
+        return graph;
     };
 
     graph.removeFocused = function () {
