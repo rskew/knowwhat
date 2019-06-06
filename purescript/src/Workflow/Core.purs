@@ -18,10 +18,7 @@ import Data.String (Pattern(..), split, contains, stripPrefix, trim)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
---import Data.UUID (UUID, genUUID, parseUUID)
---import Data.Newtype (unwrap, class Newtype)
 import Effect (Effect)
---import Foreign (unsafeToForeign, ForeignError(..), readString, Foreign, F)
 import Foreign (ForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
@@ -105,22 +102,6 @@ newtype GraphNode = GraphNode
   }
 derive instance genericGraphNode :: Generic GraphNode _
 derive instance eqGraphNode :: Eq GraphNode
-
--- TODO: use type-safe UUIDs when refactoring is easy (when js is gone)
---newtype NodeId = NodeId UUID
---derive instance newtypeNodeId :: Newtype NodeId _
---derive instance eqNodeId :: Eq NodeId
-
---instance encodeUUID :: Encode NodeId where
---  encode = unwrap >>> show >>> unsafeToForeign
---
---instance decodeUUID :: Decode NodeId where
---  decode foreignUUID= do
---    str <- readString foreignUUID
---    let maybeUUID = parseUUID str
---    case maybeUUID of
---      Nothing -> ForeignError "Can't parse UUID"
---      Just uuid -> pure NodeId uuid
 
 instance encodeGraphNode :: Encode GraphNode where
   encode node = genericEncode genericEncodeOpts node

@@ -276,8 +276,10 @@ childrenOfGroup nodes =
 -- | If a node in the highlighted set is in focus then use
 -- | it's position for the group node, otherwise use the centroid
 -- | of the group.
--- if focus not node in group, just take any node from group.
--- if no nodes in group, do nothing.
+-- if focus not node in highlighted group, just take any node from group.
+-- if no nodes in highlighted group, do nothing.
+-- Copy the focus node from the group back into the parent graph
+-- but replace its edges with the edges to/from the entire group.
 groupHighlighted :: Graph -> Graph
 groupHighlighted (Graph g) =
   case do
