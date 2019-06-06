@@ -1,40 +1,50 @@
 module Workflow.Interaction where
 
-import Data.Array (filter, sortWith, (!!))
+import Workflow.Core
+
+import Data.Array (filter, sortWith, (!!), concatMap)
 import Data.Array as Array
 import Data.Eq (class Eq)
-import Data.Foldable (foldMap, foldl, length)
+import Data.Foldable (foldMap, foldl, length, sum)
 import Data.Function (on)
 import Data.Lens (view)
 import Data.List as List
 import Data.Maybe (Maybe(..))
 import Data.Ord (class Ord)
+import Effect (Effect)
 import Foreign.Object (keys, size)
 import Foreign.Object as Object
-import Prelude (($), (<<<), map, flip, (==), (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-))
-import Effect (Effect)
-
-import Workflow.Core
+import Prelude (($), (<<<), (>>>), map, flip, (==), (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-), (/), not)
 
 
---| Whereas a GraphOp represents a fundamental graph operation,
---| a GraphInteraction represents an abstract relation between
---| the before and after affect of the operation.
---| An GraphInteraction is used as a record of an UI operation having happened,
---| rather than a description of an operation which is to be applied.
---| For example, when grouping a set of nodes, the group node which is
---| then constructed is an output of the operation, but it is recorded
---| in the Group data so that the operation can be undone.
---data GraphInteraction =
-  --NewNode GraphNode
-  --| AddEdge Edge
-  --| RemoveEdge Edge
-  --| MoveNode GraphNode Point2D
-  --| AddHighlight NodeId
-  --| RemoveHighlight NodeId
-  --| Group (Object GraphNode) GraphNode
-  --| UnGroup GraphNode (Object GraphNode)
-  --| UngroupNode
+-- | Free monad undo/redo implementation.
+-- | A GraphInteraction represents an abstract relation between
+-- | the before and after affect of an interaction with the graph.
+-- | A GraphInteraction is recorded after the application of the interaction
+-- | so that all information required to perform an undo is available (such as nodeId).
+-- data GraphInteraction =
+  -- AddNode GraphNode
+  -- AddEdge Edge
+  -- RemoveEdge Edge
+  -- MoveNode GraphNode Point2D
+  -- AddHighlight NodeId
+  -- RemoveHighlight NodeId
+  -- Group (Object GraphNode) GraphNode
+  -- UnGroup GraphNode (Object GraphNode)
+  -- UngroupNode
+
+class (MoveOnGrid a, CollapseExpand a a) <= InteractiveGraph a
+
+class MoveOnGrid a where
+  moveUp :: a -> a
+  moveDown :: a -> a
+  moveLeft :: a -> a
+  moveRight :: a -> a
+
+class CollapseExpand a b where
+  collapse :: a -> b
+  expand :: b -> a
+
 
 -- TODO: add to interaction typeclass interface
 addNode :: Point2D -> NodeIdSet -> NodeIdSet -> Graph -> Effect Graph
@@ -46,7 +56,6 @@ addNode xyPos parentIds childIds g = do
   pure $ foldl (flip applyGraphOp) g
     $ [AddNode newNode] <> addParentEdges <> addChildEdges
     <> [UpdateFocus (FocusNode newNodeId)]
-
 
 deleteNode :: GraphNode -> Graph -> Graph
 deleteNode (GraphNode node) g =
@@ -94,6 +103,12 @@ toggleHighlightFocus g =
 
 ------
 -- Traversal
+
+instance interactiveGraphMove :: MoveOnGrid Graph where
+  moveUp = traverseUp
+  moveDown = traverseDown
+  moveLeft = traverseLeft
+  moveRight = traverseRight
 
 traverseUp :: Graph -> Graph
 traverseUp g =
@@ -224,3 +239,98 @@ traverseLeft g = changeFocusLeftRight Left g
 
 traverseRight :: Graph -> Graph
 traverseRight g = changeFocusLeftRight Right g
+
+
+------
+-- Subgraph collapse/expand
+
+instance interactiveGraphCollapseExpand :: CollapseExpand Graph Graph where
+  collapse = groupHighlighted
+  expand = expandFocus
+
+centroid :: Array GraphNode -> Point2D
+centroid nodes =
+  let n_nodes = length nodes in
+  { x : sum (map (view (_GraphNode <<< _x)) nodes) / n_nodes
+  , y : sum (map (view (_GraphNode <<< _y)) nodes) / n_nodes
+  }
+
+parentsOfGroup :: Array GraphNode -> NodeIdSet
+parentsOfGroup nodes =
+  let
+    allParents = concatMap (view (_GraphNode <<< _parents) >>> keys) nodes
+    nodesIds = map (view (_GraphNode <<< _id)) nodes
+  in
+    nodeIdSetFromArray $ filter (not <<< flip Array.elem nodesIds) allParents
+
+childrenOfGroup :: Array GraphNode -> NodeIdSet
+childrenOfGroup nodes =
+  let
+    allChildren = concatMap (view (_GraphNode <<< _children) >>> keys) nodes
+    nodesIds = map (view (_GraphNode <<< _id)) nodes
+  in
+    nodeIdSetFromArray $ filter (not <<< flip Array.elem nodesIds) allChildren
+
+-- | Make the highlighted nodes into a group node, hiding the
+-- | highlighted nodes as a subgraph.
+-- | If a node in the highlighted set is in focus then use
+-- | it's position for the group node, otherwise use the centroid
+-- | of the group.
+-- if focus not node in group, just take any node from group.
+-- if no nodes in group, do nothing.
+groupHighlighted :: Graph -> Graph
+groupHighlighted (Graph g) =
+  case do
+    defaultGroupNodeId <- Array.index (keys g.highlighted) 0
+    lookupNode (Graph g) defaultGroupNodeId
+  of
+    Nothing -> Graph g
+    Just defaultGroupNode ->
+      let
+        groupNode = case g.focus of
+          FocusNode nodeId ->
+            if Array.elem nodeId $ keys g.highlighted
+               then case lookupNode (Graph g) nodeId of
+                 Just focusNode -> focusNode
+                 Nothing -> defaultGroupNode
+               else defaultGroupNode
+          _ -> defaultGroupNode
+        subgraphNodes = lookupNodes (Graph g) g.highlighted
+        unglued = unglue subgraphNodes (Graph g)
+        groupParents = parentsOfGroup subgraphNodes
+        groupChildren = childrenOfGroup subgraphNodes
+        groupNode' =
+          replaceSubgraphNodes (view (_Graph <<< _nodes) unglued.childGraph) groupNode
+        parentGraph = clearHighlighted unglued.parentGraph
+        groupNodeId = view (_GraphNode <<< _id) groupNode'
+      in
+       (insertNode groupNode'
+        >>>
+        replaceParents groupParents groupNodeId
+        >>>
+        replaceChildren groupChildren groupNodeId)
+        $ parentGraph
+
+expandFocus :: Graph -> Graph
+expandFocus g =
+  case view (_Graph <<< _focus) g of
+    FocusNode groupNodeId ->
+      case lookupNode g groupNodeId of
+        Nothing -> g
+        Just (GraphNode groupNode) ->
+          if length groupNode.subgraphNodes == 0 then g else
+          let
+            subgraph = Graph { nodes: groupNode.subgraphNodes
+                             , focus: NoFocus
+                             , highlighted: nodeIdSetFromArray $ map (view (_GraphNode <<< _id)) $ Object.values groupNode.subgraphNodes
+                             }
+            groupNodePos = {x: groupNode.x, y: groupNode.y}
+            subgraphGroupNodePos = case lookupNode subgraph groupNodeId of
+              Nothing -> groupNodePos
+              Just (GraphNode subgraphNode) -> {x: subgraphNode.x, y: subgraphNode.y}
+            groupMovement = groupNodePos `subtract` subgraphGroupNodePos
+            movedSubgraph = foldl (\graph nodeId -> moveNodeAmount groupMovement nodeId graph) subgraph groupNode.subgraphNodes
+            gluedGraph = glue movedSubgraph $ removeNode (GraphNode groupNode) g
+          in
+            updateFocus (FocusNode groupNodeId) gluedGraph
+    _ -> g

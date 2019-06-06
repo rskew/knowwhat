@@ -1,8 +1,7 @@
 module Workflow.Core where
 
 import Control.Monad.Except.Trans (ExceptT)
-import Data.Array (filter, mapMaybe, (!!))
-import Data.Array as Array
+import Data.Array (filter, mapMaybe, (!!), zipWith)
 import Data.Eq (class Eq)
 import Data.Foldable (class Foldable, all, elem, foldl, maximumBy)
 import Data.Generic.Rep (class Generic)
@@ -27,7 +26,7 @@ import Foreign (ForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
 import Foreign.Generic.Types (SumEncoding)
-import Foreign.Object (Object, keys, values, size)
+import Foreign.Object (Object, keys, values, size, fromFoldable)
 import Foreign.Object as Object
 import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), (-), show)
 
@@ -131,6 +130,12 @@ instance decodeGraphNode :: Decode GraphNode where
 
 type Point2D = { x :: Number, y :: Number }
 
+add :: Point2D -> Point2D -> Point2D
+add a b = {x: a.x + b.x, y: a.y + b.y}
+
+subtract :: Point2D -> Point2D -> Point2D
+subtract a b = {x: a.x - b.x, y: a.y - b.y}
+
 createGraphNode :: Point2D -> NodeIdSet -> NodeIdSet -> Effect GraphNode
 createGraphNode xyPos parentIds childIds = do
    nodeId <- genUUID
@@ -157,6 +162,21 @@ type EdgeId = String
 
 computeEdgeId :: Edge -> String
 computeEdgeId (Edge edge) = edge.source <> "." <> edge.target
+
+-- | Utility
+edgesToFromNode :: GraphNode -> Array Edge
+edgesToFromNode (GraphNode node) =
+  let
+    edgesToChildren = map (
+      \childNodeId -> Edge { source : node.id
+                           , target : childNodeId }
+      ) $ keys node.children
+    edgesFromParents = map (
+      \parentNodeId -> Edge { source : parentNodeId
+                            , target : node.id }
+      ) $ keys node.parents
+  in
+    edgesToChildren <> edgesFromParents
 
 data Focus =
   FocusNode String
@@ -251,14 +271,14 @@ _focus = prop (SProxy :: SProxy "focus")
 addParent :: NodeId -> GraphNode -> GraphNode
 addParent nodeId = over (_GraphNode <<< _parents) $ insert nodeId
 
-removeParent :: NodeId -> GraphNode -> GraphNode
-removeParent nodeId = over (_GraphNode <<< _parents) $ delete nodeId
+deleteParent :: NodeId -> GraphNode -> GraphNode
+deleteParent nodeId = over (_GraphNode <<< _parents) $ delete nodeId
 
 addChild :: NodeId -> GraphNode -> GraphNode
 addChild nodeId = over (_GraphNode <<< _children) $ insert nodeId
 
-removeChild :: NodeId -> GraphNode -> GraphNode
-removeChild nodeId = over (_GraphNode <<< _children) $ delete nodeId
+deleteChild :: NodeId -> GraphNode -> GraphNode
+deleteChild nodeId = over (_GraphNode <<< _children) $ delete nodeId
 
 moveNode :: Point2D -> GraphNode -> GraphNode
 moveNode pos = set (_GraphNode <<< _x) pos.x <<<
@@ -267,9 +287,10 @@ moveNode pos = set (_GraphNode <<< _x) pos.x <<<
 updateText :: String -> GraphNode -> GraphNode
 updateText = set (_GraphNode <<< _text)
 
-updateSubgraphNodes :: Object GraphNode -> GraphNode -> GraphNode
-updateSubgraphNodes = set (_GraphNode <<< _subgraphNodes)
+replaceSubgraphNodes :: Object GraphNode -> GraphNode -> GraphNode
+replaceSubgraphNodes = set (_GraphNode <<< _subgraphNodes)
 
+-- TODO: replace GraphOp with bag-of-functions
 applyGraphOp :: GraphOp -> Graph -> Graph
 applyGraphOp (AddNode (GraphNode nodeBody)) =
   setJust (_Graph <<< _nodes <<< (at nodeBody.id)) (GraphNode nodeBody)
@@ -280,11 +301,11 @@ applyGraphOp (MoveNode nodeId pos) =
 applyGraphOp (AddParent nodeId parentId) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ addParent parentId
 applyGraphOp (RemoveParent nodeId parentId) =
-  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ removeParent parentId
+  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ deleteParent parentId
 applyGraphOp (AddChild nodeId childId) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ addChild childId
 applyGraphOp (RemoveChild nodeId childId) =
-  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ removeChild childId
+  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ deleteChild childId
 applyGraphOp (AddEdge (Edge edge)) =
   applyGraphOp (AddParent edge.target edge.source)
   <<<
@@ -296,7 +317,7 @@ applyGraphOp (RemoveEdge (Edge edge)) =
 applyGraphOp (UpdateText nodeId newText) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ updateText newText
 applyGraphOp (UpdateSubgraphNodes nodeId newSubgraphNodes) =
-  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ updateSubgraphNodes newSubgraphNodes
+  over (_Graph <<< _nodes <<< (at nodeId)) $ map $ replaceSubgraphNodes newSubgraphNodes
 applyGraphOp (UpdateFocus newFocus) =
   over _Graph (_ { focus = newFocus})
 applyGraphOp (Highlight nodeId) =
@@ -306,6 +327,121 @@ applyGraphOp (UnHighlight nodeId) =
 applyGraphOp (UpdateNodeValidity nodeId validity) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ set (_GraphNode <<< _valid) validity
 
+-- TODO: add to interface typeclass.
+insertNode :: GraphNode -> Graph -> Graph
+insertNode node g = applyGraphOp (AddNode node) g
+
+-- TODO: add to interface typeclass.
+removeNode :: GraphNode -> Graph -> Graph
+removeNode (GraphNode node) g =
+  applyGraphOp (RemoveNode (GraphNode node))
+  $ removeParents node.id
+  $ removeChildren node.id
+  $ g
+
+removeParents :: NodeId -> Graph -> Graph
+removeParents nodeId g =
+  case lookupNode g nodeId of
+    Nothing -> g
+    Just (GraphNode node) ->
+      foldl (\graph parentId ->
+              (removeEdge (Edge { source : parentId, target : nodeId }) graph))
+        g
+        $ keys node.parents
+
+removeChildren :: NodeId -> Graph -> Graph
+removeChildren nodeId g =
+  case lookupNode g nodeId of
+    Nothing -> g
+    Just (GraphNode node) ->
+      foldl (\graph childId ->
+              (removeEdge (Edge { source : nodeId, target : childId }) graph))
+        g
+        $ keys node.children
+
+replaceParents :: NodeIdSet -> NodeId -> Graph -> Graph
+replaceParents newParents nodeId g =
+  foldl (\graph parentId ->
+          addEdge (Edge { source : parentId, target : nodeId }) graph)
+    (removeParents nodeId g)
+    (keys newParents)
+
+replaceChildren :: NodeIdSet -> NodeId -> Graph -> Graph
+replaceChildren newChildren nodeId g =
+  foldl (\graph childId ->
+          addEdge (Edge { source : nodeId, target : childId }) graph)
+    (removeChildren nodeId g)
+    (keys newChildren)
+
+-- TODO: add to interface typeclass.
+addEdge :: Edge -> Graph -> Graph
+addEdge edge g = applyGraphOp (AddEdge edge) g
+
+-- TODO: add to interface typeclass.
+removeEdge :: Edge -> Graph -> Graph
+removeEdge edge g = applyGraphOp (RemoveEdge edge) g
+
+moveNodeAmount :: Point2D -> GraphNode -> Graph -> Graph
+moveNodeAmount motion (GraphNode node) g =
+   let newPos = add {x: node.x, y: node.y} motion in
+   applyGraphOp (MoveNode node.id newPos) g
+
+-- TODO: move to Workflow.Interaction
+updateFocus :: Focus -> Graph -> Graph
+updateFocus focus g = applyGraphOp (UpdateFocus focus) g
+
+highlight :: NodeId -> Graph -> Graph
+highlight nodeId g = applyGraphOp (Highlight nodeId) g
+
+unHighlight :: NodeId -> Graph -> Graph
+unHighlight nodeId g = applyGraphOp (UnHighlight nodeId) g
+
+clearHighlighted :: Graph -> Graph
+clearHighlighted = set (_Graph <<< _highlighted) emptyNodeIdSet
+
+
+-- | Take a child graph that has edges to a parent graph that are not
+-- | mirrored, add the matching edges from parent graph to child graph
+-- | and merge the node sets.
+-- | This is used to merge a collapsed subgraph back into the main graph,
+-- | and will also support breaking down and joining graphs for filtering
+-- | and composing semantic networks or something :D
+-- TODO: add to interface typeclass
+glue :: Graph -> Graph -> Graph
+glue childGraph parentGraph =
+  let
+    childGraphNodeArray = values $ view (_Graph <<< _nodes) childGraph
+    childGraphEdges = do
+      childGraphNode <- childGraphNodeArray
+      edgesToFromNode childGraphNode
+    allNodes = foldl (flip insertNode) parentGraph childGraphNodeArray
+    childGraphNodeIds = nodeIdSetFromArray $ map (view (_GraphNode <<< _id)) childGraphNodeArray
+    mergedGraph = Graph { nodes : view (_Graph <<< _nodes) allNodes
+                        , focus : view (_Graph <<< _focus) childGraph
+                        , highlighted : childGraphNodeIds
+                        }
+  in
+    foldl (flip addEdge) mergedGraph childGraphEdges
+
+-- | Almost-inverse of glue (modulo some type conversions)
+unglue :: Array GraphNode -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
+unglue childGraphNodes g =
+  let
+    childGraphNodeIds = map (view (_GraphNode <<< _id)) childGraphNodes
+    childGraphEdges = do
+      childGraphNode <- childGraphNodes
+      edgesToFromNode childGraphNode
+    ungluedParentGraph = foldl (flip removeNode) g childGraphNodes
+    parentGraph = foldl (flip removeEdge) ungluedParentGraph childGraphEdges
+    childGraphNodeSet = zipWith Tuple childGraphNodeIds childGraphNodes
+    childGraph = Graph { nodes : fromFoldable childGraphNodeSet
+                       , focus : NoFocus
+                       , highlighted : Object.empty
+                       }
+  in
+    { parentGraph : parentGraph
+    , childGraph : childGraph
+    }
 
 
 demo :: Graph
@@ -399,6 +535,7 @@ lookupEdge g edgeId =
 ------
 -- Graph Queries
 
+-- TODO: remove
 terminalestNode :: Array GraphNode -> Maybe GraphNode
 terminalestNode nodes = case filter isTerminal nodes of
   [] -> maximumBy (comparing getY) nodes
@@ -447,16 +584,3 @@ graphTitle (Graph g) = titles !! 0 >>= stripPrefix titlePattern
     nodeTextArr = trim <$> (view (_GraphNode <<< _text)) <$> values g.nodes
     isTitle = contains titlePattern
     titles = filter isTitle nodeTextArr
-
-
- -- Purescript by example chapter 8
-third :: forall a. Array a -> Maybe a
---third arr = do
---  tail' <- Array.tail arr
---  tail'' <- Array.tail tail'
---  Array.head tail''
-third arr = Array.tail arr >>= Array.tail >>= Array.head
-
-
-sums :: Array Int -> Array Int
-sums = Array.sort <<< Array.nub <<< Array.foldM (\acc i -> [acc, acc + i]) 0

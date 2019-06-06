@@ -352,9 +352,9 @@ function Graph(graphNodes, focus, highlighted) {
 
     graph.toggleGroupExpand = function () {
         if (StringSet.cardinality(graph.highlighted) == 0) {
-            graph.expandGroupInFocus();
+            graph.pursGraph = Purs.interactiveGraphCollapseExpand.expand(graph.pursGraph);
         } else {
-            graph.groupHighlighted();
+            graph.pursGraph = Purs.interactiveGraphCollapseExpand.collapse(graph.pursGraph);
         }
     };
 

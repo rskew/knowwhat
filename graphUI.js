@@ -340,6 +340,13 @@ module.exports = function GraphUI(graph) {
                     .attr("cx", d => d[1].x + graphUI.background_origin.x)
                     .attr("cy", d => d[1].y + graphUI.background_origin.y)
                     .classed("focused", d => d[0] == Purs.fromFocus(graphUI.graph.focus))
+                    .attr("r", d => {
+                        if (Object.keys(d[1].subgraphNodes).length > 0) {
+                            return 12;
+                        } else {
+                            return 7;
+                        }
+                    })
             );
     };
 
