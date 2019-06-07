@@ -53,53 +53,52 @@ function Graph(graphNodes, focus, highlighted) {
     ///////////////////////////////////
     //////// Graph manipulation
 
-    graph.newChildOfFocus = function () {
-        graph.pursGraph = Purs.newChildOfFocus(graph.pursGraph)();
-        return graph;
-    };
+    //graph.newChildOfFocus = function () {
+    //    graph.pursGraph = Purs.newChildOfFocus(graph.pursGraph)();
+    //    return graph;
+    //};
 
-    graph.newParentOfFocus = function () {
-        graph.pursGraph = Purs.newParentOfFocus(graph.pursGraph)();
-        return graph;
-    };
+    //graph.newParentOfFocus = function () {
+    //    graph.pursGraph = Purs.newParentOfFocus(graph.pursGraph)();
+    //    return graph;
+    //};
 
-    graph.createNode = function (x, y, parentIds, childIds) {
-        graph.pursGraph = Purs.addNode({"x": x, "y": y})(parentIds)(childIds)(graph.pursGraph)();
-        return graph;
-    };
+    //graph.createNode = function (x, y, parentIds, childIds) {
+    //    graph.pursGraph = Purs.addNode({"x": x, "y": y})(parentIds)(childIds)(graph.pursGraph)();
+    //    return graph;
+    //};
 
-    graph.removeFocused = function () {
-        graph.pursGraph = Purs.removeFocus(graph.pursGraph);
-        return graph;
-    };
+    //graph.removeFocused = function () {
+    //    graph.pursGraph = Purs.removeFocus(graph.pursGraph);
+    //    return graph;
+    //};
 
-    graph.addEdge = function(sourceId, targetId) {
-        graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
+    //graph.addEdge = function(sourceId, targetId) {
+    //    graph.updatePurs(Purs.AddEdge.create({"source": sourceId, "target": targetId}));
 
-        return graph;
-    };
+    //    return graph;
+    //};
 
-    graph.deleteEdge = function(sourceId, targetId) {
-        graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
+    //graph.deleteEdge = function(sourceId, targetId) {
+    //    graph.updatePurs(Purs.RemoveEdge.create({"source": sourceId, "target": targetId}));
 
-        return graph;
-    };
+    //    return graph;
+    //};
 
-    graph.updateText = function(nodeId, text) {
-        graph.updatePurs(Purs.UpdateText.create(nodeId)(text));
+    //graph.updateText = function(nodeId, text) {
+    //    graph.updatePurs(Purs.UpdateText.create(nodeId)(text));
+    //    return graph;
+    //};
 
-        return graph;
-    };
+    //graph.moveNode = function (nodeId, newPos) {
+    //    graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
+    //    return graph;
+    //};
 
-    graph.moveNode = function (nodeId, newPos) {
-        graph.updatePurs(Purs.MoveNode.create(nodeId)(newPos));
-        return graph;
-    };
-
-    graph.updateValidity = function (nodeId, validity) {
-        graph.updatePurs(Purs.UpdateNodeValidity.create(nodeId)(validity));
-        return graph;
-    };
+    //graph.updateValidity = function (nodeId, validity) {
+    //    graph.updatePurs(Purs.UpdateNodeValidity.create(nodeId)(validity));
+    //    return graph;
+    //};
 
 
     ///////////////////////////////////

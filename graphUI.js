@@ -69,11 +69,15 @@ module.exports = function GraphUI(graph) {
         // Ctrl+click to create new unconnected node
         .on("mousedown", function () {
             if (d3.event.ctrlKey) {
-                graphUI.graph.createNode(
-                    d3.event.pageX - graphUI.background_origin.x,
-                    d3.event.pageY - graphUI.background_origin.y,
-                    {},
-                    {});
+                graphUI.graph.pursGraph =
+                    Purs.graphOps.insertNode(
+                        Purs.graphOps.createNode(
+                            {"x": d3.event.pageX - graphUI.background_origin.x,
+                             "y": d3.event.pageY - graphUI.background_origin.y})(
+                        {})({})()
+                    )(
+                        graphUI.graph.pursGraph
+                    );
                 graphUI.update();
             }
         })
@@ -221,7 +225,7 @@ module.exports = function GraphUI(graph) {
                     })
                     .on("click", function(edgeNodes) {
                         graphUI.graph.pursGraph =
-                            Purs.interactiveGraphFocusable.focusOn(
+                            Purs.interactiveGraphEditableFocus.focusOn(
                                 Purs.FocusEdge.create(
                                     {"source": edgeNodes.source.id, "target": edgeNodes.target.id}
                                 )([])
@@ -302,7 +306,10 @@ module.exports = function GraphUI(graph) {
                     .on("keyup", function (d) {
                         var validity = graphUI.nodeValidHook(graphUI.graph, {"text": this.innerText});
                         if (validity.allow) {
-                            graphUI.graph.updateText(d[0], this.innerText);
+                            graphUI.graph.pursGraph = Purs.interactiveGraphTextCells.updateCellText(
+                                this.innerText)(
+                                d[0]
+                            );
                         } else {
                             this.innerText = d[1].text;
                         }
@@ -502,7 +509,7 @@ module.exports = function GraphUI(graph) {
 
     function dragstarted_node(d) {
         d3.select(this).style("pointer-events", "none");
-        graphUI.graph.pursGraph = Purs.interactiveGraphFocusable.focusOn(
+        graphUI.graph.pursGraph = Purs.interactiveGraphEditableFocus.focusOn(
             Purs.FocusNode.create(d[0])
         )(  graphUI.graph.pursGraph
         );
@@ -510,10 +517,13 @@ module.exports = function GraphUI(graph) {
     }
 
     function dragged_node(d) {
-        graphUI.graph.moveNode(d[0], {
-            "x": Math.floor((d3.event.x - graphUI.background_origin.x) / graphUI.gridSize) * graphUI.gridSize,
-            "y": Math.floor((d3.event.y - graphUI.background_origin.y) / graphUI.gridSize) * graphUI.gridSize,
-        });
+        graphUI.graph.pursGraph = Purs.interactiveGraphMovable.updatePosition(
+            { "x": Math.floor((d3.event.x - graphUI.background_origin.x) / graphUI.gridSize) * graphUI.gridSize
+            , "y": Math.floor((d3.event.y - graphUI.background_origin.y) / graphUI.gridSize) * graphUI.gridSize
+            })(
+            d[0])(
+                graphUI.graph.pursGraph
+            );
         graphUI.update();
     }
 
@@ -560,8 +570,12 @@ module.exports = function GraphUI(graph) {
             graphUI.mouseState.clickedNode != graphUI.mouseState.mouseoverNode &&
             graphUI.mouseState.mouseoverNode != undefined) {
 
-            graphUI.graph.addEdge(graphUI.mouseState.clickedNode, graphUI.mouseState.mouseoverNode);
-            graphUI.graph.pursGraph = Purs.interactiveGraphFocusable.focusOn(
+            graphUI.graph.pursGraph = Purs.graphOps.addEdge(
+                { "source": graphUI.mouseState.clickedNode,
+                  "target": graphUI.mouseState.mouseoverNode})(
+                graphUI.graph.pursGraph
+            );
+            graphUI.graph.pursGraph = Purs.interactiveGraphEditableFocus.focusOn(
                 Purs.FocusNode.create(graphUI.mouseState.mouseoverNode)
             )(  graphUI.graph.pursGraph
             );
@@ -738,12 +752,15 @@ module.exports = function GraphUI(graph) {
                     graphUI.background_origin.x = 0;
                     graphUI.background_origin.y = 0;
                 } else {
-                    graph.newChildOfFocus();
+                    graph.pursGraph = Purs.newChildOfFocus(graph.pursGraph)();
                 };
             },
-            "O": graph => graph.newParentOfFocus(),
-            "x": graph => graph.removeFocused(),
-            "Delete": graph => graph.removeFocused(),
+            "O": graph => graph.pursGraph =
+                Purs.newParentOfFocus(graph.pursGraph)(),
+            "x": graph => graph.pursGraph =
+                Purs.interactiveGraphEditableFocus.removeFocused(graph.pursGraph),
+            "Delete": graph => graph.pursGraph =
+                Purs.interactiveGraphEditableFocus.removeFocused(graph.pursGraph),
             "s": function (graph, event) {
                 if (d3.event.ctrlKey) {
                     event.preventDefault();
@@ -797,7 +814,8 @@ module.exports = function GraphUI(graph) {
             },
             "s": graph => graph.pursGraph =
                 Purs.interactiveGraphCursorSelect.toggleCursorSelection(graph.pursGraph),
-            "Delete": graph => graph.removeFocused(),
+            "Delete": graph => graph.pursGraph =
+                Purs.interactiveGraphEditableFocus.removeFocused(graph.pursGraph),
             "Escape": normalMode,
             " ": graph => graph.pursGraph =
                 Purs.interactiveGraphCursorSelect.toggleCollapseExpand(graph.pursGraph),

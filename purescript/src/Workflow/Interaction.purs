@@ -8,7 +8,6 @@ import Data.Eq (class Eq)
 import Data.Foldable (foldMap, foldl, length, sum, class Foldable, maximumBy)
 import Data.Function (on)
 import Data.Lens (view)
-import Data.List as List
 import Data.Maybe (Maybe(..))
 import Data.Ord (class Ord, comparing)
 import Effect (Effect)
@@ -50,9 +49,10 @@ type InteractiveEdgeData = forall t.
 class ( MoveOnGrid a
       , CollapseExpand a
       , CursorSelect a
-      , Focusable a b
+      , EditableFocus a b
       , Validatable a
       , Movable a
+      , TextCells a
       )
       <= InteractiveGraph a b | a -> b
 
@@ -77,8 +77,9 @@ class CursorSelect a where
   toggleCursorSelection :: a -> a
   clearSelection :: a -> a
 
-class Focusable a b | a -> b where
+class EditableFocus a b | a -> b where
   focusOn :: b -> a -> a
+  removeFocus :: a -> a
 
 class Validatable a where
   updateValidity :: Boolean -> String -> a -> a
@@ -86,26 +87,23 @@ class Validatable a where
 class Movable a where
   updatePosition :: Point2D -> String -> a -> a
 
-addNode :: Point2D -> NodeIdSet -> NodeIdSet -> Graph -> Effect Graph
-addNode xyPos parentIds childIds g = do
-  newNode <- createGraphNode xyPos parentIds childIds
-  let newNodeId = (view (_GraphNode <<< _id) newNode)
-  let addParentEdges = map (\parentId -> AddChild parentId newNodeId) $ keys parentIds
-  let addChildEdges = map (\childId -> AddParent childId newNodeId) $ keys childIds
-  pure $ foldl (flip applyGraphOp) g
-    $ [AddNode newNode] <> addParentEdges <> addChildEdges
-    <> [UpdateFocus (FocusNode newNodeId)]
+-- | Text in cells indexed by String IDs
+class TextCells a where
+  updateCellText :: String -> String -> a -> a
 
-deleteNode :: GraphNode -> Graph -> Graph
-deleteNode (GraphNode node) g =
-  applyGraphOp (RemoveNode (GraphNode node))
-  $ foldl (flip applyGraphOp) g $ List.fromFoldable $ removeParentEdges <> removeChildEdges
-  where
-    removeParentEdges = (\parentId -> RemoveEdge (Edge { source: parentId, target: node.id })) <$> keys node.parents
-    removeChildEdges = (\childId -> RemoveEdge (Edge { source: node.id, target: childId })) <$> keys node.children
 
-removeFocus :: Graph -> Graph
-removeFocus g =
+------
+-- Focusing
+
+instance interactiveGraphEditableFocus :: EditableFocus Graph Focus where
+  focusOn = updateFocus
+  removeFocus = removeFocusImpl
+
+updateFocus :: Focus -> Graph -> Graph
+updateFocus focus g = applyGraphOp (UpdateFocus focus) g
+
+removeFocusImpl :: Graph -> Graph
+removeFocusImpl g =
   case view (_Graph <<< _focus) g of
     NoFocus -> g
     FocusNode nodeId -> case lookupNode g nodeId of
@@ -122,20 +120,10 @@ removeFocus g =
         in applyGraphOp
           (UpdateFocus newFocus)
           $ applyGraphOp (UnHighlight focusNode.id)
-          $ deleteNode (GraphNode focusNode) g
+          $ removeNode focusNode.id g
     FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.source))
         $ applyGraphOp (RemoveEdge (Edge edge)) g
 
-
-
-------
--- Focusing
-
-instance interactiveGraphFocusable :: Focusable Graph Focus where
-  focusOn = updateFocus
-
-updateFocus :: Focus -> Graph -> Graph
-updateFocus focus g = applyGraphOp (UpdateFocus focus) g
 
 
 ------
@@ -346,8 +334,9 @@ newChildOfFocus (Graph g) = case g.focus of
       let
         newChildPos = newChildPosition (Graph g) (GraphNode node)
         newChildParents = nodeIdSetFromArray $ [node.id]
-      in
-        addNode newChildPos newChildParents emptyNodeIdSet (Graph g)
+      in do
+        newChildNode <- createNode newChildPos newChildParents emptyNodeIdSet
+        pure $ insertNode newChildNode (Graph g)
   _ -> pure $ Graph g
 
 newParentOfFocus :: Graph -> Effect Graph
@@ -358,8 +347,9 @@ newParentOfFocus (Graph g) = case g.focus of
       let
         newParentPos = newParentPosition (Graph g) (GraphNode node)
         newParentChildren = nodeIdSetFromArray $ [node.id]
-      in
-        addNode newParentPos emptyNodeIdSet newParentChildren (Graph g)
+      in do
+        newParentNode <- createNode newParentPos emptyNodeIdSet newParentChildren
+        pure $ insertNode newParentNode (Graph g)
   _ -> pure $ Graph g
 
 
@@ -455,7 +445,7 @@ expandFocus g =
               Just (GraphNode subgraphNode) -> {x: subgraphNode.x, y: subgraphNode.y}
             groupMovement = groupNodePos `subtract` subgraphGroupNodePos
             movedSubgraph = foldl (\graph nodeId -> moveNodeAmount groupMovement nodeId graph) subgraph groupNode.subgraphNodes
-            gluedGraph = glue movedSubgraph $ removeNode (GraphNode groupNode) g
+            gluedGraph = glue movedSubgraph $ removeNode groupNode.id g
           in
             updateFocus (FocusNode groupNodeId) gluedGraph
     _ -> g
@@ -474,3 +464,10 @@ instance interactiveGraphNodeValidatable :: Validatable Graph where
 
 updateNodeValidity :: Boolean -> NodeId -> Graph -> Graph
 updateNodeValidity validity nodeId = applyGraphOp (UpdateNodeValidity nodeId validity)
+
+
+------
+-- Text
+
+instance interactiveGraphTextCells :: TextCells Graph where
+  updateCellText = updateNodeText

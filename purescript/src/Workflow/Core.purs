@@ -63,6 +63,25 @@ nodeIdSetFromArray nodeIdArr = Object.fromFoldable $ map (\nodeId -> (Tuple node
 emptyNodeIdSet :: NodeIdSet
 emptyNodeIdSet = Object.empty
 
+
+class BasicGraph where
+  createNode :: Point2D -> NodeIdSet -> NodeIdSet -> Effect GraphNode
+  insertNode :: GraphNode -> Graph -> Graph
+  removeNode :: NodeId -> Graph -> Graph
+  addEdge :: Edge -> Graph -> Graph
+  removeEdge :: Edge -> Graph -> Graph
+  glue :: Graph -> Graph -> Graph
+  unglue :: Array GraphNode -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
+
+instance graphOps :: BasicGraph where
+  createNode = createGraphNode
+  insertNode = insertNodeImpl
+  removeNode = removeNodeImpl
+  addEdge = addEdgeImpl
+  removeEdge = removeEdgeImpl
+  glue = glueImpl
+  unglue = unglueImpl
+
 newtype Graph = Graph
   { nodes :: Object GraphNode
   , focus :: Focus
@@ -320,17 +339,26 @@ applyGraphOp (UnHighlight nodeId) =
 applyGraphOp (UpdateNodeValidity nodeId validity) =
   over (_Graph <<< _nodes <<< (at nodeId)) $ map $ set (_GraphNode <<< _valid) validity
 
--- TODO: add to interface typeclass.
-insertNode :: GraphNode -> Graph -> Graph
-insertNode node g = applyGraphOp (AddNode node) g
+insertNodeImpl :: GraphNode -> Graph -> Graph
+insertNodeImpl newNode g =
+  let
+    newNodeId = (view (_GraphNode <<< _id) newNode)
+    addParentEdges = map (\parentId -> AddChild parentId newNodeId) $ keys $ view (_GraphNode <<< _parents) newNode
+    addChildEdges = map (\childId -> AddParent childId newNodeId) $ keys $ view (_GraphNode <<< _children) newNode
+  in
+    foldl (flip applyGraphOp) g
+      $ [AddNode newNode] <> addParentEdges <> addChildEdges
+      <> [UpdateFocus (FocusNode newNodeId)]
 
 -- TODO: add to interface typeclass.
-removeNode :: GraphNode -> Graph -> Graph
-removeNode (GraphNode node) g =
-  applyGraphOp (RemoveNode (GraphNode node))
-  $ removeParents node.id
-  $ removeChildren node.id
-  $ g
+removeNodeImpl :: NodeId -> Graph -> Graph
+removeNodeImpl nodeId g = case lookupNode g nodeId of
+  Nothing -> g
+  Just (GraphNode node) ->
+    applyGraphOp (RemoveNode (GraphNode node))
+    $ removeParents node.id
+    $ removeChildren node.id
+    $ g
 
 removeParents :: NodeId -> Graph -> Graph
 removeParents nodeId g =
@@ -370,12 +398,12 @@ updateNodePosition :: Point2D -> NodeId -> Graph -> Graph
 updateNodePosition newPos nodeId = applyGraphOp (MoveNode nodeId newPos)
 
 -- TODO: add to interface typeclass.
-addEdge :: Edge -> Graph -> Graph
-addEdge edge g = applyGraphOp (AddEdge edge) g
+addEdgeImpl :: Edge -> Graph -> Graph
+addEdgeImpl edge g = applyGraphOp (AddEdge edge) g
 
 -- TODO: add to interface typeclass.
-removeEdge :: Edge -> Graph -> Graph
-removeEdge edge g = applyGraphOp (RemoveEdge edge) g
+removeEdgeImpl :: Edge -> Graph -> Graph
+removeEdgeImpl edge g = applyGraphOp (RemoveEdge edge) g
 
 moveNodeAmount :: Point2D -> GraphNode -> Graph -> Graph
 moveNodeAmount motion (GraphNode node) g =
@@ -391,6 +419,8 @@ unHighlight nodeId g = applyGraphOp (UnHighlight nodeId) g
 clearHighlighted :: Graph -> Graph
 clearHighlighted = set (_Graph <<< _highlighted) emptyNodeIdSet
 
+updateNodeText :: String -> NodeId -> Graph -> Graph
+updateNodeText newText nodeId = applyGraphOp (UpdateText nodeId newText)
 
 -- | Take a child graph that has edges to a parent graph that are not
 -- | mirrored, add the matching edges from parent graph to child graph
@@ -399,8 +429,8 @@ clearHighlighted = set (_Graph <<< _highlighted) emptyNodeIdSet
 -- | and will also support breaking down and joining graphs for filtering
 -- | and composing semantic networks or something :D
 -- TODO: add to interface typeclass
-glue :: Graph -> Graph -> Graph
-glue childGraph parentGraph =
+glueImpl :: Graph -> Graph -> Graph
+glueImpl childGraph parentGraph =
   let
     childGraphNodeArray = values $ view (_Graph <<< _nodes) childGraph
     childGraphEdges = do
@@ -416,14 +446,14 @@ glue childGraph parentGraph =
     foldl (flip addEdge) mergedGraph childGraphEdges
 
 -- | Almost-inverse of glue (modulo some type conversions)
-unglue :: Array GraphNode -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
-unglue childGraphNodes g =
+unglueImpl :: Array GraphNode -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
+unglueImpl childGraphNodes g =
   let
     childGraphNodeIds = map (view (_GraphNode <<< _id)) childGraphNodes
     childGraphEdges = do
       childGraphNode <- childGraphNodes
       edgesToFromNode childGraphNode
-    ungluedParentGraph = foldl (flip removeNode) g childGraphNodes
+    ungluedParentGraph = foldl (flip removeNode) g childGraphNodeIds
     parentGraph = foldl (flip removeEdge) ungluedParentGraph childGraphEdges
     childGraphNodeSet = zipWith Tuple childGraphNodeIds childGraphNodes
     childGraph = Graph { nodes : fromFoldable childGraphNodeSet
