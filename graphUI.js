@@ -72,8 +72,8 @@ module.exports = function GraphUI(graph) {
                 graphUI.graph.createNode(
                     d3.event.pageX - graphUI.background_origin.x,
                     d3.event.pageY - graphUI.background_origin.y,
-                    StringSet.empty(),
-                    StringSet.empty());
+                    {},
+                    {});
                 graphUI.update();
             }
         })
@@ -162,7 +162,7 @@ module.exports = function GraphUI(graph) {
 
     graphUI.updateEdges = function () {
         graphUI.svg.select("#edges").selectAll("line").filter(".edge")
-            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+            .data(Purs.resolvedGraphEdges(graphUI.graph.pursGraph), function (edgeNode) {
                 return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
             })
             .join(
@@ -201,7 +201,7 @@ module.exports = function GraphUI(graph) {
 
     graphUI.updateEdgeBorders = function () {
         graphUI.svg.select("#edgeBorders").selectAll("line").filter(".edgeBorder")
-            .data(graphUI.graph.getEdgeNodes(), function (edgeNode) {
+            .data(Purs.resolvedGraphEdges(graphUI.graph.pursGraph), function (edgeNode) {
                 return Purs.computeEdgeId({"source": edgeNode.source.id, "target": edgeNode.target.id});
             })
             .join(
@@ -220,7 +220,13 @@ module.exports = function GraphUI(graph) {
                         return validity.isValid;
                     })
                     .on("click", function(edgeNodes) {
-                        graphUI.graph.focusOnEdge({"source": edgeNodes.source.id, "target": edgeNodes.target.id});
+                        graphUI.graph.pursGraph =
+                            Purs.interactiveGraphFocusable.focusOn(
+                                Purs.FocusEdge.create(
+                                    {"source": edgeNodes.source.id, "target": edgeNodes.target.id}
+                                )([])
+                            )(  graphUI.graph.pursGraph
+                             );
                         graphUI.update();
                     })
                     .on("mouseover", function (d) {
@@ -300,7 +306,9 @@ module.exports = function GraphUI(graph) {
                         } else {
                             this.innerText = d[1].text;
                         }
-                        graphUI.graph.updateValidity(d[0], validity.isValid);
+                        graphUI.graph.pursGraph = Purs.interactiveGraphNodeValidatable.updateValidity(
+                            validity.isValid)(d[0])(graphUI.graph.pursGraph
+                        );
                         graphUI.update();
                     });},
                 update => update
@@ -476,7 +484,6 @@ module.exports = function GraphUI(graph) {
             graphUI.background_drag_enable = false;
         } else {
             graphUI.background_drag_enable = true;
-            d3.select(this).style("pointer-events", "none");
             graphUI.update();
         }
     }
@@ -490,13 +497,15 @@ module.exports = function GraphUI(graph) {
     }
 
     function dragended_background(d) {
-        d3.select(this).style("pointer-events", "all");
         graphUI.update();
     }
 
     function dragstarted_node(d) {
         d3.select(this).style("pointer-events", "none");
-        graphUI.graph.focusOnNode(d[0]);
+        graphUI.graph.pursGraph = Purs.interactiveGraphFocusable.focusOn(
+            Purs.FocusNode.create(d[0])
+        )(  graphUI.graph.pursGraph
+        );
         graphUI.update();
     }
 
@@ -552,7 +561,10 @@ module.exports = function GraphUI(graph) {
             graphUI.mouseState.mouseoverNode != undefined) {
 
             graphUI.graph.addEdge(graphUI.mouseState.clickedNode, graphUI.mouseState.mouseoverNode);
-            graphUI.graph.focusOnNode(graphUI.mouseState.mouseoverNode);
+            graphUI.graph.pursGraph = Purs.interactiveGraphFocusable.focusOn(
+                Purs.FocusNode.create(graphUI.mouseState.mouseoverNode)
+            )(  graphUI.graph.pursGraph
+            );
         };
     }
 
@@ -574,37 +586,49 @@ module.exports = function GraphUI(graph) {
     graphUI.moveFocusDown = function () {
         focusNodeId = Purs.fromFocus(graphUI.graph.focus);
         node = graphUI.graph.nodes[focusNodeId];
-        graphUI.graph.moveNode(focusNodeId, {
-            "x": node.x,
-            "y": node.y + graphUI.gridSize,
-        });
+        graphUI.graph.pursGraph = Purs.interactiveGraphMovable.updatePosition(
+            { "x": node.x
+            , "y": node.y + graphUI.gridSize
+            })(
+            focusNodeId)(
+                graphUI.graph.pursGraph
+            );
     };
 
     graphUI.moveFocusUp = function () {
         focusNodeId = Purs.fromFocus(graphUI.graph.focus);
         node = graphUI.graph.nodes[focusNodeId];
-        graphUI.graph.moveNode(focusNodeId, {
-            "x": node.x,
-            "y": node.y - graphUI.gridSize,
-        });
+        graphUI.graph.pursGraph = Purs.interactiveGraphMovable.updatePosition(
+            { "x": node.x
+            , "y": node.y - graphUI.gridSize
+            })(
+            focusNodeId)(
+                graphUI.graph.pursGraph
+            );
     };
 
     graphUI.moveFocusLeft = function () {
         focusNodeId = Purs.fromFocus(graphUI.graph.focus);
         node = graphUI.graph.nodes[focusNodeId];
-        graphUI.graph.moveNode(focusNodeId, {
-            "x": node.x - graphUI.gridSize,
-            "y": node.y,
-        });
+        graphUI.graph.pursGraph = Purs.interactiveGraphMovable.updatePosition(
+            { "x": node.x - graphUI.gridSize
+            , "y": node.y
+            })(
+            focusNodeId)(
+                graphUI.graph.pursGraph
+            );
     };
 
     graphUI.moveFocusRight = function () {
         focusNodeId = Purs.fromFocus(graphUI.graph.focus);
         node = graphUI.graph.nodes[focusNodeId];
-        graphUI.graph.moveNode(focusNodeId, {
-            "x": node.x + graphUI.gridSize,
-            "y": node.y,
-        });
+        graphUI.graph.pursGraph = Purs.interactiveGraphMovable.updatePosition(
+            { "x": node.x + graphUI.gridSize
+            , "y": node.y
+            })(
+            focusNodeId)(
+                graphUI.graph.pursGraph
+            );
     };
 
 
@@ -693,14 +717,18 @@ module.exports = function GraphUI(graph) {
 
     var keybindings = {
         "normal": {
-            "j": graph => graph.traverseDown(),
-            "k": graph => graph.traverseUp(),
-            "h": graph => graph.traverseLeft(),
+            "j": graph => graph.pursGraph =
+                Purs.interactiveGraphMove.moveDown(graph.pursGraph),
+            "k": graph => graph.pursGraph =
+                Purs.interactiveGraphMove.moveUp(graph.pursGraph),
+            "h": graph => graph.pursGraph =
+                Purs.interactiveGraphMove.moveLeft(graph.pursGraph),
             "l": function (graph) {
                 if (d3.event.ctrlKey) {
                     graphUI.loadFile();
                 } else {
-                    graph.traverseRight();
+                    graph.pursGraph =
+                        Purs.interactiveGraphMove.moveRight(graph.pursGraph);
                 };
             },
             "o": function (graph, event) {
@@ -722,31 +750,57 @@ module.exports = function GraphUI(graph) {
                     event.stopPropagation();
                     graphUI.saveGraph(graph);
                 } else {
-                    graph.toggleHighlightFocus();
+                    graph.pursGraph =
+                        Purs.interactiveGraphSelection.toggleCursorSelection(
+                            graph.pursGraph
+                        );
                 };
             },
-            "Escape": graph => graph.clearHighlights(),
+            "Escape": graph => graph.pursGraph =
+                Purs.interactiveGraphSelection.clearSelection(graph.pursGraph),
             "i": insertMode,
             "v": visualMode,
             "m": moveMode,
             " ": function (graph, event) {
                 event.preventDefault();
                 event.stopPropagation();
-                graph.toggleGroupExpand();
+                graph.pursGraph =
+                    Purs.interactiveGraphCollapseExpand.toggleCollapseExpand(
+                        graph.pursGraph
+                    );
             },
         },
         "insert": {
             "Escape": normalMode,
         },
         "visual": {
-            "j": graph => graph.traverseDown().highlightFocus(),
-            "k": graph => graph.traverseUp().highlightFocus(),
-            "h": graph => graph.traverseLeft().highlightFocus(),
-            "l": graph => graph.traverseRight().highlightFocus(),
-            "s": graph => graph.toggleHighlightFocus(),
+            "j": graph => {
+                graph.pursGraph =
+                    Purs.interactiveGraphMove.moveDown(graph.pursGraph);
+                graph.pursGraph =
+                    Purs.interactiveGraphCursorSelect.cursorSelect(graph.pursGraph);
+            },
+            "k": graph => {
+                graph.pursGraph =
+                    Purs.interactiveGraphMove.moveUp(graph.pursGraph);
+                graph.pursGraph = Purs.interactiveGraphCursorSelect.cursorSelect(graph.purGraph);
+            },
+            "h": graph => {
+                graph.pursGraph =
+                    Purs.interactiveGraphMove.moveLeft(graph.pursGraph);
+                graph.pursGraph = Purs.interactiveGraphCursorSelect.cursorSelect(graph.purGraph);
+            },
+            "l": graph => {
+                graph.pursGraph =
+                    Purs.interactiveGraphMove.moveRight(graph.pursGraph);
+                graph.pursGraph = Purs.interactiveGraphCursorSelect.cursorSelect(graph.purGraph);
+            },
+            "s": graph => graph.pursGraph =
+                Purs.interactiveGraphCursorSelect.toggleCursorSelection(graph.pursGraph),
             "Delete": graph => graph.removeFocused(),
             "Escape": normalMode,
-            " ": graph => graph.toggleGroupExpand,
+            " ": graph => graph.pursGraph =
+                Purs.interactiveGraphCursorSelect.toggleCollapseExpand(graph.pursGraph),
         },
         "move": {
             "j": graph => graphUI.moveFocusDown(),

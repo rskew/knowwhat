@@ -51,55 +51,15 @@ function Graph(graphNodes, focus, highlighted) {
     };
 
     ///////////////////////////////////
-    //////// Constants
-
-    // TODO: should go with layout logic
-    var initNodePos = {"x": 100, "y": 100},
-        newNodeOffset = {"x": 100, "y": 100},
-        newNodeClearenceThreshold = 80;
-
-
-    ///////////////////////////////////
     //////// Graph manipulation
 
-    graph.getEdgeNodes = function () {
-        return [].concat.apply(
-            [], [].concat.apply(
-                [], Object.entries(graph.nodes).map(
-                    node => StringSet.toArray(node[1].children).map(
-                        target => ({"source": graph.nodes[node[0]],
-                                    "target": graph.nodes[target]})))));
-    };
-
     graph.newChildOfFocus = function () {
-        if (Purs.fromFocus(graph.focus) != null) {
-            newNodePos = Purs.newChildPosition(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)]);
-            graph.createNode(newNodePos.x,
-                             newNodePos.y,
-                             StringSet.singleton(Purs.fromFocus(graph.focus)),
-                             StringSet.empty());
-        } else {
-            graph.createNode(initNodePos.x,
-                             initNodePos.y,
-                             StringSet.empty(),
-                             StringSet.empty());
-        }
+        graph.pursGraph = Purs.newChildOfFocus(graph.pursGraph)();
         return graph;
     };
 
     graph.newParentOfFocus = function () {
-        if (Purs.fromFocus(graph.focus) != "") {
-            newNodePos = Purs.newParentPosition(graph.pursGraph)(graph.nodes[Purs.fromFocus(graph.focus)]);
-            graph.createNode(newNodePos.x,
-                             newNodePos.y,
-                             StringSet.empty(),
-                             StringSet.singleton(Purs.fromFocus(graph.focus)));
-        } else {
-            graph.createNode(initNodePos.x,
-                             initNodePos.y,
-                             StringSet.empty(),
-                             StringSet.empty());
-        }
+        graph.pursGraph = Purs.newParentOfFocus(graph.pursGraph)();
         return graph;
     };
 
@@ -145,78 +105,62 @@ function Graph(graphNodes, focus, highlighted) {
     ///////////////////////////////////
     //////// Grouping/ungrouping
 
-    graph.toggleGroupExpand = function () {
-        if (StringSet.cardinality(graph.highlighted) == 0) {
-            graph.pursGraph = Purs.interactiveGraphCollapseExpand.expand(graph.pursGraph);
-        } else {
-            graph.pursGraph = Purs.interactiveGraphCollapseExpand.collapse(graph.pursGraph);
-        }
-    };
+    //graph.toggleGroupExpand = function () {
+    //    graph.pursGraph = Purs.interactiveGraphCollapseExpand.toggleCollapseExpand(graph.pursGraph);
+    //};
 
 
     ///////////////////////////////////
     //////// Traversal functions
 
-    graph.traverseUp = function () {
-        graph.pursGraph = Purs.traverseUp(graph.pursGraph);
-        return graph;
-    };
+    //graph.traverseUp = function () {
+    //    graph.pursGraph = Purs.traverseUp(graph.pursGraph);
+    //    return graph;
+    //};
 
-    graph.traverseDown = function () {
-        graph.pursGraph = Purs.traverseDown(graph.pursGraph);
-        return graph;
-    };
+    //graph.traverseDown = function () {
+    //    graph.pursGraph = Purs.traverseDown(graph.pursGraph);
+    //    return graph;
+    //};
 
-    graph.traverseLeft = function () {
-        graph.pursGraph = Purs.traverseLeft(graph.pursGraph);
-        return graph;
-    };
+    //graph.traverseLeft = function () {
+    //    graph.pursGraph = Purs.traverseLeft(graph.pursGraph);
+    //    return graph;
+    //};
 
-    graph.traverseRight = function () {
-        graph.pursGraph = Purs.traverseRight(graph.pursGraph);
-        return graph;
-    };
+    //graph.traverseRight = function () {
+    //    graph.pursGraph = Purs.traverseRight(graph.pursGraph);
+    //    return graph;
+    //};
 
 
     ///////////////////////////////////
     //////// Highlighting a selection/focusing
 
-    graph.focusOnNode = function (id) {
-        graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusNode.create(id)));
-    };
+    //graph.focusOnNode = function (id) {
+    //    graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusNode.create(id)));
+    //};
 
-    graph.focusOnEdge = function (edge) {
-        graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusEdge.create(edge)([])));
-    };
+    //graph.focusOnEdge = function (edge) {
+    //    graph.updatePurs(Purs.UpdateFocus.create(Purs.FocusEdge.create(edge)([])));
+    //};
 
-    graph.unHighlightNode = function(nodeId) {
-        graph.updatePurs(Purs.UnHighlight.create(nodeId));
-    };
+    //graph.unHighlightNode = function(nodeId) {
+    //    graph.updatePurs(Purs.UnHighlight.create(nodeId));
+    //};
 
-    graph.highlightNode = function(nodeId) {
-        graph.updatePurs(Purs.Highlight.create(nodeId));
-    };
+    //graph.highlightNode = function(nodeId) {
+    //    graph.updatePurs(Purs.Highlight.create(nodeId));
+    //};
 
-    graph.toggleHighlightFocus = function () {
-        graph.pursGraph = Purs.toggleHighlightFocus(graph.pursGraph);
-        return graph;
-    };
+    //graph.toggleHighlightFocus = function () {
+    //    graph.pursGraph = Purs.toggleHighlightFocus(graph.pursGraph);
+    //    return graph;
+    //};
 
-    graph.replaceHighlighted = function(newHighlighted) {
-        oldHighlightedNodes = StringSet.copy(graph.highlighted);
-        for (i=0; i<StringSet.cardinality(oldHighlightedNodes); i++) {
-            graph.unHighlightNode(
-                StringSet.lookupIndex(i, oldHighlightedNodes));
-        };
-        for (i=0; i<StringSet.cardinality(newHighlighted); i++) {
-            graph.highlightNode(
-                StringSet.lookupIndex(i, newHighlighted));
-        };
-    };
-
-    graph.clearHighlights = function () {
-        graph.replaceHighlighted(StringSet.empty());
-        return graph;
-    };
+    //graph.clearHighlights = function () {
+    //    graph.pursGraph = Purs.clearHighlighted(graph.pursGraph);
+    //    return graph;
+    //};
 };
 module.exports = Graph;

@@ -3,7 +3,7 @@ module Workflow.Core where
 import Control.Monad.Except.Trans (ExceptT)
 import Data.Array (filter, mapMaybe, (!!), zipWith)
 import Data.Eq (class Eq)
-import Data.Foldable (class Foldable, all, elem, foldl, maximumBy)
+import Data.Foldable (elem, foldl)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
 import Data.Lens (Lens', lens, view, over, set, setJust)
@@ -11,10 +11,9 @@ import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.List (List(..), (:))
 import Data.List.NonEmpty (NonEmptyList)
-import Data.Maybe (Maybe(..), isJust)
+import Data.Maybe (Maybe(..))
 import Data.Maybe as Maybe
-import Data.Ord (comparing)
-import Data.String (Pattern(..), split, contains, stripPrefix, trim)
+import Data.String (Pattern(..), contains, stripPrefix, trim)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
@@ -23,13 +22,14 @@ import Foreign (ForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode, genericDecodeJSON, genericEncodeJSON)
 import Foreign.Generic.Types (SumEncoding)
-import Foreign.Object (Object, keys, values, size, fromFoldable)
+import Foreign.Object (Object, keys, values, fromFoldable)
 import Foreign.Object as Object
-import Prelude (Unit, unit, ($), (<<<), map, flip, (==), compare, Ordering, append, (<>), bind, pure, (>>=), (+), (<$>), (-), show)
+import Prelude (Unit, unit, ($), (<<<), map, flip, (<>), bind, pure, (>>=), (+), (<$>), (-), show)
 
 version :: String
 version = "0.001"
 
+-- TODO: move these constants to UI
 newNodeXOffset :: Number
 newNodeXOffset = 100.0
 
@@ -158,6 +158,18 @@ edgesToFromNode (GraphNode node) =
       ) $ keys node.parents
   in
     edgesToChildren <> edgesFromParents
+
+resolveEdgeNodes :: Edge -> Graph -> Maybe { source :: GraphNode, target :: GraphNode }
+resolveEdgeNodes (Edge edge) g = do
+  source <- lookupNode g edge.source
+  target <- lookupNode g edge.target
+  pure { source : source, target : target }
+
+graphEdges :: Graph -> Array Edge
+graphEdges (Graph g) = do
+  GraphNode node <- values g.nodes
+  childId <- keys node.children
+  pure $ Edge { source : node.id, target : childId }
 
 data Focus =
   FocusNode String
@@ -354,6 +366,9 @@ replaceChildren newChildren nodeId g =
     (removeChildren nodeId g)
     (keys newChildren)
 
+updateNodePosition :: Point2D -> NodeId -> Graph -> Graph
+updateNodePosition newPos nodeId = applyGraphOp (MoveNode nodeId newPos)
+
 -- TODO: add to interface typeclass.
 addEdge :: Edge -> Graph -> Graph
 addEdge edge g = applyGraphOp (AddEdge edge) g
@@ -366,10 +381,6 @@ moveNodeAmount :: Point2D -> GraphNode -> Graph -> Graph
 moveNodeAmount motion (GraphNode node) g =
    let newPos = add {x: node.x, y: node.y} motion in
    applyGraphOp (MoveNode node.id newPos) g
-
--- TODO: move to Workflow.Interaction
-updateFocus :: Focus -> Graph -> Graph
-updateFocus focus g = applyGraphOp (UpdateFocus focus) g
 
 highlight :: NodeId -> Graph -> Graph
 highlight nodeId g = applyGraphOp (Highlight nodeId) g
@@ -465,35 +476,6 @@ demo = foldl (flip applyGraphOp) emptyGraph $
        : Nil
 
 
-
-------
--- Positioning
---
--- this should go in some UI submodule
-
-rightmostNode :: forall f. Foldable f => f GraphNode -> Maybe GraphNode
-rightmostNode = maximumBy (comparing viewX)
-
---newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
---newPositionFrom g (GraphNode node) relations =
---  fromMaybe { x: node.x, y: node.y + newParentYOffset } do
---    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
---    pure { x: rightmostParent.x + newNodeXOffset
---         , y: rightmostParent.y }
-
-newChildPosition :: Graph -> GraphNode -> Point2D
-newChildPosition g (GraphNode node) =
-  fromMaybe { x: node.x, y: node.y + newNodeYOffset } do
-    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
-    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
-
-newParentPosition :: Graph -> GraphNode -> Point2D
-newParentPosition g (GraphNode node) =
-  fromMaybe { x: node.x, y: node.y - newNodeYOffset } do
-    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
-    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
-
-
 ------
 -- Utilities
 
@@ -503,36 +485,12 @@ lookupNode g nodeId = view (_Graph <<< _nodes <<< at nodeId) g
 lookupNodes :: Graph -> NodeIdSet -> Array GraphNode
 lookupNodes g nodeIds = mapMaybe (lookupNode g) $ keys nodeIds
 
-lookupEdge :: Graph -> EdgeId -> Maybe Edge
-lookupEdge g edgeId =
-  let edgeNodeIds = split (Pattern ".") edgeId
-      sourceId = fromMaybe "" $ edgeNodeIds !! 0
-      targetId = fromMaybe "" $ edgeNodeIds !! 1
-  in
-  case all isJust [lookupNode g sourceId, lookupNode g targetId] of
-    false -> Nothing
-    true -> Just $ Edge { source : sourceId, target: targetId }
+resolvedGraphEdges :: Graph -> Array { source :: GraphNode, target :: GraphNode }
+resolvedGraphEdges g =
+  mapMaybe (flip resolveEdgeNodes g) $ graphEdges g
 
 ------
 -- Graph Queries
-
--- TODO: remove
-terminalestNode :: Array GraphNode -> Maybe GraphNode
-terminalestNode nodes = case filter isTerminal nodes of
-  [] -> maximumBy (comparing getY) nodes
-  terminalNodes -> maximumBy mostParentsLowest terminalNodes
-  where
-    mostParentsLowest :: GraphNode -> GraphNode -> Ordering
-    mostParentsLowest a b = compare (nParents a) (nParents b) `append` lower a b
-    lower :: GraphNode -> GraphNode -> Ordering
-    lower = comparing getY
-    isTerminal :: GraphNode -> Boolean
-    isTerminal node = nChildren node == 0
-    nChildren = size <<< view (_GraphNode <<< _children)
-    nParents :: GraphNode -> Int
-    nParents = size <<< view (_GraphNode <<< _parents)
-    getY :: GraphNode -> Number
-    getY = view (_GraphNode <<< _y)
 
 -- TODO: re-export to JS using module system properly
 fromMaybe :: forall a. a -> Maybe a -> a

@@ -5,12 +5,12 @@ import Workflow.Core
 import Data.Array (filter, sortWith, (!!), concatMap)
 import Data.Array as Array
 import Data.Eq (class Eq)
-import Data.Foldable (foldMap, foldl, length, sum)
+import Data.Foldable (foldMap, foldl, length, sum, class Foldable, maximumBy)
 import Data.Function (on)
 import Data.Lens (view)
 import Data.List as List
 import Data.Maybe (Maybe(..))
-import Data.Ord (class Ord)
+import Data.Ord (class Ord, comparing)
 import Effect (Effect)
 import Foreign.Object (keys, size)
 import Foreign.Object as Object
@@ -33,7 +33,30 @@ import Prelude (($), (<<<), (>>>), map, flip, (==), (<>), bind, pure, (>>=), (+)
   -- UnGroup GraphNode (Object GraphNode)
   -- UngroupNode
 
-class (MoveOnGrid a, CollapseExpand a a) <= InteractiveGraph a
+type InteractiveNodeData = forall t.
+  { text :: String
+  , pos :: Point2D
+  , isValid :: Boolean
+  | t
+  }
+
+type InteractiveEdgeData = forall t.
+  { isValid :: Boolean
+  | t
+  }
+
+--type InterGraph = Graph InteractiveNodeData InteractiveEdgeData
+
+class ( MoveOnGrid a
+      , CollapseExpand a
+      , CursorSelect a
+      , Focusable a b
+      , Validatable a
+      , Movable a
+      )
+      <= InteractiveGraph a b | a -> b
+
+instance interactiveGraph :: InteractiveGraph Graph Focus
 
 class MoveOnGrid a where
   moveUp :: a -> a
@@ -41,12 +64,28 @@ class MoveOnGrid a where
   moveLeft :: a -> a
   moveRight :: a -> a
 
-class CollapseExpand a b where
-  collapse :: a -> b
-  expand :: b -> a
+class CollapseExpand a where
+  collapse :: a -> a
+  expand :: a -> a
+  toggleCollapseExpand :: a -> a
 
+class CursorSelect a where
+  select :: String -> a -> a
+  deSelect :: String -> a -> a
+  cursorSelect :: a -> a
+  cursorDeSelect :: a -> a
+  toggleCursorSelection :: a -> a
+  clearSelection :: a -> a
 
--- TODO: add to interaction typeclass interface
+class Focusable a b | a -> b where
+  focusOn :: b -> a -> a
+
+class Validatable a where
+  updateValidity :: Boolean -> String -> a -> a
+
+class Movable a where
+  updatePosition :: Point2D -> String -> a -> a
+
 addNode :: Point2D -> NodeIdSet -> NodeIdSet -> Graph -> Effect Graph
 addNode xyPos parentIds childIds g = do
   newNode <- createGraphNode xyPos parentIds childIds
@@ -88,17 +127,46 @@ removeFocus g =
         $ applyGraphOp (RemoveEdge (Edge edge)) g
 
 
+
+------
+-- Focusing
+
+instance interactiveGraphFocusable :: Focusable Graph Focus where
+  focusOn = updateFocus
+
+updateFocus :: Focus -> Graph -> Graph
+updateFocus focus g = applyGraphOp (UpdateFocus focus) g
+
+
 ------
 -- Highlighting
 
+instance interactiveGraphSelection :: CursorSelect Graph where
+  select = highlight
+  deSelect = unHighlight
+  cursorSelect = highlightFocus
+  cursorDeSelect = unHighlightFocus
+  toggleCursorSelection = toggleHighlightFocus
+  clearSelection = clearHighlighted
+
+highlightFocus :: Graph -> Graph
+highlightFocus (Graph g) = case g.focus of
+  FocusNode nodeId -> highlight nodeId $ Graph g
+  _ -> Graph g
+
+unHighlightFocus :: Graph -> Graph
+unHighlightFocus (Graph g) = case g.focus of
+  FocusNode nodeId -> unHighlight nodeId $ Graph g
+  _ -> Graph g
+
 toggleHighlightFocus :: Graph -> Graph
-toggleHighlightFocus g =
-  case view (_Graph <<< _focus) g of
-    FocusNode nodeId -> case Object.member nodeId (view (_Graph <<< _highlighted) g) of
-      true -> applyGraphOp (UnHighlight nodeId) g
-      false -> applyGraphOp (Highlight nodeId) g
-    FocusEdge edge _ -> applyGraphOp (UpdateFocus (FocusEdge edge [])) g
-    _ -> g
+toggleHighlightFocus (Graph g) = case g.focus of
+  FocusNode nodeId ->
+    case Object.member nodeId g.highlighted of
+      true -> applyGraphOp (UnHighlight nodeId) $ Graph g
+      false -> applyGraphOp (Highlight nodeId) $ Graph g
+  FocusEdge edge _ -> applyGraphOp (UpdateFocus (FocusEdge edge [])) $ Graph g
+  _ -> Graph g
 
 
 ------
@@ -242,11 +310,66 @@ traverseRight g = changeFocusLeftRight Right g
 
 
 ------
+-- Positioning nodes
+--
+
+instance interactiveGraphMovable :: Movable Graph where
+  updatePosition = updateNodePosition
+
+rightmostNode :: forall f. Foldable f => f GraphNode -> Maybe GraphNode
+rightmostNode = maximumBy (comparing viewX)
+
+--newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
+--newPositionFrom g (GraphNode node) relations =
+--  fromMaybe { x: node.x, y: node.y + newParentYOffset } do
+--    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
+--    pure { x: rightmostParent.x + newNodeXOffset
+--         , y: rightmostParent.y }
+
+newChildPosition :: Graph -> GraphNode -> Point2D
+newChildPosition g (GraphNode node) =
+  fromMaybe { x: node.x, y: node.y + newNodeYOffset } do
+    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
+    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
+
+newParentPosition :: Graph -> GraphNode -> Point2D
+newParentPosition g (GraphNode node) =
+  fromMaybe { x: node.x, y: node.y - newNodeYOffset } do
+    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
+    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
+
+newChildOfFocus :: Graph -> Effect Graph
+newChildOfFocus (Graph g) = case g.focus of
+  FocusNode nodeId -> case lookupNode (Graph g) nodeId of
+    Nothing -> pure $ Graph g
+    Just (GraphNode node) ->
+      let
+        newChildPos = newChildPosition (Graph g) (GraphNode node)
+        newChildParents = nodeIdSetFromArray $ [node.id]
+      in
+        addNode newChildPos newChildParents emptyNodeIdSet (Graph g)
+  _ -> pure $ Graph g
+
+newParentOfFocus :: Graph -> Effect Graph
+newParentOfFocus (Graph g) = case g.focus of
+  FocusNode nodeId -> case lookupNode (Graph g) nodeId of
+    Nothing -> pure $ Graph g
+    Just (GraphNode node) ->
+      let
+        newParentPos = newParentPosition (Graph g) (GraphNode node)
+        newParentChildren = nodeIdSetFromArray $ [node.id]
+      in
+        addNode newParentPos emptyNodeIdSet newParentChildren (Graph g)
+  _ -> pure $ Graph g
+
+
+------
 -- Subgraph collapse/expand
 
-instance interactiveGraphCollapseExpand :: CollapseExpand Graph Graph where
+instance interactiveGraphCollapseExpand :: CollapseExpand Graph where
   collapse = groupHighlighted
   expand = expandFocus
+  toggleCollapseExpand = toggleGroupExpand
 
 centroid :: Array GraphNode -> Point2D
 centroid nodes =
@@ -336,3 +459,18 @@ expandFocus g =
           in
             updateFocus (FocusNode groupNodeId) gluedGraph
     _ -> g
+
+toggleGroupExpand :: Graph -> Graph
+toggleGroupExpand (Graph g) = case length g.highlighted of
+  0 -> expand (Graph g)
+  _ -> collapse (Graph g)
+
+
+------
+-- Validity
+
+instance interactiveGraphNodeValidatable :: Validatable Graph where
+  updateValidity = updateNodeValidity
+
+updateNodeValidity :: Boolean -> NodeId -> Graph -> Graph
+updateNodeValidity validity nodeId = applyGraphOp (UpdateNodeValidity nodeId validity)
