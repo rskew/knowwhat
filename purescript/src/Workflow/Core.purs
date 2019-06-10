@@ -529,6 +529,9 @@ fromMaybe = Maybe.fromMaybe
 maybe :: forall a. a -> Maybe a
 maybe = Just
 
+nodeIdSetMember :: NodeId -> NodeIdSet -> Boolean
+nodeIdSetMember nodeId set = elem nodeId $ keys set
+
 fromFocus :: Focus -> String
 fromFocus NoFocus = ""
 fromFocus (FocusNode nodeId) = nodeId

@@ -1,4 +1,4 @@
-const Graph = require('./graph.js');
+//const Graph = require('./graph.js');
 const GraphUI = require('./graphUI.js');
 const StringSet = require('./stringSet.js');
 const Utils = require('./utils.js');
@@ -57,14 +57,16 @@ var graphNodes = {
     },
 };
 
-var graph = new Graph(graphNodes, Purs.FocusNode.create("a"), StringSet.fromArray(["b"]));
+var graph = Purs.Graph({"nodes": graphNodes,
+                        "focus": Purs.FocusNode.create("a"),
+                        "highlighted": StringSet.fromArray(["b"])});
 var graphUI = new GraphUI(graph);
 
-function copyPursGraph(pursGraph) {
-    return new Graph(Utils.deepCopyObject(pursGraph.nodes),
-                     pursGraph.focus,
-                     pursGraph.highlighted);
-};
+//function copyPursGraph(pursGraph) {
+//    return new Graph(Utils.deepCopyObject(pursGraph.nodes),
+//                     pursGraph.focus,
+//                     pursGraph.highlighted);
+//};
 
 
 ///////////////////////////////////
@@ -95,12 +97,12 @@ window.graphUI.registerEdgeValidHook(function (graph, sourceNode, targetNode) {
             "allow": true};
 });
 
-window.copyPursGraph = copyPursGraph;
-window.graphUI.graph = copyPursGraph(Purs.demo);
+//window.copyPursGraph = copyPursGraph;
+window.graphUI.graph = Purs.demo;
 window.graphUI.update();
 //window.graphUI.graph.newNodeBelowFocus();
-window.graphUI.update();
-window.graphUI.graph.usePursGraph();
+//window.graphUI.update();
+//window.graphUI.graph.usePursGraph();
 window.graphUI.update();
 
 
