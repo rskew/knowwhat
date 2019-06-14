@@ -2,208 +2,469 @@ module Workflow.Interaction where
 
 import Workflow.Core
 
+import Control.Monad.Except.Trans (ExceptT)
+import Foreign (ForeignError)
+import Data.List.NonEmpty (NonEmptyList)
+import Data.Identity (Identity)
 import Data.Array (filter, sortWith, (!!), concatMap)
 import Data.Array as Array
 import Data.Eq (class Eq)
-import Data.Foldable (foldMap, foldl, length, sum, class Foldable, maximumBy)
+import Data.Foldable (foldMap, foldl, length, class Foldable, maximumBy, elem)
 import Data.Function (on)
-import Data.Lens (view)
-import Data.Maybe (Maybe(..))
+import Data.Generic.Rep (class Generic)
+import Data.Lens (Lens', lens, view, set, over, setJust)
+import Data.Lens.At (at)
+import Data.Lens.Record (prop)
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Ord (class Ord, comparing)
+import Data.String (Pattern(..), contains, stripPrefix, trim)
+import Data.Symbol (SProxy(..))
+import Data.UUID (genUUID)
 import Effect (Effect)
-import Foreign.Object (keys, size)
+import Foreign.Class (class Encode, class Decode)
+import Foreign.Generic (genericEncode, genericDecode)
+import Foreign.Object (Object, keys, values)
 import Foreign.Object as Object
-import Prelude (($), (<<<), (>>>), map, flip, (==), (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-), (/), not)
+import Prelude (($), (<<<), (>>>), map, flip, (==), (<>), bind, pure, (>>=), (+), (<$>), (#), (>), (/=), mod, (<), (-), not, unit, show)
+
 
 
 -- | Free monad undo/redo implementation.
--- | A GraphInteraction represents an abstract relation between
+-- | A Interaction represents an abstract relation between
 -- | the before and after affect of an interaction with the graph.
--- | A GraphInteraction is recorded after the application of the interaction
+-- | A Interaction is recorded after the application of the interaction
 -- | so that all information required to perform an undo is available (such as nodeId).
--- data GraphInteraction =
-  -- AddNode GraphNode
-  -- AddEdge Edge
-  -- RemoveEdge Edge
-  -- MoveNode GraphNode Point2D
+-- data Interaction =
+  -- AddNode InterNode
+  -- AddEdge InterEdge
+  -- RemoveEdge InterEdge
+  -- MoveNode InterNode Point2D
   -- AddHighlight NodeId
   -- RemoveHighlight NodeId
-  -- Group (Object GraphNode) GraphNode
-  -- UnGroup GraphNode (Object GraphNode)
+  -- Group (Object InterNode) InterNode
+  -- UnGroup InterNode (Object InterNode)
   -- UngroupNode
 
-type InteractiveNodeData = forall t.
-  { text :: String
-  , pos :: Point2D
+version :: String
+version = "0.00001"
+
+------
+-- Constants
+
+newNodeXOffset :: Number
+newNodeXOffset = 100.0
+
+newNodeYOffset :: Number
+newNodeYOffset = 100.0
+
+------
+-- Core implementation
+
+instance graphEdge :: Edge InterEdge where
+  edgeSource = view _InterEdge >>> _.source
+  edgeTarget = view _InterEdge >>> _.target
+
+instance graphNode :: Node InterNode where
+  createNode = createInterNode
+  viewId = view _id
+  viewParents = view _parents
+  viewChildren = view _children
+
+instance graph :: Graph InterGraph InterNode InterEdge where
+  emptyGraph = emptyInterGraph
+  viewNodes = view _nodes
+  insertNode = insertInterNode
+  removeNode = removeInterNode
+  viewSubgraph = view _subgraph
+  addEdge = addInterEdge
+  removeEdge = removeInterEdge
+  lookupEdge = lookupInterEdge
+  replaceSubgraph = replaceSubgraph'
+  lookupNode = lookupInterNode
+
+data Focus =
+  FocusNode String
+  | FocusEdge InterEdge (Array InterEdge)
+  | NoFocus
+
+newtype InteractionState = InteractionState { focus :: Focus
+                                            , highlighted :: NodeIdSet
+                                            }
+
+emptyInteractionState :: InteractionState
+emptyInteractionState = InteractionState { focus : NoFocus
+                                         , highlighted : Object.empty
+                                         }
+
+type Point2D = { x :: Number, y :: Number }
+
+add :: Point2D -> Point2D -> Point2D
+add a b = {x: a.x + b.x, y: a.y + b.y}
+
+subtract :: Point2D -> Point2D -> Point2D
+subtract a b = {x: a.x - b.x, y: a.y - b.y}
+
+newtype InterGraph = InterGraph
+  { nodes :: Object InterNode
+  , edgeData :: Object Boolean
+  , interactionState :: InteractionState
+  }
+
+emptyInterGraph :: InterGraph
+emptyInterGraph = InterGraph
+  { nodes: Object.empty
+  , edgeData: Object.empty
+  , interactionState : emptyInteractionState
+  }
+
+newtype InterNode = InterNode
+  { id :: NodeId
+  , children :: NodeIdSet
+  , parents :: NodeIdSet
+  , subgraph :: InterGraph
+  , text :: String
+  , position :: Point2D
   , isValid :: Boolean
-  | t
   }
 
-type InteractiveEdgeData = forall t.
-  { isValid :: Boolean
-  | t
-  }
+createInterNode :: NodeIdSet -> NodeIdSet -> Effect InterNode
+createInterNode parentIds childIds = do
+   nodeId <- genUUID
+   pure $ InterNode
+      { id : show nodeId
+      , children : childIds
+      , parents : parentIds
+      , subgraph : emptyInterGraph
+      , text : ""
+      , position : { x: 0.0, y: 0.0 }
+      , isValid : false
+      }
 
---type InterGraph = Graph InteractiveNodeData InteractiveEdgeData
+newtype InterEdge = InterEdge { source :: NodeId
+                              , target :: NodeId
+                              , isValid :: Boolean
+                              }
 
-class ( MoveOnGrid a
-      , CollapseExpand a
-      , CursorSelect a
-      , EditableFocus a b
-      , Validatable a
-      , Movable a
-      , TextCells a
-      )
-      <= InteractiveGraph a b | a -> b
+lookupInterEdge :: NodeId -> NodeId -> InterGraph -> InterEdge
+lookupInterEdge source target g =
+  let
+    isValid = fromMaybe false
+              $ view (_edgeData <<< at (edgeId source target))
+              $ g
+  in
+    InterEdge { source : source, target : target, isValid : isValid }
 
-instance interactiveGraph :: InteractiveGraph Graph Focus
+------
+-- Generic serialisation boilerplate
 
-class MoveOnGrid a where
-  moveUp :: a -> a
-  moveDown :: a -> a
-  moveLeft :: a -> a
-  moveRight :: a -> a
+derive instance generic :: Generic InterGraph _
+derive instance eq :: Eq InterGraph
+instance encode :: Encode InterGraph where
+  encode = genericEncode genericEncodeOpts
+instance decode :: Decode InterGraph where
+  decode = genericDecode genericEncodeOpts
 
-class CollapseExpand a where
-  collapse :: a -> a
-  expand :: a -> a
-  toggleCollapseExpand :: a -> a
+derive instance genericNode :: Generic InterNode _
+derive instance eqNode :: Eq InterNode
+instance encodeNode :: Encode InterNode where
+  encode node = genericEncode genericEncodeOpts node
+instance decodeNode :: Decode InterNode where
+  decode node = genericDecode genericEncodeOpts node
 
-class CursorSelect a where
-  select :: String -> a -> a
-  deSelect :: String -> a -> a
-  cursorSelect :: a -> a
-  cursorDeSelect :: a -> a
-  toggleCursorSelection :: a -> a
-  clearSelection :: a -> a
+derive instance genericInterEdge :: Generic InterEdge _
+derive instance eqInterEdge :: Eq InterEdge
+instance encodeInterEdge :: Encode InterEdge where
+  encode x = genericEncode genericEncodeOpts x
+instance decodeInterEdge :: Decode InterEdge where
+  decode x = genericDecode genericEncodeOpts x
 
-class EditableFocus a b | a -> b where
-  focusOn :: b -> a -> a
-  removeFocus :: a -> a
+derive instance genericFocus :: Generic Focus _
+derive instance eqFocus :: Eq Focus
+instance encodeFocus :: Encode Focus where
+  encode x = genericEncode genericEncodeOpts x
+instance decodeFocus :: Decode Focus where
+  decode x = genericDecode genericEncodeOpts x
 
-class Validatable a where
-  updateValidity :: Boolean -> String -> a -> a
+derive instance genericInteractionState :: Generic InteractionState _
+derive instance eqInteractionState :: Eq InteractionState
+instance encodeInteractionState :: Encode InteractionState where
+  encode = genericEncode genericEncodeOpts
+instance decodeInteractionState :: Decode InteractionState where
+  decode = genericDecode genericEncodeOpts
 
-class Movable a where
-  updatePosition :: Point2D -> String -> a -> a
+------
+-- Lens boilerplate
 
--- | Text in cells indexed by String IDs
-class TextCells a where
-  updateCellText :: String -> String -> a -> a
+_InterGraph :: Lens' InterGraph { nodes :: Object InterNode
+                                , edgeData :: Object Boolean
+                                , interactionState :: InteractionState
+                                }
+_InterGraph = lens (\(InterGraph g) -> g) (\_ -> InterGraph)
+
+_nodes :: Lens' InterGraph (Object InterNode)
+_nodes = _InterGraph <<< prop (SProxy :: SProxy "nodes")
+
+_edgeData :: Lens' InterGraph (Object Boolean)
+_edgeData = _InterGraph <<< prop (SProxy :: SProxy "edgeData")
+
+_interactionState :: Lens' InterGraph InteractionState
+_interactionState = _InterGraph <<< prop (SProxy :: SProxy "interactionState")
+
+_InteractionState :: Lens' InteractionState { focus :: Focus
+                                            , highlighted :: NodeIdSet
+                                            }
+_InteractionState = lens (\(InteractionState s) -> s) (\_ -> InteractionState)
+
+_highlighted :: Lens' InterGraph NodeIdSet
+_highlighted = _interactionState <<< _InteractionState <<< prop (SProxy :: SProxy "highlighted")
+
+_focus :: Lens' InterGraph Focus
+_focus = _interactionState <<< _InteractionState <<< prop (SProxy :: SProxy "focus")
+
+_InterNode :: Lens' InterNode { id :: NodeId
+                              , children :: NodeIdSet
+                              , parents :: NodeIdSet
+                              , subgraph :: InterGraph
+                              , text :: String
+                              , position :: Point2D
+                              , isValid :: Boolean
+                              }
+_InterNode = lens (\(InterNode n) -> n) (\_ -> InterNode)
+
+_parents :: Lens' InterNode NodeIdSet
+_parents = _InterNode <<< prop (SProxy :: SProxy "parents")
+
+_children :: Lens' InterNode NodeIdSet
+_children = _InterNode <<< prop (SProxy :: SProxy "children")
+
+_id :: Lens' InterNode String
+_id = _InterNode <<< prop (SProxy :: SProxy "id")
+
+_subgraph :: Lens' InterNode InterGraph
+_subgraph = _InterNode <<< prop (SProxy :: SProxy "subgraph")
+
+_position :: Lens' InterNode Point2D
+_position = _InterNode <<< prop (SProxy :: SProxy "position")
+
+_x :: Lens' InterNode Number
+_x = _position <<< prop (SProxy :: SProxy "x")
+
+_y :: Lens' InterNode Number
+_y = _position <<< prop (SProxy :: SProxy "y")
+
+_text :: Lens' InterNode String
+_text = _InterNode <<< prop (SProxy :: SProxy "text")
+
+_nodeIsValid :: Lens' InterNode Boolean
+_nodeIsValid = _InterNode <<< prop (SProxy :: SProxy "isValid")
+
+_InterEdge :: Lens' InterEdge { source :: NodeId
+                              , target :: NodeId
+                              , isValid :: Boolean
+                              }
+_InterEdge = lens (\(InterEdge e) -> e) (\_ -> InterEdge)
+
+_edgeIsValid :: Lens' InterEdge Boolean
+_edgeIsValid = _InterEdge <<< prop (SProxy :: SProxy "isValid")
+
+_subgraphInteractionState :: Lens' InterNode InteractionState
+_subgraphInteractionState = _subgraph <<<
+                            _interactionState
+
+
+------
+--  basic operations
+
+addParent :: NodeId -> InterNode -> InterNode
+addParent nodeId = over _parents $ insertNodeId nodeId
+
+deleteParent :: NodeId -> InterNode -> InterNode
+deleteParent nodeId = over _parents $ deleteNodeId nodeId
+
+addChild :: NodeId -> InterNode -> InterNode
+addChild nodeId = over _children $ insertNodeId nodeId
+
+deleteChild :: NodeId -> InterNode -> InterNode
+deleteChild nodeId = over _children $ deleteNodeId nodeId
+
+insertInterNode :: InterNode -> InterGraph -> InterGraph
+insertInterNode newNode g =
+  let
+    newNodeId = (viewId newNode)
+    g' = setJust (_nodes <<< (at (viewId newNode))) newNode g
+  in
+    g'
+
+removeInterNode :: NodeId -> InterGraph -> InterGraph
+removeInterNode nodeId g =
+  set (_nodes <<< (at nodeId)) Nothing
+    $ removeParents nodeId
+    $ removeChildren nodeId
+    $ g
+
+updateEdgeData :: NodeId -> NodeId -> Maybe Boolean -> InterGraph -> InterGraph
+updateEdgeData source target newData g = case newData of
+  Nothing -> over _edgeData (Object.delete (edgeId source target)) g
+  Just valid -> over _edgeData (Object.insert (edgeId source target) valid) g
+
+addInterEdge :: InterEdge -> InterGraph -> InterGraph
+addInterEdge (InterEdge edge) =
+  (over _edgeData (Object.insert
+                   (edgeId edge.source edge.target)
+                   (view _edgeIsValid (InterEdge edge))))
+  <<<
+  (over (_nodes <<< (at edge.target)) $ map $ addParent edge.source)
+  <<<
+  (over (_nodes <<< (at edge.source)) $ map $ addChild edge.target)
+
+removeInterEdge :: NodeId -> NodeId -> InterGraph -> InterGraph
+removeInterEdge source target =
+  (updateEdgeData source target Nothing)
+  <<<
+  (over (_nodes <<< (at target)) $ map $ deleteParent source)
+  <<<
+  (over (_nodes <<< (at source)) $ map $ deleteChild target)
+
+replaceSubgraph' :: InterGraph -> InterNode -> InterNode
+replaceSubgraph' = set _subgraph
+
+lookupInterNode :: NodeId -> InterGraph -> Maybe InterNode
+lookupInterNode nodeId g = view (_nodes <<< at nodeId) g
+
+lookupEdgeData :: NodeId -> NodeId -> InterGraph -> Maybe Boolean
+lookupEdgeData source target g = do
+  Object.lookup (edgeId source target) $ view _edgeData g
+
+updateNodePosition :: Point2D -> NodeId -> InterGraph -> InterGraph
+updateNodePosition newPos nodeId =
+  over (_nodes <<< (at nodeId)) $ map $ moveNode newPos
+
+moveNode :: Point2D -> InterNode -> InterNode
+moveNode pos = set _x pos.x <<<
+               set _y pos.y
+
+moveNodeAmount :: Point2D -> InterNode -> InterGraph -> InterGraph
+moveNodeAmount motion node g =
+   let newPos = add {x: view _x node, y: view _y node} motion in
+   updateNodePosition newPos (view _id node) g
+
+updateNodeText :: String -> InterNode -> InterNode
+updateNodeText = set _text
 
 
 ------
 -- Focusing
 
-instance interactiveGraphEditableFocus :: EditableFocus Graph Focus where
-  focusOn = updateFocus
-  removeFocus = removeFocusImpl
+updateFocus :: Focus -> InterGraph -> InterGraph
+updateFocus = set _focus
 
-updateFocus :: Focus -> Graph -> Graph
-updateFocus focus g = applyGraphOp (UpdateFocus focus) g
-
-removeFocusImpl :: Graph -> Graph
-removeFocusImpl g =
-  case view (_Graph <<< _focus) g of
+removeFocus :: InterGraph -> InterGraph
+removeFocus g =
+  case view _focus g of
     NoFocus -> g
-    FocusNode nodeId -> case lookupNode g nodeId of
+    FocusNode nodeId -> case lookupNode nodeId g of
       Nothing -> g
-      Just (GraphNode focusNode) ->
+      Just focusNode ->
         let
-          newFocus = case size focusNode.parents of
-            0 -> case (keys focusNode.children) !! 0 of
+          newFocus = case (keys (view _parents focusNode)) !! 0 of
+            Nothing -> case (keys (view _children focusNode)) !! 0 of
               Nothing -> NoFocus
               Just childId -> FocusNode childId
-            otherwise -> case (keys focusNode.parents) !! 0 of
-              Nothing -> NoFocus
-              Just parentId -> FocusNode parentId
-        in applyGraphOp
-          (UpdateFocus newFocus)
-          $ applyGraphOp (UnHighlight focusNode.id)
-          $ removeNode focusNode.id g
-    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.source))
-        $ applyGraphOp (RemoveEdge (Edge edge)) g
+            Just parentId -> FocusNode parentId
+        in updateFocus newFocus
+          $ unHighlight (view _id focusNode)
+          $ removeNode (view _id focusNode) g
+    FocusEdge (InterEdge edge) _ ->
+      updateFocus (FocusNode edge.source)
+      $ removeEdge edge.source edge.target g
+
+edgeInFocusGroup :: InterGraph -> InterEdge -> Boolean
+edgeInFocusGroup g edge =
+  case view _focus g of
+    FocusEdge _ focusGroup -> elem edge focusGroup
+    _ -> false
 
 
 
 ------
 -- Highlighting
 
-instance interactiveGraphSelection :: CursorSelect Graph where
-  select = highlight
-  deSelect = unHighlight
-  cursorSelect = highlightFocus
-  cursorDeSelect = unHighlightFocus
-  toggleCursorSelection = toggleHighlightFocus
-  clearSelection = clearHighlighted
+highlight :: NodeId -> InterGraph -> InterGraph
+highlight nodeId = over _highlighted (Object.insert nodeId unit)
 
-highlightFocus :: Graph -> Graph
-highlightFocus (Graph g) = case g.focus of
-  FocusNode nodeId -> highlight nodeId $ Graph g
-  _ -> Graph g
+unHighlight :: NodeId -> InterGraph -> InterGraph
+unHighlight nodeId = over _highlighted (Object.delete nodeId)
 
-unHighlightFocus :: Graph -> Graph
-unHighlightFocus (Graph g) = case g.focus of
-  FocusNode nodeId -> unHighlight nodeId $ Graph g
-  _ -> Graph g
+clearHighlighted :: InterGraph -> InterGraph
+clearHighlighted = set _highlighted Object.empty
 
-toggleHighlightFocus :: Graph -> Graph
-toggleHighlightFocus (Graph g) = case g.focus of
+highlightFocus :: InterGraph -> InterGraph
+highlightFocus g = case view _focus g of
+  FocusNode nodeId -> highlight nodeId g
+  _ -> g
+
+unHighlightFocus :: InterGraph -> InterGraph
+unHighlightFocus g = case view _focus g of
+  FocusNode nodeId -> unHighlight nodeId g
+  _ -> g
+
+toggleHighlightFocus :: InterGraph -> InterGraph
+toggleHighlightFocus g = case view _focus g of
   FocusNode nodeId ->
-    case Object.member nodeId g.highlighted of
-      true -> applyGraphOp (UnHighlight nodeId) $ Graph g
-      false -> applyGraphOp (Highlight nodeId) $ Graph g
-  FocusEdge edge _ -> applyGraphOp (UpdateFocus (FocusEdge edge [])) $ Graph g
-  _ -> Graph g
+    case Object.member nodeId (view _highlighted g) of
+      true -> unHighlight nodeId g
+      false -> highlight nodeId g
+  FocusEdge edge _ -> set _focus (FocusEdge edge []) g
+  _ -> g
 
 
 ------
 -- Traversal
 
-instance interactiveGraphMove :: MoveOnGrid Graph where
-  moveUp = traverseUp
-  moveDown = traverseDown
-  moveLeft = traverseLeft
-  moveRight = traverseRight
-
-traverseUp :: Graph -> Graph
+traverseUp :: InterGraph -> InterGraph
 traverseUp g =
-  case view (_Graph <<< _focus) g of
+  case view _focus g of
     FocusNode nodeId -> fromMaybe g do
-      GraphNode node <- lookupNode g nodeId
-      let upEdges' = Edge <$> { source: _, target: node.id } <$> keys node.parents
+      node <- lookupNode nodeId g
+      let upEdges' = InterEdge <$> { source: _
+                                   , target: view _id node
+                                   , isValid: false
+                                   } <$> (keys (view _parents node))
       newFocus <- upEdges' !! 0
       -- If the focus group has a single element then collapse the focus
       let upEdges = if length upEdges' == 1 then [] else upEdges'
-      pure $ applyGraphOp (UpdateFocus (FocusEdge newFocus upEdges)) g
-    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.source)) g
+      pure $ set _focus (FocusEdge newFocus upEdges) g
+    FocusEdge (InterEdge edge) _ -> set _focus (FocusNode edge.source) g
     NoFocus -> g
 
 -- TODO: remove duplicate code
-traverseDown :: Graph -> Graph
+traverseDown :: InterGraph -> InterGraph
 traverseDown g =
-  case view (_Graph <<< _focus) g of
+  case view _focus g of
     FocusNode nodeId -> fromMaybe g do
-      GraphNode node <- lookupNode g nodeId
-      let downEdges' = Edge <$> { source: node.id, target: _ } <$> keys node.children
+      node <- lookupNode nodeId g
+      let downEdges' = InterEdge <$> { source: view _id node
+                                     , target: _
+                                     , isValid: false
+                                     } <$> (keys (view _children node))
       newFocus <- downEdges' !! 0
       -- If the focus group has a single element then collapse the focus
       let downEdges = if length downEdges' == 1 then [] else downEdges'
-      pure $ applyGraphOp (UpdateFocus (FocusEdge newFocus downEdges)) g
-    FocusEdge (Edge edge) _ -> applyGraphOp (UpdateFocus (FocusNode edge.target)) g
+      pure $ set _focus (FocusEdge newFocus downEdges) g
+    FocusEdge (InterEdge edge) _ -> set _focus (FocusNode edge.target) g
     NoFocus -> g
 
-siblings :: Graph -> GraphNode -> NodeIdSet
-siblings g node = foldMap (view (_GraphNode <<< _children)) parents
+siblings :: InterGraph -> InterNode -> NodeIdSet
+siblings g node = foldMap (view _children) parents
   where
-    parents = lookupNodes g parentIds
-    parentIds = view (_GraphNode <<< _parents) node
+    parents = lookupNodes parentIds g
+    parentIds = view _parents node
 
-coparents :: Graph -> GraphNode -> NodeIdSet
-coparents g node = foldMap (view (_GraphNode <<< _parents)) children
+coparents :: InterGraph -> InterNode -> NodeIdSet
+coparents g node = foldMap (view _parents) children
   where
-    children = lookupNodes g childIds
-    childIds = view (_GraphNode <<< _children) node
+    children = lookupNodes childIds g
+    childIds = view _children node
 
 -- | Order array elements to the right of a given element,
 -- | not including the given element.
@@ -227,23 +488,31 @@ nextElemWrap Right x getPosition xs = fromMaybe x $ xsOrderedToTheRight !! 0
   where
     xsOrderedToTheRight = toRightWrapOrdering x getPosition xs <> [x]
 
-nextEdgeGroup :: DirectionLR -> Graph -> Edge -> Array Edge
-nextEdgeGroup dir g (Edge edge) =
-  case lookupNode g edge.source of
+nextEdgeGroup :: DirectionLR -> InterGraph -> InterEdge -> Array InterEdge
+nextEdgeGroup dir g (InterEdge edge) =
+  case lookupNode edge.source g of
     Nothing -> []
-    Just (GraphNode source) ->
-      case lookupNode g edge.target of
+    Just source ->
+      case lookupNode edge.target g of
         Nothing -> []
-        Just (GraphNode target) ->
+        Just target ->
           let
-            (GraphNode leftParentOfTarget) = nextElemWrap dir (GraphNode source) viewX $ lookupNodes g target.parents
-            (GraphNode leftChildOfSource) = nextElemWrap dir (GraphNode target) viewX $ lookupNodes g source.children
-            newSourceEdge = Edge { source: leftParentOfTarget.id
-                                 , target: target.id }
-            newTargetEdge = Edge { source: source.id
-                                 , target: leftChildOfSource.id }
+            leftParentOfTarget =
+              nextElemWrap dir source (view _x)
+              $ lookupNodes (view _parents target) g
+            leftChildOfSource =
+              nextElemWrap dir target (view _x)
+              $ lookupNodes (view _children source) g
+            newSourceEdge = InterEdge { source: view _id leftParentOfTarget
+                                      , target: view _id target
+                                      , isValid: false
+                                      }
+            newTargetEdge = InterEdge { source: view _id source
+                                      , target: view _id leftChildOfSource
+                                      , isValid: false
+                                      }
           in
-          filter ((/=) (Edge edge)) [newSourceEdge, newTargetEdge]
+          filter ((/=) (InterEdge edge)) [newSourceEdge, newTargetEdge]
 
 nextInGroup :: forall a. Eq a => DirectionLR -> a -> Array a -> Maybe a
 nextInGroup Left x xs =
@@ -251,28 +520,29 @@ nextInGroup Left x xs =
 nextInGroup Right x xs =
   Array.elemIndex x xs >>= \xIndex -> xs !! (xIndex - 1) `mod` length xs
 
-nextNodeWrap :: DirectionLR -> Graph -> GraphNode -> GraphNode
+nextNodeWrap :: DirectionLR -> InterGraph -> InterNode -> InterNode
 nextNodeWrap dir g node =
-  nextElemWrap dir node viewX siblingsAndCoparents
+  nextElemWrap dir node (view _x) siblingsAndCoparents
   where
-    siblingsAndCoparents = lookupNodes g $ siblings g node <> coparents g node
+    siblingsAndCoparents = lookupNodes (siblings g node <> coparents g node) g
 
-edgePosition :: Graph -> Edge -> Number
-edgePosition g (Edge edge) = fromMaybe 0.0 do
-  GraphNode source <- lookupNode g edge.source
-  GraphNode target <- lookupNode g edge.target
-  pure $ source.x + target.x
+edgePosition :: InterGraph -> InterEdge -> Number
+edgePosition g (InterEdge edge) =
+  fromMaybe 0.0 do
+    source <- lookupNode edge.source g
+    target <- lookupNode edge.target g
+    pure $ (view _x source) + (view _x target)
 
-changeFocusLeftRight :: DirectionLR -> Graph -> Graph
+changeFocusLeftRight :: DirectionLR -> InterGraph -> InterGraph
 changeFocusLeftRight dir g =
-  case view (_Graph <<< _focus) g of
-    FocusNode nodeId -> case lookupNode g nodeId of
+  case view _focus g of
+    FocusNode nodeId -> case lookupNode nodeId g of
       Nothing -> g
       Just node ->
         let
           leftNode = nextNodeWrap dir g node
         in
-        applyGraphOp (UpdateFocus (FocusNode (view (_GraphNode <<< _id) leftNode))) g
+        set _focus (FocusNode (view _id leftNode)) g
     FocusEdge edge focusGroup ->
       let
         focus = if focusGroup /= []
@@ -287,13 +557,13 @@ changeFocusLeftRight dir g =
             in
             FocusEdge newFocus newGroup
       in
-      applyGraphOp (UpdateFocus focus) g
+      set _focus focus g
     NoFocus -> g
 
-traverseLeft :: Graph -> Graph
+traverseLeft :: InterGraph -> InterGraph
 traverseLeft g = changeFocusLeftRight Left g
 
-traverseRight :: Graph -> Graph
+traverseRight :: InterGraph -> InterGraph
 traverseRight g = changeFocusLeftRight Right g
 
 
@@ -301,173 +571,273 @@ traverseRight g = changeFocusLeftRight Right g
 -- Positioning nodes
 --
 
-instance interactiveGraphMovable :: Movable Graph where
-  updatePosition = updateNodePosition
+rightmostNode :: forall f. Foldable f => f InterNode -> Maybe InterNode
+rightmostNode = maximumBy (comparing (view _x))
 
-rightmostNode :: forall f. Foldable f => f GraphNode -> Maybe GraphNode
-rightmostNode = maximumBy (comparing viewX)
-
---newPositionFrom :: Graph -> GraphNode -> (GraphNode -> NodeIdSet) -> Point2D
---newPositionFrom g (GraphNode node) relations =
+--newPositionFrom ::  -> InterNode -> (InterNode -> NodeIdSet) -> Point2D
+--newPositionFrom g (InterNode node) relations =
 --  fromMaybe { x: node.x, y: node.y + newParentYOffset } do
---    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g $ relations $ GraphNode node
+--    (InterNode rightmostParent) <- rightmostNode $ lookupNodes (relations $ InterNode node) g
 --    pure { x: rightmostParent.x + newNodeXOffset
 --         , y: rightmostParent.y }
 
-newChildPosition :: Graph -> GraphNode -> Point2D
-newChildPosition g (GraphNode node) =
-  fromMaybe { x: node.x, y: node.y + newNodeYOffset } do
-    (GraphNode rightmostChild) <- rightmostNode $ lookupNodes g node.children
-    pure { x: rightmostChild.x + newNodeXOffset, y: rightmostChild.y }
+newChildPosition :: InterGraph -> InterNode -> Point2D
+newChildPosition g node =
+  fromMaybe { x: view _x node, y: (view _y node) + newNodeYOffset } do
+    rightmostChild <- rightmostNode $ lookupNodes (view _children node) g
+    pure { x: (view _x rightmostChild) + newNodeXOffset, y: (view _y rightmostChild) }
 
-newParentPosition :: Graph -> GraphNode -> Point2D
-newParentPosition g (GraphNode node) =
-  fromMaybe { x: node.x, y: node.y - newNodeYOffset } do
-    (GraphNode rightmostParent) <- rightmostNode $ lookupNodes g node.parents
-    pure { x: rightmostParent.x + newNodeXOffset, y: rightmostParent.y }
+newParentPosition :: InterGraph -> InterNode -> Point2D
+newParentPosition g node =
+  fromMaybe { x: view _x node, y: (view _y node) - newNodeYOffset } do
+    rightmostParent <- rightmostNode $ lookupNodes (view _parents node) g
+    pure { x: (view _x rightmostParent) + newNodeXOffset, y: view _y rightmostParent }
 
-newChildOfFocus :: Graph -> Effect Graph
-newChildOfFocus (Graph g) = case g.focus of
-  FocusNode nodeId -> case lookupNode (Graph g) nodeId of
-    Nothing -> pure $ Graph g
-    Just (GraphNode node) ->
+newChildOfFocus :: InterGraph -> Effect InterGraph
+newChildOfFocus g = case view _focus g of
+  FocusNode nodeId -> case lookupNode nodeId g of
+    Nothing -> pure g
+    Just node ->
       let
-        newChildPos = newChildPosition (Graph g) (GraphNode node)
-        newChildParents = nodeIdSetFromArray $ [node.id]
+        newChildPos = newChildPosition g node
+        newChildParents = nodeIdSetFromArray $ [viewId node]
       in do
-        newChildNode <- createNode newChildPos newChildParents emptyNodeIdSet
-        pure $ insertNode newChildNode (Graph g)
-  _ -> pure $ Graph g
+        newChildNode' <- createNode Object.empty Object.empty
+        let newChildNode = set _position newChildPos newChildNode'
+        let newEdge = InterEdge { source : nodeId
+                                , target : viewId newChildNode
+                                , isValid : false
+                                }
+        pure $ ((updateFocus (FocusNode (view _id newChildNode))) <<<
+                (addEdge newEdge) <<<
+                (insertNode newChildNode))
+             $ g
+  _ -> pure g
 
-newParentOfFocus :: Graph -> Effect Graph
-newParentOfFocus (Graph g) = case g.focus of
-  FocusNode nodeId -> case lookupNode (Graph g) nodeId of
-    Nothing -> pure $ Graph g
-    Just (GraphNode node) ->
+newParentOfFocus :: InterGraph -> Effect InterGraph
+newParentOfFocus g = case view _focus g of
+  FocusNode nodeId -> case lookupNode nodeId g of
+    Nothing -> pure g
+    Just node ->
       let
-        newParentPos = newParentPosition (Graph g) (GraphNode node)
-        newParentChildren = nodeIdSetFromArray $ [node.id]
+        newParentPos = newParentPosition g node
+        newParentChildren = nodeIdSetFromArray $ [viewId node]
       in do
-        newParentNode <- createNode newParentPos emptyNodeIdSet newParentChildren
-        pure $ insertNode newParentNode (Graph g)
-  _ -> pure $ Graph g
+        newParentNode' <- createNode Object.empty Object.empty
+        let newParentNode = set _position newParentPos newParentNode'
+        let newEdge = InterEdge { source : viewId newParentNode
+                                , target : viewId node
+                                , isValid : false
+                                }
+        pure $ ((updateFocus (FocusNode (viewId newParentNode)))
+                <<<
+                (addEdge newEdge)
+                <<<
+                (insertNode newParentNode))
+             $ g
+  _ -> pure g
 
 
 ------
 -- Subgraph collapse/expand
 
-instance interactiveGraphCollapseExpand :: CollapseExpand Graph where
-  collapse = groupHighlighted
-  expand = expandFocus
-  toggleCollapseExpand = toggleGroupExpand
-
-centroid :: Array GraphNode -> Point2D
-centroid nodes =
-  let n_nodes = length nodes in
-  { x : sum (map (view (_GraphNode <<< _x)) nodes) / n_nodes
-  , y : sum (map (view (_GraphNode <<< _y)) nodes) / n_nodes
-  }
-
-parentsOfGroup :: Array GraphNode -> NodeIdSet
+parentsOfGroup :: Array InterNode -> NodeIdSet
 parentsOfGroup nodes =
   let
-    allParents = concatMap (view (_GraphNode <<< _parents) >>> keys) nodes
-    nodesIds = map (view (_GraphNode <<< _id)) nodes
+    allParents = concatMap (view _parents >>> keys) nodes
+    nodesIds = map (view _id) nodes
   in
     nodeIdSetFromArray $ filter (not <<< flip Array.elem nodesIds) allParents
 
-childrenOfGroup :: Array GraphNode -> NodeIdSet
+childrenOfGroup :: Array InterNode -> NodeIdSet
 childrenOfGroup nodes =
   let
-    allChildren = concatMap (view (_GraphNode <<< _children) >>> keys) nodes
-    nodesIds = map (view (_GraphNode <<< _id)) nodes
+    allChildren = concatMap (view _children >>> keys) nodes
+    nodesIds = map (view _id) nodes
   in
     nodeIdSetFromArray $ filter (not <<< flip Array.elem nodesIds) allChildren
 
--- | Make the highlighted nodes into a group node, hiding the
--- | highlighted nodes as a subgraph.
--- | If a node in the highlighted set is in focus then use
--- | it's position for the group node, otherwise use the centroid
--- | of the group.
--- if focus not node in highlighted group, just take any node from group.
--- if no nodes in highlighted group, do nothing.
--- Copy the focus node from the group back into the parent graph
--- but replace its edges with the edges to/from the entire group.
-groupHighlighted :: Graph -> Graph
-groupHighlighted (Graph g) =
+groupHighlighted :: InterGraph -> InterGraph
+groupHighlighted g =
   case do
-    defaultGroupNodeId <- Array.index (keys g.highlighted) 0
-    lookupNode (Graph g) defaultGroupNodeId
+    defaultGroupNodeId <- Array.index (keys (view _highlighted g)) 0
+    lookupNode defaultGroupNodeId g
   of
-    Nothing -> Graph g
+    Nothing -> g
     Just defaultGroupNode ->
       let
-        groupNode = case g.focus of
+        groupNode = case view _focus g of
           FocusNode nodeId ->
-            if Array.elem nodeId $ keys g.highlighted
-               then case lookupNode (Graph g) nodeId of
+            if Array.elem nodeId $ keys $ view _highlighted g
+               then case lookupNode nodeId g of
                  Just focusNode -> focusNode
                  Nothing -> defaultGroupNode
                else defaultGroupNode
           _ -> defaultGroupNode
-        subgraphNodes = lookupNodes (Graph g) g.highlighted
-        unglued = unglue subgraphNodes (Graph g)
+        subgraphNodes = lookupNodes (view _highlighted g) g
+        unglued = unglue subgraphNodes g
         groupParents = parentsOfGroup subgraphNodes
         groupChildren = childrenOfGroup subgraphNodes
-        groupNode' =
-          replaceSubgraphNodes (view (_Graph <<< _nodes) unglued.childGraph) groupNode
-        parentGraph = clearHighlighted unglued.parentGraph
-        groupNodeId = view (_GraphNode <<< _id) groupNode'
+        groupInterNode =
+          replaceSubgraph unglued.childGraph groupNode
+        focusGroupNodeNoHighlight = InteractionState { highlighted : Object.empty
+                                                     , focus : FocusNode (viewId groupNode)
+                                                     }
+        groupInterNode' = set _subgraphInteractionState focusGroupNodeNoHighlight groupInterNode
+        groupNodeId = viewId groupInterNode'
+        parentGraph = set _interactionState focusGroupNodeNoHighlight unglued.parentGraph
+        parentEdges = (\parentId ->
+                        InterEdge { source : parentId
+                                  , target : groupNodeId
+                                  , isValid : false
+                                  })
+                      <$> keys groupParents
+        childEdges = (\childId ->
+                       InterEdge { source : groupNodeId
+                                 , target : childId
+                                 , isValid : false
+                                 })
+                     <$> keys groupChildren
       in
-       (insertNode groupNode'
+       (insertNode groupInterNode'
         >>>
-        replaceParents groupParents groupNodeId
-        >>>
-        replaceChildren groupChildren groupNodeId)
-        $ parentGraph
+        (replaceEdges groupNodeId (parentEdges <> childEdges)))
+       $ parentGraph
 
-expandFocus :: Graph -> Graph
+expandFocus :: InterGraph -> InterGraph
 expandFocus g =
-  case view (_Graph <<< _focus) g of
+  case view _focus g of
     FocusNode groupNodeId ->
-      case lookupNode g groupNodeId of
+      case lookupNode groupNodeId g of
         Nothing -> g
-        Just (GraphNode groupNode) ->
-          if length groupNode.subgraphNodes == 0 then g else
+        Just groupNode ->
+          if Object.isEmpty (view (_subgraph <<< _nodes) groupNode) then g else
           let
-            subgraph = Graph { nodes: groupNode.subgraphNodes
-                             , focus: NoFocus
-                             , highlighted: nodeIdSetFromArray $ map (view (_GraphNode <<< _id)) $ Object.values groupNode.subgraphNodes
-                             }
-            groupNodePos = {x: groupNode.x, y: groupNode.y}
-            subgraphGroupNodePos = case lookupNode subgraph groupNodeId of
-              Nothing -> groupNodePos
-              Just (GraphNode subgraphNode) -> {x: subgraphNode.x, y: subgraphNode.y}
+            subgraph = view _subgraph groupNode
+            groupNodePos = view _position groupNode
+            subgraphGroupNodePos = case lookupNode groupNodeId subgraph of
+              Nothing -> view _position groupNode
+              Just subgraphNode -> view _position subgraphNode
             groupMovement = groupNodePos `subtract` subgraphGroupNodePos
-            movedSubgraph = foldl (\graph nodeId -> moveNodeAmount groupMovement nodeId graph) subgraph groupNode.subgraphNodes
-            gluedGraph = glue movedSubgraph $ removeNode groupNode.id g
+            movedSubgraph = foldl
+                            (\graph_ node -> moveNodeAmount groupMovement node graph_)
+                            subgraph
+                            $ view (_subgraph <<< _nodes) groupNode
+            glued = glue movedSubgraph $ removeNode (view _id groupNode) g
+            newInteractionState = InteractionState { focus : FocusNode groupNodeId
+                                                   , highlighted : nodeIdSetFromArray $ keys $ view (_subgraph <<< _nodes) groupNode
+                                                   }
+            glued' = set _interactionState newInteractionState glued
           in
-            updateFocus (FocusNode groupNodeId) gluedGraph
+            set _focus (FocusNode groupNodeId) glued'
     _ -> g
 
-toggleGroupExpand :: Graph -> Graph
-toggleGroupExpand (Graph g) = case length g.highlighted of
-  0 -> expand (Graph g)
-  _ -> collapse (Graph g)
+toggleGroupExpand :: InterGraph -> InterGraph
+toggleGroupExpand g = case length (view _highlighted g) of
+  0 -> expandFocus g
+  _ -> groupHighlighted g
 
 
 ------
 -- Validity
 
-instance interactiveGraphNodeValidatable :: Validatable Graph where
-  updateValidity = updateNodeValidity
+updateNodeValidity :: Boolean -> NodeId -> InterGraph -> InterGraph
+updateNodeValidity validity nodeId = over (_nodes <<< (at nodeId)) (map (set _nodeIsValid validity))
 
-updateNodeValidity :: Boolean -> NodeId -> Graph -> Graph
-updateNodeValidity validity nodeId = applyGraphOp (UpdateNodeValidity nodeId validity)
+updateEdgeValidity :: Boolean -> InterEdge -> InterGraph -> InterGraph
+updateEdgeValidity validity (InterEdge edge) g =
+  updateEdgeData edge.source edge.target (Just validity) g
 
 
 ------
 -- Text
 
-instance interactiveGraphTextCells :: TextCells Graph where
-  updateCellText = updateNodeText
+updateCellText :: NodeId -> String -> InterGraph -> InterGraph
+updateCellText nodeId newText = over (_nodes <<< at nodeId) (map (set _text newText))
+
+
+graphTitle :: InterGraph -> Maybe String
+graphTitle g = titles !! 0 >>= stripPrefix titlePattern
+  where
+    titlePattern = Pattern "Title: "
+    nodeTextArr = trim <$> (view _text) <$> values (view _nodes g)
+    isTitle = contains titlePattern
+    titles = filter isTitle nodeTextArr
+
+------
+-- Demo
+
+demo :: InterGraph
+demo = updateFocus (FocusEdge (InterEdge { source: "title"
+                                         , target: "goofus"
+                                         , isValid: false
+                                         })
+                    [InterEdge { source: "title"
+                               , target: "goofus"
+                               , isValid: false
+                               },
+                     InterEdge { source: "thingo"
+                               , target: "goofus"
+                               , isValid: false
+                               }])
+       $ highlight "thingo"
+       $ addEdge (InterEdge { source : "title"
+                                 , target : "goofus"
+                                 , isValid : false
+                                 })
+       $ insertNode (InterNode
+           { text: "Title: Workflow"
+           , isValid: true
+           , position : { x : 205.0
+                        , y : 150.0
+                        }
+           , id : "title"
+           , parents : Object.empty
+           , children : Object.empty
+           , subgraph : emptyInterGraph
+           })
+       $ addEdge (InterEdge { source : "thingo"
+                                 , target : "goofus"
+                                 , isValid : false
+                                 })
+       $ insertNode (InterNode
+           { text: "thingo"
+           , isValid: false
+           , position : { x : 205.0
+                        , y : 100.0
+                        }
+           , id : "thingo"
+           , parents : Object.empty
+           , children : Object.empty
+           , subgraph : emptyInterGraph
+           })
+       $ insertNode (InterNode
+           { text: "asdf"
+           , isValid: true
+           , position : { x: 450.0
+                        , y: 270.0
+                        }
+           , id : "goofus"
+           , parents : Object.empty
+           , children : Object.empty
+           , subgraph : emptyInterGraph
+           })
+       $ emptyInterGraph
+
+-- TODO: re-export to JS using module system properly
+fromMaybe_ :: forall a. a -> Maybe a -> a
+fromMaybe_ = fromMaybe
+
+-- Give some polymorphic functions concrete instances to make them
+-- easier to call from JavaScript
+resolvedInterGraphEdges :: InterGraph -> Array { source :: InterNode, target :: InterNode }
+resolvedInterGraphEdges = resolvedGraphEdges
+
+lookupInterNodes :: NodeIdSet -> InterGraph -> Array InterNode
+lookupInterNodes = lookupNodes
+
+interGraphToJSON :: InterGraph -> String
+interGraphToJSON = graphToJSON
+
+interGraphFromJSON :: String -> ExceptT (NonEmptyList ForeignError) Identity InterGraph
+interGraphFromJSON = graphFromJSON
