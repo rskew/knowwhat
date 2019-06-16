@@ -2,7 +2,8 @@ const GraphUI = require('./graphUI.js');
 const Utils = require('./utils.js');
 var PursCore = require('./purescript/output/Workflow.Core/index.js');
 var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
-var Purs = {...PursCore, ...PursInteraction};
+var PursInteractionImpl = require('./purescript/output/Workflow.Interaction.Impl/index.js');
+var Purs = {...PursCore, ...PursInteraction, ...PursInteractionImpl};
 var Graphputer = require('./purescript/output/Graphputer.Core/index.js');
 var GraphputerParser = require('./purescript/output/Graphputer.Parser/index.js');
 

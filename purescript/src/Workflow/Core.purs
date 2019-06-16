@@ -8,7 +8,7 @@ module Workflow.Core
        , nodeIdSetFromArray
        , insertNodeId
        , deleteNodeId
-       , viewNodes
+       , nodes
        , createNode
        , viewId
        , viewParents
@@ -16,6 +16,7 @@ module Workflow.Core
        , removeParents
        , removeChildren
        , replaceEdges
+       , createEdge
        , edgeId
        , edgeSource
        , edgeTarget
@@ -38,7 +39,7 @@ module Workflow.Core
        ) where
 
 import Control.Monad.Except.Trans (ExceptT)
-import Data.Array (mapMaybe)
+import Data.Array (mapMaybe, catMaybes)
 import Data.Foldable (foldl, elem)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
@@ -55,8 +56,11 @@ import Foreign.Object as Object
 import Prelude (Unit, unit, ($), (>>>), map, flip, (<>), bind, pure)
 
 
-------
--- Interface
+type NodeId = String
+
+type NodeIdSet = Object Unit
+
+type EdgeId = String
 
 class Node node where
   createNode :: NodeIdSet -> NodeIdSet -> Effect node
@@ -65,26 +69,23 @@ class Node node where
   viewChildren :: node -> NodeIdSet
 
 class Edge edge where
+  createEdge :: NodeId -> NodeId -> edge
   edgeSource :: edge -> NodeId
   edgeTarget :: edge -> NodeId
 
 class (Node node, Edge edge) <=
       Graph graph node edge | graph -> node, graph -> edge where
   emptyGraph :: graph
-  viewNodes :: graph -> Object node
+  nodes :: graph -> Object node
+  lookupNode :: NodeId -> graph -> Maybe node
   insertNode :: node -> graph -> graph
   -- removeNode should also remove edges to/from that node
   removeNode :: NodeId -> graph -> graph
-  viewSubgraph :: node -> graph
+  lookupEdge :: NodeId -> NodeId -> graph -> Maybe edge
   addEdge :: edge -> graph -> graph
   removeEdge :: NodeId -> NodeId -> graph -> graph
-  lookupEdge :: NodeId -> NodeId -> graph -> edge
+  viewSubgraph :: node -> graph
   replaceSubgraph :: graph -> node -> node
-  lookupNode :: NodeId -> graph -> Maybe node
-
-type NodeId = String
-
-type NodeIdSet = Object Unit
 
 insertNodeId :: NodeId -> NodeIdSet -> NodeIdSet
 insertNodeId nodeId = Object.insert nodeId unit
@@ -100,8 +101,6 @@ emptyNodeIdSet = Object.empty
 
 nodeIdSetMember :: NodeId -> NodeIdSet -> Boolean
 nodeIdSetMember nodeId set = elem nodeId $ keys set
-
-type EdgeId = String
 
 edgeId :: NodeId -> NodeId -> EdgeId
 edgeId source target = source <> "." <> target
@@ -127,10 +126,10 @@ edgesToFromNode :: forall graph node edge.
                    node -> graph -> Array edge
 edgesToFromNode node g =
   let
-    edgesToChildren = map (
+    edgesToChildren = catMaybes $ map (
       \childNodeId -> lookupEdge (viewId node) childNodeId g
       ) $ keys $ viewChildren node
-    edgesFromParents = map (
+    edgesFromParents = catMaybes $ map (
       \parentNodeId -> lookupEdge parentNodeId (viewId node) g
       ) $ keys $ viewParents node
   in
@@ -147,8 +146,8 @@ resolveEdgeNodes edge g = do
 graphEdges :: forall graph node edge.
               Graph graph node edge =>
               graph -> Array edge
-graphEdges g = do
-  node <- values $ viewNodes g
+graphEdges g = catMaybes do
+  node <- values $ nodes g
   childId <- keys $ viewChildren node
   pure $ lookupEdge (viewId node) childId g
 
@@ -210,7 +209,7 @@ glue :: forall graph node edge.
         graph -> graph -> graph
 glue childGraph parentGraph =
   let
-    childNodeArray = values $ viewNodes childGraph
+    childNodeArray = values $ nodes childGraph
     childGraphEdges = do
       childNode <- childNodeArray
       edgesToFromNode childNode childGraph
