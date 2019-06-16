@@ -864,7 +864,7 @@ module.exports = function GraphUI(graph) {
             " ": function (graph, event) {
                 event.preventDefault();
                 event.stopPropagation();
-                return Purs.toggleGroupExpand(
+                return Purs.toggleGroupExpandImpl(
                         graph
                     );
             },
@@ -896,7 +896,7 @@ module.exports = function GraphUI(graph) {
             "s": graph => Purs.toggleHighlightFocusImpl(graph),
             "Delete": graph => Purs.removeFocusImpl(graph),
             "Escape": normalMode,
-            " ": graph => Purs.toggleGroupExpand(graph),
+            " ": graph => Purs.toggleGroupExpandImpl(graph),
         },
         "move": {
             "j": graph => graphUI.moveFocusDown(),

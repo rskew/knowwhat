@@ -274,11 +274,7 @@ deleteChild nodeId = over _children $ deleteNodeId nodeId
 
 insertNodeImpl :: InterNodeImpl -> InterGraphImpl -> InterGraphImpl
 insertNodeImpl newNode g =
-  let
-    newNodeId = (viewId newNode)
-    g' = setJust (_nodes <<< (at (viewId newNode))) newNode g
-  in
-    g'
+  setJust (_nodes <<< (at (viewId newNode))) newNode g
 
 removeNodeImpl :: NodeId -> InterGraphImpl -> InterGraphImpl
 removeNodeImpl nodeId g =
