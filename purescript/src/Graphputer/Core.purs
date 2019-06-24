@@ -8,7 +8,7 @@ import Prelude (class Show, (<>), show, ($), (==), map)
 import Data.Eq (class Eq)
 import Data.Maybe (Maybe(..))
 
-import Workflow.Core
+import Workflow.Interaction.Impl
 
 
 data PyType
@@ -65,7 +65,7 @@ pyApply func arg = case func of
          else Nothing
   _ -> Nothing
 
-convertToPython :: Graph -> String
+convertToPython :: InterGraphImpl -> String
 convertToPython g = "hmmmmm"
   -- collect setupCode nodes and concat text
   -- - put 'import' node text at beginning
