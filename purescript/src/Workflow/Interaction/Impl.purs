@@ -1,21 +1,21 @@
 module Workflow.Interaction.Impl where
 
-import Workflow.Core (class Edge, class Graph, class Node, NodeId, NodeIdSet, addEdge, deleteNodeId, edgeId, genericEncodeOpts, graphFromJSON, graphToJSON, insertNode, insertNodeId, lookupNodes, removeChildren, removeParents, resolvedGraphEdges, viewId)
+import Workflow.Core (class Edge, class Graph, class Node, NodeId, NodeIdSet, addEdge, deleteNodeId, edgeId, genericEncodeOpts, insertNode, insertNodeId, removeChildren, removeParents, viewId, graphToJSON, graphFromJSON)
 import Workflow.Interaction
 
 import Control.Monad.Except.Trans (ExceptT)
+import Data.List.NonEmpty (NonEmptyList)
+import Data.Identity (Identity)
+import Foreign (ForeignError)
 import Data.Eq (class Eq)
 import Data.Generic.Rep (class Generic)
-import Data.Identity (Identity)
 import Data.Lens (Lens', lens, view, set, over, setJust)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
-import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Symbol (SProxy(..))
 import Data.UUID (genUUID)
 import Effect (Effect)
-import Foreign (ForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode)
 import Foreign.Object (Object)
@@ -28,10 +28,6 @@ import Prelude (($), (<<<), (>>>), map, bind, pure, unit, show)
 
 version :: String
 version = "0.00001"
-
-newNodeOffset :: Point2D
-newNodeOffset = { x: 100.0, y: 100.0 }
-
 
 ------
 -- Types
@@ -78,14 +74,14 @@ createInterNodeImpl parentIds childIds = do
       , subgraph : emptyInterGraphImpl
       , text : ""
       , position : { x: 0.0, y: 0.0 }
-      , isValid : false
+      , isValid : true
       }
 
 createEdgeImpl :: NodeId -> NodeId -> InterEdgeImpl
 createEdgeImpl source target = InterEdgeImpl { source : source
-                                                  , target : target
-                                                  , isValid : false
-                                                  }
+                                             , target : target
+                                             , isValid : true
+                                             }
 
 newtype InterEdgeImpl = InterEdgeImpl { source :: NodeId
                                       , target :: NodeId
@@ -384,7 +380,7 @@ demo = updateFocus (FocusEdge (InterEdgeImpl { source: "title"
                                , target: "goofus"
                                , isValid: false
                                }])
-       $ highlight "thingo"
+       --$ highlight "thingo"
        $ addEdge (InterEdgeImpl { source : "title"
                                  , target : "goofus"
                                  , isValid : false
@@ -406,7 +402,7 @@ demo = updateFocus (FocusEdge (InterEdgeImpl { source: "title"
                                  })
        $ insertNode (InterNodeImpl
            { text: "thingo"
-           , isValid: false
+           , isValid: true
            , position : { x : 205.0
                         , y : 100.0
                         }
@@ -432,55 +428,9 @@ demo = updateFocus (FocusEdge (InterEdgeImpl { source: "title"
 fromMaybe_ :: forall a. a -> Maybe a -> a
 fromMaybe_ = fromMaybe
 
--- Give some polymorphic functions concrete instances to make them
--- easier to call from JavaScript
-resolvedInterGraphEdges :: InterGraphImpl -> Array { source :: InterNodeImpl, target :: InterNodeImpl }
-resolvedInterGraphEdges = resolvedGraphEdges
-
-lookupNodesImpl :: NodeIdSet -> InterGraphImpl -> Array InterNodeImpl
-lookupNodesImpl = lookupNodes
-
+-- type-narrowed export so js doesn't have to do annoying typeclass dict passing
 interGraphToJSON :: InterGraphImpl -> String
 interGraphToJSON = graphToJSON
 
 interGraphFromJSON :: String -> ExceptT (NonEmptyList ForeignError) Identity InterGraphImpl
 interGraphFromJSON = graphFromJSON
-
-edgeInFocusGroupImpl :: InterGraphImpl -> InterEdgeImpl -> Boolean
-edgeInFocusGroupImpl = edgeInFocusGroup
-
-removeFocusImpl :: InterGraphImpl -> InterGraphImpl
-removeFocusImpl = removeFocus
-
-clearHighlightedImpl :: InterGraphImpl -> InterGraphImpl
-clearHighlightedImpl = clearHighlighted
-
-highlightFocusImpl :: InterGraphImpl -> InterGraphImpl
-highlightFocusImpl = highlightFocus
-
-toggleHighlightFocusImpl :: InterGraphImpl -> InterGraphImpl
-toggleHighlightFocusImpl = toggleHighlightFocus
-
-traverseUpImpl :: InterGraphImpl -> InterGraphImpl
-traverseUpImpl = traverseUp
-
-traverseDownImpl :: InterGraphImpl -> InterGraphImpl
-traverseDownImpl = traverseDown
-
-traverseLeftImpl :: InterGraphImpl -> InterGraphImpl
-traverseLeftImpl = traverseLeft
-
-traverseRightImpl :: InterGraphImpl -> InterGraphImpl
-traverseRightImpl = traverseRight
-
-graphTitleImpl :: InterGraphImpl -> Maybe String
-graphTitleImpl = graphTitle
-
-newParentOfFocusImpl :: InterGraphImpl -> Effect InterGraphImpl
-newParentOfFocusImpl = newParentOfFocus newNodeOffset
-
-newChildOfFocusImpl :: InterGraphImpl -> Effect InterGraphImpl
-newChildOfFocusImpl = newChildOfFocus newNodeOffset
-
-toggleGroupExpandImpl :: InterGraphImpl -> InterGraphImpl
-toggleGroupExpandImpl  = toggleGroupExpand

@@ -2,8 +2,43 @@ body {
     overflow: hidden;
 }
 
-[contenteditable]:focus {
-    outline: 0px solid transparent;
+svg {
+    z-index: -1;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+}
+
+.nonsvg {
+    position: absolute;
+}
+
+.CodeMirror {
+    border: 1px solid #eeeb;
+    height: auto;
+    width: auto;
+    max-height: 200px;
+    max-width: 400px;
+    position: absolute;
+    background-color: rgba(255,255,255,.8);
+    display: flex;
+    flex-wrap: wrap;
+    border-radius: 3px;
+}
+
+.CodeMirror-scroll {
+    height: auto;
+    width: auto;
+    max-height:200px;
+    max-width: 400px;
+}
+
+/* Hide green edit mode cursor when codemirror not in focus */
+.cm-fat-cursor-mark {
+    background-color: rgba(20, 255, 20, 0.0);
+}
+.CodeMirror-focused .cm-fat-cursor-mark {
+    background-color: rgba(20, 255, 20, 0.5);
 }
 
 circle {
@@ -34,6 +69,11 @@ circle.node.focused.move {
 
 .nodeBorder.invalid {
     fill: #f662;
+    opacity: 1.0;
+}
+
+.nodeBorder.clicked {
+    fill: #44f3;
     opacity: 1.0;
 }
 
@@ -74,7 +114,7 @@ line.focused {
 }
 
 .edgeBorder.focusGroup {
-    stroke: #08f2;
+    stroke: #08f1;
     stroke-width: 25px;
 }
 

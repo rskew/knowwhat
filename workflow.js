@@ -7,29 +7,32 @@ var Purs = {...PursCore, ...PursInteraction, ...PursInteractionImpl};
 var Graphputer = require('./purescript/output/Graphputer.Core/index.js');
 var GraphputerParser = require('./purescript/output/Graphputer.Parser/index.js');
 
-
-///////////////////////////////////
-//////// Main
-
-var graphUI = new GraphUI(Purs.demo);
-// TODO: remove debugging hackz
 window.Purs = Purs;
-window.graphUI = graphUI;
 window.Graphputer = Graphputer;
 window.GraphputerParser = GraphputerParser;
 
-window.graphUI.registerNodeValidHook(function (graph, node) {
-    return window.GraphputerParser.canParseNodeText(node.text.trim());
-});
+/////////////////////////////////
+////// Main
 
-window.graphUI.registerEdgeValidHook(function (graph, sourceNode, targetNode) {
-    return window.GraphputerParser.canCompose(
-        targetNode.text.trim())(
-        sourceNode.text.trim());
-});
+window.onload = function () {
 
-window.graph = window.graphUI.graph;
+    var graphUI = new GraphUI(Purs.demo);
+    window.graphUI = graphUI;
 
-console.log(graphUI.graph);
+    // uncomment to activate validation
+    //window.graphUI.registerNodeValidHook(function (graph, node) {
+    //    return window.GraphputerParser.canParseNodeText(node.text.trim());
+    //});
 
-graphUI.update();
+    //window.graphUI.registerEdgeValidHook(function (graph, sourceNode, targetNode) {
+    //    return window.GraphputerParser.canCompose(
+    //        targetNode.text.trim())(
+    //        sourceNode.text.trim());
+    //});
+
+    window.graph = window.graphUI.graph;
+
+    console.log(graphUI.graph);
+
+    graphUI.update();
+};

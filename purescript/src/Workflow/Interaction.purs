@@ -2,10 +2,11 @@ module Workflow.Interaction where
 
 import Workflow.Core
 
+import Math as Math
 import Data.Array (filter, sortWith, (!!), concatMap, catMaybes, null)
 import Data.Array as Array
 import Data.Eq (class Eq)
-import Data.Foldable (foldMap, foldl, length, class Foldable, maximumBy, elem)
+import Data.Foldable (foldMap, foldl, length, class Foldable, maximumBy, elem, minimumBy)
 import Data.Function (on)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe)
@@ -44,7 +45,8 @@ class (Graph graph node edge, InterNode node) <=
   unHighlight :: NodeId -> graph -> graph
   updateText :: NodeId -> String -> graph -> graph
 
-class (InterGraph graph node edge) <= ValidatableGraph graph node edge | graph -> node, graph -> edge where
+class (InterGraph graph node edge) <=
+      ValidatableGraph graph node edge | graph -> node, graph -> edge where
   updateNodeValidity :: Boolean -> NodeId -> graph -> graph
   updateEdgeValidity :: Boolean -> edge -> graph -> graph
 
@@ -78,6 +80,13 @@ instance decodeFocus :: (Generic edge rep, GenericDecode rep, Decode edge) => De
 
 ------
 -- Focusing
+
+hasFocus :: forall graph node edge.
+            InterGraph graph node edge =>
+            NodeId -> graph -> Boolean
+hasFocus nodeId g = case viewFocus g of
+  FocusNode focusNodeId -> nodeId == focusNodeId
+  _ -> false
 
 removeFocus :: forall graph node edge.
                InterGraph graph node edge =>
@@ -192,16 +201,16 @@ siblings :: forall graph node edge.
             graph -> node -> NodeIdSet
 siblings g node = foldMap viewChildren parents
   where
-    parents = lookupNodes parentIds g
     parentIds = viewParents node
+    parents = lookupNodes parentIds g
 
 coparents :: forall graph node edge.
              InterGraph graph node edge =>
              graph -> node -> NodeIdSet
 coparents g node = foldMap viewParents children
   where
-    children = lookupNodes childIds g
     childIds = viewChildren node
+    children = lookupNodes childIds g
 
 -- | Order array elements to the right of a given element,
 -- | not including the given element.
@@ -496,3 +505,26 @@ graphTitle g = titles !! 0 >>= stripPrefix titlePattern
     nodeTextArr = trim <$> viewText <$> values (nodes g)
     isTitle = contains titlePattern
     titles = filter isTitle nodeTextArr
+
+
+------
+-- Utilities
+
+-- | Eventually replace with KD tree or something cooler then linear search
+getNearestNeighbor :: forall graph node edge.
+                      InterGraph graph node edge =>
+                      Point2D -> graph -> Maybe { nodeId :: NodeId
+                                                , distance :: Number
+                                                }
+getNearestNeighbor point g =
+  let
+    distance :: Point2D -> Point2D -> Number
+    distance pointA pointB =
+       Math.sqrt $ (Math.pow (pointA.x - pointB.x) 2.0)
+                   + (Math.pow (pointA.y - pointB.y) 2.0)
+    distanceNode nodeId = fromMaybe 999999999.9 $ do
+      node <- lookupNode nodeId g
+      pure $ distance point $ viewPos node
+  in do
+    closestNodeId <- minimumBy (comparing distanceNode) $ keys $ nodes g
+    pure { nodeId : closestNodeId, distance : distanceNode closestNodeId }
