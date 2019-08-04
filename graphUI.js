@@ -1,8 +1,8 @@
 const d3 = require("./libs/d3.js");
 const Utils = require("./utils");
-var PursCore = require('./purescript/output/Workflow.Core/index.js');
-var PursInteraction = require('./purescript/output/Workflow.Interaction/index.js');
-var PursInteractionImpl = require('./purescript/output/Workflow.Interaction.Impl/index.js');
+var PursCore = require('./output/Workflow.Core/index.js');
+var PursInteraction = require('./output/Workflow.Interaction/index.js');
+var PursInteractionImpl = require('./output/Workflow.Interaction.Impl/index.js');
 var Purs = {...PursCore, ...PursInteraction, ...PursInteractionImpl};
 var FileSaver = require("./libs/FileSaver.min.js");
 var CodeMirror = require('./libs/CodeMirror');
