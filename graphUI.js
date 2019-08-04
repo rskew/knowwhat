@@ -37,8 +37,9 @@ module.exports = function GraphUI(graph) {
         "mouseoverNode": undefined,
     };
 
-    graphUI.background_origin = { "x": 0, "y": 0};
+    graphUI.background_origin = {"x": 0, "y": 0};
     graphUI.background_drag_enable = true;
+    graphUI.zoomAmount = 1;
 
     // Keyboard modes: normal, insert, visual
     graphUI.keyboardMode = "normal";
@@ -61,6 +62,7 @@ module.exports = function GraphUI(graph) {
     graphUI.scrollTickPeriod = 50; // ms
     graphUI.newNodeOffset = { x: 100.0, y: 100.0 };
     graphUI.dragDropEdgeThreshold = 50;
+    graphUI.zoomScalingPower = 0.05;
 
     graphUI.codeMirrorOptions = {
         inputStyle: "contenteditable",
@@ -73,13 +75,15 @@ module.exports = function GraphUI(graph) {
     ///////////////////////////////////
     //////// D3
 
-    graphUI.svg = d3.select("body").append("svg");
+    var viewBoxSize = Math.max(window.innerHeight, window.innerWidth);
+    graphUI.svg = d3.select("body").append("svg")
+        .attr("preserveAspectRatio", "xMinYMin slice")
+        .attr("viewBox", "0 0 " + viewBoxSize + " " + viewBoxSize);
 
     graphUI.nonsvg = d3.select("body").append("div")
         .classed("nonsvg", true);
     graphUI.svg
         .on("click", function (e) {
-            console.log("click on backgnd");
             graphUI.graph =
                 Purs.interGraph.updateFocus(
                     Purs.NoFocus.value)(
@@ -94,20 +98,18 @@ module.exports = function GraphUI(graph) {
                     {})({})();
             graphUI.graph =
                 Purs.graph.insertNode(
-                    newNode
-                )(
+                    newNode)(
                     graphUI.graph
                 );
             graphUI.graph = Purs.interGraph.updateNodePosition(
-                {"x": d3.event.pageX - graphUI.background_origin.x,
-                 "y": d3.event.pageY - graphUI.background_origin.y})(
+                {"x": d3.event.x * graphUI.zoomAmount + graphUI.background_origin.x,
+                 "y": d3.event.y * graphUI.zoomAmount + graphUI.background_origin.y})(
                 newNode.id)(
                      graphUI.graph
             );
             graphUI.graph =
                 Purs.interGraph.updateFocus(
-                    Purs.FocusNode.create(newNode.id)
-                )(
+                    Purs.FocusNode.create(newNode.id))(
                     graphUI.graph
                 );
             graphUI.update();
@@ -116,7 +118,60 @@ module.exports = function GraphUI(graph) {
         .call(d3.drag()
               .on("start", dragstarted_background)
               .on("drag", dragged_background)
-              .on("end", dragended_background));
+              .on("end", dragended_background))
+        .call(d3.zoom()
+              .on("zoom", zoomer));
+
+    function zoomer(d) {
+        if (d3.event.sourceEvent){
+            var newZoom = Math.pow(d3.event.transform.k, graphUI.zoomScalingPower);
+            var zoomDelta = newZoom - graphUI.zoomAmount;
+            var oldMouseXGraph = d3.event.sourceEvent.x * graphUI.zoomAmount;
+            var newMouseXGraph = d3.event.sourceEvent.x * newZoom;
+            var deltaXGraph = newMouseXGraph - oldMouseXGraph;
+            var oldMouseYGraph = d3.event.sourceEvent.y * graphUI.zoomAmount;
+            var newMouseYGraph = d3.event.sourceEvent.y * newZoom;
+            var deltaYGraph = newMouseYGraph - oldMouseYGraph;
+            graphUI.background_origin.x -= deltaXGraph;
+            graphUI.background_origin.y -= deltaYGraph;
+            graphUI.zoomAmount = newZoom;
+            graphUI.update();
+        }
+    }
+
+    // Translates THEN Scales
+    function updateTransform() {
+        var viewBoxSize = Math.max(window.innerHeight, window.innerWidth) * graphUI.zoomAmount;
+        graphUI.svg.attr("viewBox", graphUI.background_origin.x + " " + graphUI.background_origin.y + " " + viewBoxSize + " " + viewBoxSize);
+        var invZoomAmount = 1 / graphUI.zoomAmount;
+        graphUI.nonsvg.style(
+            "transform",
+            "scale(" + invZoomAmount + ") "
+                + "translate(" + -Math.round(graphUI.background_origin.x) + "px, "
+                + -Math.round(graphUI.background_origin.y) + "px)");
+    }
+
+    function dragstarted_background(d) {
+        if (d3.event.sourceEvent.ctrlKey) {
+            graphUI.background_drag_enable = false;
+        } else {
+            graphUI.background_drag_enable = true;
+            graphUI.update();
+        }
+    }
+
+    function dragged_background(d) {
+        if (graphUI.background_drag_enable) {
+            graphUI.background_origin.x -= d3.event.dx * graphUI.zoomAmount;
+            graphUI.background_origin.y -= d3.event.dy * graphUI.zoomAmount;
+            graphUI.update();
+        }
+    }
+
+    function dragended_background(d) {
+        graphUI.update();
+    }
+
 
     // Define Z axis ordering of elements
     graphUI.svg.append("g").attr("id", "nodeHalos");
@@ -182,10 +237,10 @@ module.exports = function GraphUI(graph) {
             .join(
                 enter => enter.append("line")
                     .classed("edge", true)
-                    .attr("x1", edgeNode => edgeNode.source.position.x + graphUI.background_origin.x)
-                    .attr("y1", edgeNode => edgeNode.source.position.y + graphUI.background_origin.y)
-                    .attr("x2", edgeNode => edgeNode.target.position.x + graphUI.background_origin.x)
-                    .attr("y2", edgeNode => edgeNode.target.position.y + graphUI.background_origin.y)
+                    .attr("x1", edgeNode => edgeNode.source.position.x)
+                    .attr("y1", edgeNode => edgeNode.source.position.y)
+                    .attr("x2", edgeNode => edgeNode.target.position.x)
+                    .attr("y2", edgeNode => edgeNode.target.position.y)
                     .classed("focused", edgeNode => {
                         if (graphUI.graph.interactionState.focus.value0 == undefined) {
                             return false;
@@ -202,10 +257,10 @@ module.exports = function GraphUI(graph) {
                             return "url(#arrow-to-group)";
                         }}),
                 update => update
-                    .attr("x1", edgeNode => edgeNode.source.position.x + graphUI.background_origin.x)
-                    .attr("y1", edgeNode => edgeNode.source.position.y + graphUI.background_origin.y)
-                    .attr("x2", edgeNode => edgeNode.target.position.x + graphUI.background_origin.x)
-                    .attr("y2", edgeNode => edgeNode.target.position.y + graphUI.background_origin.y)
+                    .attr("x1", edgeNode => edgeNode.source.position.x)
+                    .attr("y1", edgeNode => edgeNode.source.position.y)
+                    .attr("x2", edgeNode => edgeNode.target.position.x)
+                    .attr("y2", edgeNode => edgeNode.target.position.y)
                     .classed("focused", edgeNode => {
                         if (graphUI.graph.interactionState.focus.value0 == undefined) {
                             return false;
@@ -232,10 +287,10 @@ module.exports = function GraphUI(graph) {
             .join(
                 enter => enter.append("line")
                     .classed("edgeBorder", true)
-                    .attr("x1", edgeNodes => edgeNodes.source.position.x + graphUI.background_origin.x)
-                    .attr("y1", edgeNodes => edgeNodes.source.position.y + graphUI.background_origin.y)
-                    .attr("x2", edgeNodes => edgeNodes.target.position.x + graphUI.background_origin.x)
-                    .attr("y2", edgeNodes => edgeNodes.target.position.y + graphUI.background_origin.y)
+                    .attr("x1", edgeNodes => edgeNodes.source.position.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.position.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.position.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.position.y)
                     .attr("stroke-linecap", "butt")
                     .classed("focusGroup", edgeNodes => Purs.edgeInFocusGroup(Purs.eqInterEdgeImpl)(Purs.interGraph)(graphUI.graph)(
                         Purs.graphEdge.createEdge(edgeNodes.source.id)(edgeNodes.target.id)))
@@ -272,10 +327,10 @@ module.exports = function GraphUI(graph) {
                         }
                     }),
                 update => update
-                    .attr("x1", edgeNodes => edgeNodes.source.position.x + graphUI.background_origin.x)
-                    .attr("y1", edgeNodes => edgeNodes.source.position.y + graphUI.background_origin.y)
-                    .attr("x2", edgeNodes => edgeNodes.target.position.x + graphUI.background_origin.x)
-                    .attr("y2", edgeNodes => edgeNodes.target.position.y + graphUI.background_origin.y)
+                    .attr("x1", edgeNodes => edgeNodes.source.position.x)
+                    .attr("y1", edgeNodes => edgeNodes.source.position.y)
+                    .attr("x2", edgeNodes => edgeNodes.target.position.x)
+                    .attr("y2", edgeNodes => edgeNodes.target.position.y)
                     .classed("focusGroup", edgeNodes => Purs.edgeInFocusGroup(Purs.eqInterEdgeImpl)(Purs.interGraph)(graphUI.graph)(
                         Purs.graphEdge.createEdge(edgeNodes.source.id)(edgeNodes.target.id)))
                     .classed("invalid", function (edgeNodes) {
@@ -332,7 +387,6 @@ module.exports = function GraphUI(graph) {
                             graphUI.codeMirrorOptions);
                         codeMirror.setValue(d[1].text);
                         codeMirror.on("focus", function (e) {
-                            console.log("focusing on node");
                             graphUI.graph = Purs.interGraph.updateFocus(
                                 Purs.FocusNode.create(d[0]))(
                                 graphUI.graph
@@ -342,8 +396,8 @@ module.exports = function GraphUI(graph) {
                         });
                         return codeMirror.getWrapperElement();
                     })
-                    .style("left", d => (d[1].position.x + 20 + graphUI.background_origin.x) + "px")
-                    .style("top", d => (d[1].position.y - 10 + graphUI.background_origin.y) + "px")
+                    .style("left", d => (d[1].position.x + 20) + "px")
+                    .style("top", d => (d[1].position.y - 10) + "px")
                     .each(function (d) {
                         this.CodeMirror.refresh();
                     })
@@ -359,8 +413,8 @@ module.exports = function GraphUI(graph) {
                         graphUI.update();
                     }),
                 update => update
-                    .style("left", d => (d[1].position.x + 20 + graphUI.background_origin.x) + "px")
-                    .style("top", d => (d[1].position.y - 10 + graphUI.background_origin.y) + "px")
+                    .style("left", d => (d[1].position.x + 20) + "px")
+                    .style("top", d => (d[1].position.y - 10) + "px")
                     .each(function (d) {
                         if (graphUI.keyboardMode == "insert" &&
                               d[0] == graphUI.graph.interactionState.focus.value0) {
@@ -385,14 +439,14 @@ module.exports = function GraphUI(graph) {
                             return 7;
                         }
                     })
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .classed("focused", d => d[0] == graphUI.graph.interactionState.focus.value0),
                 update => update
                     .attr("class", graphUI.keyboardMode)
                     .classed("node", true)
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .classed("focused", d => d[0] == graphUI.graph.interactionState.focus.value0)
                     .attr("r", d => {
                         if (Object.keys(d[1].subgraph.nodes).length > 0) {
@@ -411,8 +465,8 @@ module.exports = function GraphUI(graph) {
                 enter => enter.append("circle")
                     .classed("nodeBorder", true)
                     .attr("r", 28)
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .classed("grouped", d => Purs.nodeIdSetMember(d[0])(graphUI.graph.interactionState.highlighted))
                     .classed("invalid", d => !d[1].isValid)
                     .on("click", function (d) {
@@ -457,8 +511,8 @@ module.exports = function GraphUI(graph) {
                         }
                     }),
                 update => update
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .classed("grouped", d => Purs.nodeIdSetMember(d[0])(graphUI.graph.interactionState.highlighted))
                     .classed("invalid", d => !d[1].isValid)
                     .each(function () {
@@ -479,8 +533,8 @@ module.exports = function GraphUI(graph) {
                 enter => enter.append("circle")
                     .classed("halo", true)
                     .attr("r", "40")
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .on("mouseover", function (d) {
                         graphUI.mouseState.mouseoverNode = d[0];
                         d3.select(this).classed("ready", false);
@@ -516,8 +570,8 @@ module.exports = function GraphUI(graph) {
                           .on("drag", dragged_halo)
                           .on("end", dragended_halo)),
                 update => update
-                    .attr("cx", d => d[1].position.x + graphUI.background_origin.x)
-                    .attr("cy", d => d[1].position.y + graphUI.background_origin.y)
+                    .attr("cx", d => d[1].position.x)
+                    .attr("cy", d => d[1].position.y)
                     .classed("focused", d => d[0] == graphUI.graph.interactionState.focus.value0)
                     .each(function () {
                         if (d3.select(this).classed("focused")) {
@@ -552,28 +606,9 @@ module.exports = function GraphUI(graph) {
             graphUI.mouseState.drawingEdge = [];
             console.log(graphUI.mouseState);
         });
+
+        updateTransform();
     };
-
-    function dragstarted_background(d) {
-        if (d3.event.sourceEvent.ctrlKey) {
-            graphUI.background_drag_enable = false;
-        } else {
-            graphUI.background_drag_enable = true;
-            graphUI.update();
-        }
-    }
-
-    function dragged_background(d) {
-        if (graphUI.background_drag_enable) {
-            graphUI.background_origin.x = d3.event.x;
-            graphUI.background_origin.y = d3.event.y;
-            graphUI.update();
-        }
-    }
-
-    function dragended_background(d) {
-        graphUI.update();
-    }
 
     function dragstarted_node(d) {
         graphUI.graph = Purs.interGraph.updateFocus(
@@ -585,8 +620,8 @@ module.exports = function GraphUI(graph) {
 
     function dragged_node(d) {
         graphUI.graph = Purs.interGraph.updateNodePosition(
-            { "x": Math.floor((d3.event.x - graphUI.background_origin.x) / graphUI.gridSize) * graphUI.gridSize
-            , "y": Math.floor((d3.event.y - graphUI.background_origin.y) / graphUI.gridSize) * graphUI.gridSize
+            { "x": d3.event.sourceEvent.x * graphUI.zoomAmount + graphUI.background_origin.x
+            , "y": d3.event.sourceEvent.y * graphUI.zoomAmount + graphUI.background_origin.y
             })(
             d[0])(
                 graphUI.graph
@@ -603,10 +638,10 @@ module.exports = function GraphUI(graph) {
         if (Purs.hasFocus(Purs.interGraph)(d[0])(graphUI.graph)) {
             graphUI.mouseState.clickedNode = d[0];
             graphUI.mouseState.drawingEdge = [
-                {"source": {"x": d[1].position.x + graphUI.background_origin.x,
-                            "y": d[1].position.y + graphUI.background_origin.y},
-                 "target": {"x": d3.event.x,
-                            "y": d3.event.y}}
+                {"source": {"x": d[1].position.x,
+                            "y": d[1].position.y},
+                 "target": {"x": d3.event.sourceEvent.x * graphUI.zoomAmount + graphUI.background_origin.x,
+                            "y": d3.event.sourceEvent.y * graphUI.zoomAmount + graphUI.background_origin.y}}
             ];
             graphUI.update();
         }
@@ -616,10 +651,10 @@ module.exports = function GraphUI(graph) {
         if (Purs.hasFocus(Purs.interGraph)(d[0])(graphUI.graph)) {
             graphUI.mouseState.clickedNode = d[0];
             graphUI.mouseState.drawingEdge = [
-                {"source": {"x": d[1].position.x + graphUI.background_origin.x,
-                            "y": d[1].position.y + graphUI.background_origin.y},
-                 "target": {"x": d3.event.x,
-                            "y": d3.event.y}}
+                {"source": {"x": d[1].position.x,
+                            "y": d[1].position.y},
+                 "target": {"x": d3.event.sourceEvent.x * graphUI.zoomAmount + graphUI.background_origin.x,
+                            "y": d3.event.sourceEvent.y * graphUI.zoomAmount + graphUI.background_origin.y}}
             ];
             graphUI.update();
         }
@@ -628,10 +663,9 @@ module.exports = function GraphUI(graph) {
     function dragended_halo(d) {
         if (Purs.hasFocus(Purs.interGraph)(d[0])(graphUI.graph)) {
             focusNodeId = Purs.interGraph.viewFocus(graphUI.graph).value0;
-            console.log(graphUI.background_origin);
             nearestNeighbor = Purs.getNearestNeighbor(Purs.interGraph)(
-                {"x": d3.event.x - graphUI.background_origin.x,
-                 "y": d3.event.y - graphUI.background_origin.y})(
+                {"x": d3.event.sourceEvent.x * graphUI.zoomAmount + graphUI.background_origin.x,
+                 "y": d3.event.sourceEvent.y * graphUI.zoomAmount + graphUI.background_origin.y})(
                 graphUI.graph
             ).value0;
             if (nearestNeighbor.distance < graphUI.dragDropEdgeThreshold &&
@@ -744,12 +778,16 @@ module.exports = function GraphUI(graph) {
         }
     }
 
+    function snapToGrid(position) {
+        return Math.floor(position / graphUI.gridSize) * graphUI.gridSize;
+    }
+
     graphUI.moveFocusDown = function () {
         focusNodeId = graphUI.graph.interactionState.focus.value0;
         node = graphUI.graph.nodes[focusNodeId];
         graphUI.graph = Purs.interGraph.updateNodePosition(
-            { "x": node.position.x
-            , "y": node.position.y + graphUI.gridSize
+            { "x": snapToGrid(node.position.x)
+            , "y": snapToGrid(node.position.y) + graphUI.gridSize
             })(
             focusNodeId)(
                 graphUI.graph
@@ -761,8 +799,8 @@ module.exports = function GraphUI(graph) {
         focusNodeId = graphUI.graph.interactionState.focus.value0;
         node = graphUI.graph.nodes[focusNodeId];
         graphUI.graph = Purs.interGraph.updateNodePosition(
-            { "x": node.position.x
-            , "y": node.position.y - graphUI.gridSize
+            { "x": snapToGrid(node.position.x)
+            , "y": snapToGrid(node.position.y) - graphUI.gridSize
             })(
             focusNodeId)(
                 graphUI.graph
@@ -774,8 +812,8 @@ module.exports = function GraphUI(graph) {
         focusNodeId = graphUI.graph.interactionState.focus.value0;
         node = graphUI.graph.nodes[focusNodeId];
         graphUI.graph = Purs.interGraph.updateNodePosition(
-            { "x": node.position.x - graphUI.gridSize
-            , "y": node.position.y
+            { "x": snapToGrid(node.position.x) - graphUI.gridSize
+            , "y": snapToGrid(node.position.y)
             })(
             focusNodeId)(
                 graphUI.graph
@@ -787,8 +825,8 @@ module.exports = function GraphUI(graph) {
         focusNodeId = graphUI.graph.interactionState.focus.value0;
         node = graphUI.graph.nodes[focusNodeId];
         graphUI.graph = Purs.interGraph.updateNodePosition(
-            { "x": node.position.x + graphUI.gridSize
-            , "y": node.position.y
+            { "x": snapToGrid(node.position.x) + graphUI.gridSize
+            , "y": snapToGrid(node.position.y)
             })(
             focusNodeId)(
                 graphUI.graph
