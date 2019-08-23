@@ -1,256 +1,281 @@
 module Workflow.Core
-       ( class Graph
-       , class Node
-       , class Edge
-       , emptyGraph
-       , NodeId
-       , NodeIdSet
-       , nodeIdSetFromArray
-       , insertNodeId
-       , deleteNodeId
-       , nodes
-       , createNode
-       , viewId
-       , viewParents
-       , viewChildren
-       , removeParents
-       , removeChildren
-       , replaceEdges
-       , createEdge
-       , edgeId
-       , edgeSource
-       , edgeTarget
-       , insertNode
-       , removeNode
-       , addEdge
-       , removeEdge
+       ( NodeId
+       , EdgeId
+       , class Graph
+       , withDual
+       , dualEdge
+       , _isDual
+       , _nodes
+       , _parents
+       , _children
+       , _id
+       , _subgraph
+       , _edgeId
+       , _source
+       , _target
        , lookupEdge
-       , viewSubgraph
-       , replaceSubgraph
+       , insertEdge
+       , deleteEdge
+       , deleteEdgeId
+       , lookupNode
+       , lookupChildren
+       , lookupParents
+       , lookupSiblings
+       , lookupCoparents
+       , lookupIncomingEdges
+       , lookupOutgoingEdges
+       , lookupNodeEdges
+       , allEdges
+       , insertNode
+       , deleteNode
        , glue
        , unglue
-       , lookupNode
-       , lookupNodes
-       , resolvedGraphEdges
-       , genericEncodeOpts
-       , graphToJSON
-       , graphFromJSON
-       , nodeIdSetMember
+       , lookupEdgesBetweenGraphs
        ) where
 
-import Control.Monad.Except.Trans (ExceptT)
-import Data.Array (mapMaybe, catMaybes)
-import Data.Foldable (foldl, elem)
-import Data.Generic.Rep (class Generic)
-import Data.Identity (Identity)
-import Data.List.NonEmpty (NonEmptyList)
+import Prelude
+
+import Data.Foldable (foldl, foldr, foldMap)
+import Data.Lens (Lens', Traversal', traversed, view, (^.), (^?), (.~), (%~), (?~))
+import Data.Lens.At (at)
+import Data.Map (Map)
+import Data.Map as Map
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Maybe (Maybe(..))
-import Data.Tuple (Tuple(..))
-import Effect (Effect)
-import Foreign (ForeignError)
-import Foreign.Generic (defaultOptions, genericDecodeJSON, genericEncodeJSON)
-import Foreign.Generic.Class (class GenericDecode, class GenericEncode)
-import Foreign.Generic.Types (SumEncoding)
-import Foreign.Object (Object, keys, values)
-import Foreign.Object as Object
-import Prelude (Unit, unit, ($), (>>>), map, flip, (<>), bind, pure)
-
-
-type NodeId = String
-
-type NodeIdSet = Object Unit
-
-type EdgeId = String
-
-class Node node where
-  createNode :: NodeIdSet -> NodeIdSet -> Effect node
-  viewId :: node -> NodeId
-  viewParents :: node -> NodeIdSet
-  viewChildren :: node -> NodeIdSet
-
-class Edge edge where
-  createEdge :: NodeId -> NodeId -> edge
-  edgeSource :: edge -> NodeId
-  edgeTarget :: edge -> NodeId
-
-class (Node node, Edge edge) <=
-      Graph graph node edge | graph -> node, graph -> edge where
-  emptyGraph :: graph
-  nodes :: graph -> Object node
-  lookupNode :: NodeId -> graph -> Maybe node
-  insertNode :: node -> graph -> graph
-  -- removeNode should also remove edges to/from that node
-  removeNode :: NodeId -> graph -> graph
-  lookupEdge :: NodeId -> NodeId -> graph -> Maybe edge
-  addEdge :: edge -> graph -> graph
-  removeEdge :: NodeId -> NodeId -> graph -> graph
-  viewSubgraph :: node -> graph
-  replaceSubgraph :: graph -> node -> node
-
-insertNodeId :: NodeId -> NodeIdSet -> NodeIdSet
-insertNodeId nodeId = Object.insert nodeId unit
-
-deleteNodeId :: NodeId -> NodeIdSet -> NodeIdSet
-deleteNodeId = Object.delete
-
-nodeIdSetFromArray :: Array NodeId -> NodeIdSet
-nodeIdSetFromArray nodeIdArr = Object.fromFoldable $ map (\nodeId -> (Tuple nodeId unit)) nodeIdArr
-
-emptyNodeIdSet :: NodeIdSet
-emptyNodeIdSet = Object.empty
-
-nodeIdSetMember :: NodeId -> NodeIdSet -> Boolean
-nodeIdSetMember nodeId set = elem nodeId $ keys set
-
-edgeId :: NodeId -> NodeId -> EdgeId
-edgeId source target = source <> "." <> target
-
-graphToJSON :: forall graph node edge rep.
-               Generic graph rep =>
-               GenericEncode rep =>
-               Graph graph node edge =>
-               graph -> String
-graphToJSON g =
-  genericEncodeJSON genericEncodeOpts g
-
-graphFromJSON :: forall graph node edge rep.
-                 Generic graph rep =>
-                 GenericDecode rep =>
-                 Graph graph node edge =>
-                 String -> ExceptT (NonEmptyList ForeignError) Identity graph
-graphFromJSON graphJSON = genericDecodeJSON genericEncodeOpts graphJSON
-
-
-edgesToFromNode :: forall graph node edge.
-                   Graph graph node edge =>
-                   node -> graph -> Array edge
-edgesToFromNode node g =
-  let
-    edgesToChildren = catMaybes $ map (
-      \childNodeId -> lookupEdge (viewId node) childNodeId g
-      ) $ keys $ viewChildren node
-    edgesFromParents = catMaybes $ map (
-      \parentNodeId -> lookupEdge parentNodeId (viewId node) g
-      ) $ keys $ viewParents node
-  in
-    edgesToChildren <> edgesFromParents
-
-resolveEdgeNodes :: forall graph node edge.
-                    Graph graph node edge =>
-                    edge -> graph -> Maybe { source :: node , target :: node }
-resolveEdgeNodes edge g = do
-  source <- lookupNode (edgeSource edge) g
-  target <- lookupNode (edgeTarget edge) g
-  pure { source : source, target : target }
-
-graphEdges :: forall graph node edge.
-              Graph graph node edge =>
-              graph -> Array edge
-graphEdges g = catMaybes do
-  node <- values $ nodes g
-  childId <- keys $ viewChildren node
-  pure $ lookupEdge (viewId node) childId g
-
-removeParents :: forall graph node edge.
-                 Graph graph node edge =>
-                 NodeId -> graph -> graph
-removeParents nodeId g =
-  case lookupNode nodeId g of
-    Nothing -> g
-    Just node ->
-      foldl (\graph_ parentId ->
-              removeEdge parentId nodeId graph_)
-        g
-        $ keys $ viewParents node
-
-removeChildren :: forall graph node edge.
-                  Graph graph node edge =>
-                  NodeId -> graph -> graph
-removeChildren nodeId g =
-  case lookupNode nodeId g of
-    Nothing -> g
-    Just node ->
-      foldl (\graph_ childId ->
-              removeEdge nodeId childId graph_)
-        g
-        $ keys (viewChildren node)
-
-replaceEdges :: forall graph node edge.
-                Graph graph node edge =>
-                NodeId -> Array edge -> graph -> graph
-replaceEdges nodeId edges g =
-  let
-    noEdges = (removeChildren nodeId)
-              >>>
-              (removeParents nodeId)
-              $ g
-  in
-    foldl (flip addEdge) noEdges edges
-
-resolvedGraphEdges :: forall graph node edge.
-                      Graph graph node edge =>
-                      graph -> Array { source :: node, target :: node }
-resolvedGraphEdges g =
-  mapMaybe (flip resolveEdgeNodes g) $ graphEdges g
-
-lookupNodes :: forall graph node edge.
-               Graph graph node edge =>
-               NodeIdSet -> graph -> Array node
-lookupNodes nodeIds g = mapMaybe (flip lookupNode g) $ keys nodeIds
-
--- | Take a child graph that has edges to a parent graph that are not
--- | mirrored, add the matching edges from parent graph to child graph
--- | and merge the node sets.
--- | This is used to merge a collapsed subgraph back into the main graph,
--- | and will also support breaking down and joining graphs for filtering
--- | and composing semantic networks or something :D
-glue :: forall graph node edge.
-        Graph graph node edge =>
-        graph -> graph -> graph
-glue childGraph parentGraph =
-  let
-    childNodeArray = values $ nodes childGraph
-    childGraphEdges = do
-      childNode <- childNodeArray
-      edgesToFromNode childNode childGraph
-    allNodesGraph = foldl (flip insertNode) parentGraph childNodeArray
-    allNodesEdgesGraph =
-      foldl (flip addEdge) allNodesGraph childGraphEdges
-  in
-    allNodesEdgesGraph
-
--- | Almost-inverse of glue (modulo some type conversions)
--- | TODO: property-based tests for inverse relationship (glue <<< unglue == id)
-unglue :: forall graph node edge.
-          Graph graph node edge =>
-          Array node -> graph -> { parentGraph :: graph, childGraph :: graph }
-unglue childNodes g =
-  let
-    childNodeIds = map viewId childNodes
-    childGraphEdges = do
-      childNode <- childNodes
-      edgesToFromNode childNode g
-    parentGraph = foldl (flip removeNode) g childNodeIds
-    childGraph' =
-      foldl (flip insertNode) emptyGraph childNodes
-    childGraph =
-      foldl (flip addEdge) childGraph' childGraphEdges
-  in
-    { parentGraph : parentGraph
-    , childGraph : childGraph
-    }
+import Data.UUID (UUID)
+import Data.Symbol (SProxy(..))
+import Data.Lens.Record (prop)
 
 
 ------
 -- Constants
 
 version :: String
-version = "0.001"
+version = "0.0.001"
 
-genericEncodeOpts ::
-  { unwrapSingleConstructors :: Boolean
-  , fieldTransform :: String -> String
-  , sumEncoding :: SumEncoding
-  , unwrapSingleArguments :: Boolean
-  }
-genericEncodeOpts = defaultOptions { unwrapSingleConstructors = true }
+
+------
+-- Types
+
+type NodeId = UUID
+
+type EdgeId = { source :: NodeId, target :: NodeId }
+
+class (Ord edge, Ord node) <= Graph graph node edge | graph -> node, graph -> edge, node -> graph, edge -> graph where
+  _isDual :: Lens' graph Boolean
+  _nodes :: Lens' graph (Map NodeId node)
+  _parents :: Lens' node (Map NodeId edge)
+  _children :: Lens' node (Map NodeId edge)
+  _id :: Lens' node NodeId
+  _subgraph :: Lens' node graph
+  _edgeId :: Lens' edge EdgeId
+
+-- | The dual graph is the graph with the edge directions flipped.
+-- | Using the dual representation allows the use of the symmetry of edge flipping
+-- | explicitly.
+-- |
+-- | The lookupEdge, insertEdge and deleteEdge functions respect the
+-- | current view (dual or not dual) of the graph. withDual allows running
+-- | a graph operation temprarily with the dual representation.
+withDual :: forall graph node edge. Graph graph node edge =>
+            (graph -> graph) -> graph -> graph
+withDual op graph =
+  graph
+  # _isDual %~ not
+  # op
+  # _isDual %~ not
+
+----
+-- Lenses
+
+_source :: forall graph node edge. Graph graph node edge =>
+           Lens' edge NodeId
+_source = _edgeId <<< prop (SProxy :: SProxy "source")
+
+_target :: forall graph node edge. Graph graph node edge =>
+           Lens' edge NodeId
+_target = _edgeId <<< prop (SProxy :: SProxy "target")
+
+_sourceTarget :: forall graph node edge. Graph graph node edge =>
+                 NodeId -> NodeId -> Traversal' graph (Maybe edge)
+_sourceTarget source target = _nodes <<< at source <<< traversed <<< _children <<< at target
+_targetSource :: forall graph node edge. Graph graph node edge =>
+                 NodeId -> NodeId -> Traversal' graph (Maybe edge)
+_targetSource source target = _nodes <<< at target <<< traversed <<< _parents <<< at source
+
+
+------
+-- Interface
+
+lookupNode :: forall graph node edge. Graph graph node edge =>
+              graph -> NodeId -> Maybe node
+lookupNode g nodeId = g ^. _nodes <<< at nodeId
+
+insertNode :: forall graph node edge. Graph graph node edge =>
+              node -> graph -> graph
+insertNode node graph =
+  graph
+  # ((_nodes <<< (at (node ^. _id))) ?~ node)
+  # (\graph' -> (foldr insertEdge graph' (lookupNodeEdges graph' node)))
+
+deleteNode :: forall graph node edge. Graph graph node edge =>
+              node -> graph -> graph
+deleteNode node graph =
+    graph
+    # (\graph' -> foldr deleteEdge graph' $ (node ^. _children) <> (node ^. _parents))
+    # (_nodes <<< at (node ^. _id)) .~ Nothing
+
+
+dualEdge :: forall graph node edge. Graph graph node edge =>
+            edge -> edge
+dualEdge edge =
+  edge # _edgeId .~ { source : (edge ^. _edgeId).target
+                    , target : (edge ^. _edgeId).source
+                    }
+
+lookupChildren :: forall graph node edge. Graph graph node edge =>
+                  graph -> node -> Set node
+lookupChildren g n =
+  let
+    children = case g ^. _isDual of
+      false -> n ^. _children
+      true -> n ^. _parents
+    childIds = Map.keys children
+  in
+    Set.mapMaybe (lookupNode g) $ childIds
+
+lookupParents :: forall graph node edge. Graph graph node edge =>
+                 graph -> node -> Set node
+lookupParents graph node =
+  let
+    dualG = graph # _isDual %~ not
+  in
+    lookupChildren dualG node
+
+lookupParentsOfGroup :: forall graph node edge. Graph graph node edge =>
+                        graph -> Set node -> Set node
+lookupParentsOfGroup graph nodes = foldMap (lookupParents graph) nodes
+
+lookupChildrenOfGroup :: forall graph node edge. Graph graph node edge =>
+                         graph -> Set node -> Set node
+lookupChildrenOfGroup graph nodes = lookupParentsOfGroup (graph # _isDual %~ not) nodes
+
+lookupSiblings :: forall graph node edge. Graph graph node edge =>
+                  graph -> node -> Set node
+lookupSiblings graph node = foldMap (lookupChildren graph) $ lookupParents graph node
+
+lookupCoparents :: forall graph node edge. Graph graph node edge =>
+             graph -> node -> Set node
+lookupCoparents g n =
+  let
+    dualG = g # _isDual %~ not
+  in
+    lookupSiblings dualG n
+
+lookupEdge :: forall graph node edge. Graph graph node edge =>
+              graph -> NodeId -> NodeId -> Maybe edge
+lookupEdge graph source target =
+  case graph ^. _isDual of
+    false ->              graph ^? _sourceTarget source target # join
+    true -> dualEdge <$> (graph ^? _sourceTarget target source # join)
+
+lookupOutgoingEdges :: forall graph node edge. Graph graph node edge =>
+                       graph -> node -> Set edge
+lookupOutgoingEdges graph node =
+  case graph ^. _isDual of
+    false ->              Set.fromFoldable $ Map.values $ node ^. _children
+    true -> dualEdge `Set.map` (Set.fromFoldable $ Map.values $ node ^. _parents)
+
+lookupIncomingEdges :: forall graph node edge. Graph graph node edge =>
+                       graph -> node -> Set edge
+lookupIncomingEdges graph node =
+  case graph ^. _isDual of
+    false ->              Set.fromFoldable $ Map.values $ node ^. _parents
+    true -> dualEdge `Set.map` (Set.fromFoldable $ Map.values $ node ^. _children)
+
+lookupNodeEdges :: forall graph node edge. Graph graph node edge =>
+                   graph -> node -> Set edge
+lookupNodeEdges graph node =
+  lookupOutgoingEdges graph node <> lookupIncomingEdges graph node
+
+allEdges :: forall graph node edge. Graph graph node edge =>
+            graph -> Set edge
+allEdges graph =
+  foldl (\edges node -> foldr Set.insert edges (lookupNodeEdges graph node)) Set.empty $ graph ^. _nodes
+
+insertEdge :: forall graph node edge. Graph graph node edge =>
+              edge -> graph -> graph
+insertEdge edge graph =
+  let
+    edgeId = edge ^. _edgeId
+  in
+    case graph ^. _isDual of
+      false -> graph
+               # _sourceTarget edgeId.source edgeId.target ?~ edge
+               # _targetSource edgeId.source edgeId.target ?~ edge
+      true ->  graph
+               # _sourceTarget edgeId.target edgeId.source ?~ dualEdge edge
+               # _targetSource edgeId.target edgeId.source ?~ dualEdge edge
+
+deleteEdge :: forall graph node edge. Graph graph node edge =>
+              edge -> graph -> graph
+deleteEdge = view _edgeId >>> deleteEdgeId
+
+deleteEdgeId :: forall graph node edge. Graph graph node edge =>
+             EdgeId -> graph -> graph
+deleteEdgeId edgeId graph =
+  if graph ^. _isDual
+  then graph
+       # _sourceTarget edgeId.target edgeId.source .~ Nothing
+       # _targetSource edgeId.target edgeId.source .~ Nothing
+  else graph
+       # _sourceTarget edgeId.source edgeId.target .~ Nothing
+       # _targetSource edgeId.source edgeId.target .~ Nothing
+
+
+lookupEdgesBetweenGraphs :: forall graph node edge. Graph graph node edge =>
+                            graph -> graph -> Set edge
+lookupEdgesBetweenGraphs graphA graphB =
+  let
+    edgePartiallyInGraph graph edge =
+      Map.member (edge ^. _source) (graph ^. _nodes)
+      ||
+      Map.member (edge ^. _target) (graph ^. _nodes)
+    aToFromB = Set.filter (edgePartiallyInGraph graphB) $ allEdges graphA
+    bToFromA = Set.filter (edgePartiallyInGraph graphA) $ allEdges graphB
+  in
+    aToFromB <> bToFromA
+
+-- | Take a child graph that has edges to a parent graph that are not
+-- | represented in the parent graph, add the matching edges from parent
+-- | graph to child graph and merge the node sets.
+-- | This is used to merge a collapsed subgraph back into the main graph,
+-- | and will also support splitting and joining graphs for filtering
+-- | and composing semantic networks or something :D
+glue :: forall graph node edge. Graph graph node edge =>
+        graph -> graph -> graph
+glue graphA graphB =
+  let
+    graphBNodes = Map.values $ graphB ^. _nodes
+    graphBEdges = allEdges graphB
+    edgesBetweenAB = lookupEdgesBetweenGraphs graphA graphB
+  in
+    graphA
+    # (\g -> foldr insertNode g graphBNodes)
+    # (\g -> foldr insertEdge g graphBEdges)
+    # (\g -> foldr insertEdge g edgesBetweenAB)
+
+-- | Inverse of glue (given the array of nodes that made up
+-- | the glued-in child graph)
+unglue :: forall graph node edge. Graph graph node edge =>
+          Set node -> graph -> { parentGraph :: graph, childGraph :: graph }
+unglue subgraphNodes graph =
+  let
+    parentGraph = foldr deleteNode graph subgraphNodes
+    emptyGraph = foldr deleteNode graph $ graph ^. _nodes
+    childGraph = foldr insertNode emptyGraph subgraphNodes
+  in
+    { parentGraph : parentGraph
+    , childGraph : childGraph
+    }

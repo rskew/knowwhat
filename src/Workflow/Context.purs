@@ -1,10 +1,10 @@
 module Workflow.Context where
 
-import Workflow.Core
-import Workflow.Interaction.Impl
-
-import Effect (Effect)
-import Prelude (class Monad, pure)
+--import Workflow.Core
+--import Workflow.Interaction.Impl
+--
+--import Effect (Effect)
+--import Prelude (class Monad, pure)
 
 -- | Embeds a graph in a context with side effects associated with
 -- | graph construction.

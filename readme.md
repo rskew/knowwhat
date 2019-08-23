@@ -1,5 +1,5 @@
-Prototype task tracking application. Record subtasks and collapse/expand groups, never losing track of the goals your tasks are heading towards.
+Graph drawing for knowledge engineering.
 
-To try it, run `pulp build` in the `purescript` directory to compile the purescript sources to javascript, then run `parcel ./index.html` in the top level directory to run the hotloading server at `localhost:1234` (hotloading needs work :/)
+To try it, run `bower install` then `pulp build` in the `purescript` directory to download libraries and compile the purescript sources to javascript. Then run `parcel ./index.html` in the top level directory to run the hotloading server at `localhost:1234`
 
-![example graph](https://github.com/rskew/workflow/raw/master/procrastination.png)
+![example graph](https://github.com/rskew/workflow/raw/master/exampleGraph.png)

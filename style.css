@@ -1,5 +1,19 @@
+:root {
+  --node-color: #000;
+  --node-border-color: #0001;
+  --focused-color: #fc0;
+  --highlighted-color: #08f2;
+  --invalid-color: #f662;
+  --text-field-border-color: #eeeb;
+  --edge-color: #666;
+}
+
 body {
     overflow: hidden;
+}
+
+input {
+    visibility: hidden;
 }
 
 svg {
@@ -7,7 +21,6 @@ svg {
     position: absolute;
     width: 100%;
     height: 100%;
-    background_color: rgba(255,255,255,0);
 }
 
 .nonsvg {
@@ -15,116 +28,119 @@ svg {
     position: absolute;
 }
 
-.CodeMirror {
-    border: 1px solid #eeeb;
-    height: auto;
+.text-field {
+    border: 1px solid var(--text-field-border-color);
     width: auto;
-    max-height: 200px;
-    max-width: 400px;
+    min-width: 5%;
+    min-width: 100px;
+    max-width: 100%;
+    min-height: 5%;
+    min-height: 50;
+    max-height: 100%;
     position: absolute;
-    background-color: rgba(255,255,255,.8);
-    display: flex;
-    flex-wrap: wrap;
     border-radius: 3px;
+    outline: 0px solid transparent;
+    overflow: auto;
+    white-space: pre;
+    font-family: monospace;
 }
 
-.CodeMirror-scroll {
-    height: auto;
-    width: auto;
-    max-height:200px;
-    max-width: 400px;
+foreignObject {
+    overflow: visible;
 }
 
-/* Hide green edit mode cursor when codemirror not in focus */
-.cm-fat-cursor-mark {
-    background-color: rgba(20, 255, 20, 0.0);
-}
-.CodeMirror-focused .cm-fat-cursor-mark {
-    background-color: rgba(20, 255, 20, 0.5);
+.node {
+    fill: var(--node-color);
 }
 
-circle {
-    fill: #000;
+.node.focused {
+    fill: var(--focused-color);
 }
 
-circle.node.focused {
-    fill: #fc0;
-}
+//// probably wont implement this
+//circle.node.focused.insert {
+//    fill: #909;
+//}
 
-circle.node.focused.insert {
-    fill: #909;
-}
-
-circle.node.focused.move {
-    fill: #f40;
-}
+//// probably wont implement this
+//circle.node.focused.move {
+//    fill: #f40;
+//}
 
 .nodeBorder {
-    fill: #0001;
+    fill: var(--node-border-color);
     opacity: 0.0;
 }
 
-.nodeBorder.grouped {
-    fill: #08f2;
+.nodeBorder.hovered {
+    opacity: 1.0;
+}
+
+.nodeBorder.highlighted {
+    fill: var(--highlighted-color);
     opacity: 1.0;
 }
 
 .nodeBorder.invalid {
-    fill: #f662;
+    fill: var(--invalid-color);
     opacity: 1.0;
 }
 
-.nodeBorder.clicked {
-    fill: #44f3;
-    opacity: 1.0;
-}
-
-.halo {
+.nodeHalo {
     fill: #fff0;
-    stroke: #0001;
+    stroke: var(--node-border-color);
     stroke-width: 25;
     opacity: 0.0;
 }
 
-.halo.ready {
-    stroke: #fb07;
+.nodeHalo.focused {
+    opacity: 1.0;
 }
 
-.halo.invalid {
-    stroke: #f667;
+.nodeHalo.ready {
+    stroke: var(--focused-color);
+    opacity: 0.5;
 }
 
-line {
-    stroke: #666;
+.nodeHalo.invalid {
+    stroke: var(--invalid-color);
+}
+
+.edge {
+    stroke: var(--edge-color);
     stroke-width: 1.5px;
 }
 
-line.invalid {
-    stroke: #f66;
+.edge.invalid {
+    stroke: var(--invalid-color);
     stroke-width: 1.5px;
 }
 
-line.focused {
-    stroke: #fc0;
+.edge.focused {
+    stroke: var(--focused-color);
     stroke-width: 3px;
 }
 
 .edgeBorder {
-    stroke: #0001;
+    stroke: var(--node-border-color);
     stroke-width: 25px;
     opacity: 0.0;
 }
 
-.edgeBorder.focusGroup {
-    stroke: #08f1;
-    stroke-width: 25px;
+.edgeBorder.hover {
+    opacity: 1.0;
 }
+
+//.edgeBorder.focusGroup {
+//    stroke: var(--highlight-color);
+//    stroke-width: 25px;
+//}
 
 .edgeBorder.invalid {
-    stroke: #f662;
+    stroke: var(--invalid-color);
     stroke-width: 25px;
 }
 
-line.drawing {
+.drawingEdge {
     pointer-events: none;
 }

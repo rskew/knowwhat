@@ -1,5 +1,5 @@
 {
-  "name": "purescript",
+  "name": "workflow",
   "ignore": [
     "**/.*",
     "node_modules",
@@ -8,15 +8,17 @@
   ],
   "dependencies": {
     "purescript-prelude": "^4.1.0",
-    "purescript-console": "^4.2.0",
-    "purescript-effect": "^2.0.1",
-    "purescript-ordered-collections": "^1.6.0",
-    "purescript-profunctor-lenses": "^6.2.0",
-    "purescript-foreign": "^5.0.0",
-    "purescript-foreign-generic": "^9.0.0",
-    "purescript-uuid": "^5.2.2",
+    "purescript-foreign-generic": "^7.0.0",
+    "purescript-uuid": "^6.0.0",
     "purescript-generics-rep": "^6.1.1",
-    "purescript-parsing": "^5.0.3"
+    "purescript-parsing": "^5.0.3",
+    "purescript-halogen": "4.0.0",
+    "purescript-halogen-svg": "git@github.com/rskew/purescript-halogen-svg.git#d71b1fc744c1d390558ecf9aef603257ba5f49dd",
+    "purescript-quickcheck": "^5.0.0",
+    "purescript-datetime": "^4.1.1",
+    "purescript-now": "^4.0.0",
+    "purescript-halogen-contenteditable": "git@github.com/rskew/purescript-halogen-contenteditable.git#7f7365d2249708e80ab1451c98b8d121c77f8e7c",
+    "file-saver": "^2.0.2"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"
