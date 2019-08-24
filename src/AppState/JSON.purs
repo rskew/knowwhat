@@ -1,11 +1,13 @@
 module AppState.JSON where
 
-import Prelude (bind, flip, map, pure, show, (#), ($), (<$>), (>>>))
-import AppState (AppState(..), DrawingEdge, GraphElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape)
+import Prelude (bind, flip, map, pure, show, (#), ($), (<$>), (>>>), (<>), (>>=))
+import AppState (AppState(..), DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape)
 import Workflow.UIGraph (Point2D)
 import Workflow.UIGraph.JSON
+import Workflow.Core (EdgeId)
 
 import Control.Monad.Except.Trans (ExceptT, runExceptT)
+import Data.Array ((!!))
 import Data.DateTime.Instant (Instant, instant, unInstant)
 import Data.Either (Either(..), note)
 import Data.Bifunctor (lmap)
@@ -15,7 +17,9 @@ import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe)
 import Data.Traversable (traverse)
 import Data.Time.Duration (Milliseconds(..))
+import Data.String (Pattern(..), split)
 import Data.UUID as UUID
+import Data.UUID (parseUUID)
 import Foreign (Foreign, ForeignError, renderForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericDecodeJSON, genericEncodeJSON, genericEncode, genericDecode)
@@ -64,7 +68,8 @@ instance decodeForeignPos :: Decode ForeignPos where
 newtype ForeignAppState =
   ForeignAppState
   { graph :: ForeignUIGraph
-  , textFieldShapes :: Object ForeignShape
+  , nodeTextFieldShapes :: Object ForeignShape
+  , edgeTextFieldShapes :: Object ForeignShape
   , drawingEdges :: Object ForeignDrawingEdge
   , hoveredElementId :: Maybe ForeignGraphElementId
   , windowSize :: ForeignShape
@@ -123,7 +128,7 @@ objectifyDrawingEdge drawingEdge =
                 , pos = ForeignPos drawingEdgePos
                 }
 
-objectifyGraphElementId :: GraphElementId -> ForeignGraphElementId
+objectifyGraphElementId :: HoveredElementId -> ForeignGraphElementId
 objectifyGraphElementId (NodeHaloId nodeId) = ForeignNodeHaloId $ UUID.toString nodeId
 objectifyGraphElementId (NodeBorderId nodeId) = ForeignNodeBorderId $ UUID.toString nodeId
 objectifyGraphElementId (EdgeBorderId edgeId) =
@@ -132,11 +137,17 @@ objectifyGraphElementId (EdgeBorderId edgeId) =
   , target : UUID.toString edgeId.target
   }
 
+edgeIdToString :: EdgeId -> String
+edgeIdToString edgeId = UUID.toString edgeId.source
+                        <> " "
+                        <> UUID.toString edgeId.target
+
 objectifyAppState :: AppState -> ForeignAppState
 objectifyAppState (AppState state) =
   let
     foreignGraph = objectifyUIGraph state.graph
-    foreignTextFieldShapes = objectifyMap ForeignShape UUID.toString state.textFieldShapes
+    foreignNodeTextFieldShapes = objectifyMap ForeignShape UUID.toString state.nodeTextFieldShapes
+    foreignEdgeTextFieldShapes = objectifyMap ForeignShape edgeIdToString state.edgeTextFieldShapes
     foreignDrawingEdges = objectifyMap objectifyDrawingEdge UUID.toString state.drawingEdges
     foreignHoveredElementId = objectifyGraphElementId <$> state.hoveredElementId
     foreignGraphId = UUID.toString state.graphId
@@ -146,7 +157,8 @@ objectifyAppState (AppState state) =
   in
     ForeignAppState $
     state { graph = foreignGraph
-          , textFieldShapes = foreignTextFieldShapes
+          , nodeTextFieldShapes = foreignNodeTextFieldShapes
+          , edgeTextFieldShapes = foreignEdgeTextFieldShapes
           , drawingEdges = foreignDrawingEdges
           , hoveredElementId = foreignHoveredElementId
           , windowSize = foreignWindowSize
@@ -192,7 +204,7 @@ unObjectifyDrawingEdge (ForeignDrawingEdge foreignDrawingEdge) =
            , pos : drawingEdgePos
            }
 
-unObjectifyGraphElementId :: ForeignGraphElementId -> Either String GraphElementId
+unObjectifyGraphElementId :: ForeignGraphElementId -> Either String HoveredElementId
 unObjectifyGraphElementId (ForeignNodeHaloId foreignNodeId) = NodeHaloId <$> parseUUIDEither foreignNodeId
 unObjectifyGraphElementId (ForeignNodeBorderId foreignNodeId) = NodeBorderId <$> parseUUIDEither foreignNodeId
 unObjectifyGraphElementId (ForeignEdgeBorderId (ForeignEdgeId foreignEdgeId)) = do
@@ -200,10 +212,21 @@ unObjectifyGraphElementId (ForeignEdgeBorderId (ForeignEdgeId foreignEdgeId)) = 
   target <- parseUUIDEither foreignEdgeId.target
   pure $ EdgeBorderId { source : source, target : target }
 
+parseEdgeIdEither :: String -> Either String EdgeId
+parseEdgeIdEither edgeIdStr =
+  let
+    edgeIdStrs = split (Pattern " ") edgeIdStr
+  in
+  note "Failed to parse EdgeId" do
+    sourceId <- edgeIdStrs !! 0 >>= parseUUID
+    targetId <- edgeIdStrs !! 1 >>= parseUUID
+    pure { source : sourceId, target : targetId }
+
 unObjectifyAppState :: ForeignAppState -> Either String AppState
 unObjectifyAppState (ForeignAppState foreignState) = do
   graph <- unObjectifyUIGraph foreignState.graph
-  textFieldShapes <- unObjectifyMap (\(ForeignShape x) -> Right x) parseUUIDEither foreignState.textFieldShapes
+  nodeTextFieldShapes <- unObjectifyMap (\(ForeignShape x) -> Right x) parseUUIDEither foreignState.nodeTextFieldShapes
+  edgeTextFieldShapes <- unObjectifyMap (\(ForeignShape x) -> Right x) parseEdgeIdEither foreignState.edgeTextFieldShapes
   drawingEdges <- unObjectifyMap unObjectifyDrawingEdge parseUUIDEither foreignState.drawingEdges
   hoveredElementId <- traverse unObjectifyGraphElementId foreignState.hoveredElementId
   graphId <- parseUUIDEither foreignState.graphId
@@ -212,7 +235,8 @@ unObjectifyAppState (ForeignAppState foreignState) = do
   let graphOrigin = PageSpacePos foreignGraphOrigin
   pure $ AppState $
     foreignState { graph = graph
-                 , textFieldShapes = textFieldShapes
+                 , nodeTextFieldShapes = nodeTextFieldShapes
+                 , edgeTextFieldShapes = edgeTextFieldShapes
                  , drawingEdges = drawingEdges
                  , hoveredElementId = hoveredElementId
                  , windowSize = windowSize

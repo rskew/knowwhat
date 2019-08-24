@@ -34,7 +34,7 @@ svg {
     min-width: 5%;
     min-width: 100px;
     max-width: 100%;
-    min-height: 5%;
+    min-height: 15px;
     min-height: 50;
     max-height: 100%;
     position: absolute;

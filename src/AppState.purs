@@ -66,39 +66,37 @@ instance showDragSource :: Show DragSource where
   show HaloDrag = "HaloDrag"
   show BackgroundDrag = "BackgroundDrag"
 
-data GraphElementId
+data HoveredElementId
   = NodeHaloId NodeId
   | NodeBorderId NodeId
   | EdgeBorderId EdgeId
-derive instance eqGraphElementId :: Eq GraphElementId
+derive instance eqGraphElementId :: Eq HoveredElementId
 
-newtype AppState = AppState
-                   { graph :: UIGraph
-                   , textFieldShapes :: Map NodeId Shape
-                   , drawingEdges :: Map DrawingEdgeId DrawingEdge
-                   , hoveredElementId :: Maybe GraphElementId
-                   , windowSize :: Shape
-                   , graphOrigin :: PageSpacePos
-                   , zoom :: Number
-                   , graphId :: GraphId
-                   }
+type AppStateInner =
+  { graph :: UIGraph
+  , nodeTextFieldShapes :: Map NodeId Shape
+  , edgeTextFieldShapes :: Map EdgeId Shape
+  , drawingEdges :: Map DrawingEdgeId DrawingEdge
+  , hoveredElementId :: Maybe HoveredElementId
+  , windowSize :: Shape
+  , graphOrigin :: PageSpacePos
+  , zoom :: Number
+  , graphId :: GraphId
+  }
 
-_AppState :: Lens' AppState { graph :: UIGraph
-                            , textFieldShapes :: Map NodeId Shape
-                            , drawingEdges :: Map DrawingEdgeId DrawingEdge
-                            , hoveredElementId :: Maybe GraphElementId
-                            , windowSize :: Shape
-                            , graphOrigin :: PageSpacePos
-                            , zoom :: Number
-                            , graphId :: GraphId
-                            }
+newtype AppState = AppState AppStateInner
+
+_AppState :: Lens' AppState AppStateInner
 _AppState = lens (\(AppState appState) -> appState) (\_ -> AppState)
 
 _graph :: Lens' AppState UIGraph
 _graph = _AppState <<< prop (SProxy :: SProxy "graph")
 
-_textFieldShapes :: Lens' AppState (Map NodeId Shape)
-_textFieldShapes = _AppState <<< prop (SProxy :: SProxy "textFieldShapes")
+_nodeTextFieldShapes :: Lens' AppState (Map NodeId Shape)
+_nodeTextFieldShapes = _AppState <<< prop (SProxy :: SProxy "nodeTextFieldShapes")
+
+_edgeTextFieldShapes :: Lens' AppState (Map EdgeId Shape)
+_edgeTextFieldShapes = _AppState <<< prop (SProxy :: SProxy "edgeTextFieldShapes")
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
 _drawingEdges = _AppState <<< prop (SProxy :: SProxy "drawingEdges")

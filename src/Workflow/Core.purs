@@ -17,6 +17,7 @@ module Workflow.Core
        , insertEdge
        , deleteEdge
        , deleteEdgeId
+       , modifyEdge
        , lookupNode
        , lookupChildren
        , lookupParents
@@ -35,6 +36,7 @@ module Workflow.Core
 
 import Prelude
 
+import Control.Alt ((<|>))
 import Data.Foldable (foldl, foldr, foldMap)
 import Data.Lens (Lens', Traversal', traversed, view, (^.), (^?), (.~), (%~), (?~))
 import Data.Lens.At (at)
@@ -126,13 +128,15 @@ deleteNode node graph =
     # (\graph' -> foldr deleteEdge graph' $ (node ^. _children) <> (node ^. _parents))
     # (_nodes <<< at (node ^. _id)) .~ Nothing
 
+dualEdgeId :: EdgeId -> EdgeId
+dualEdgeId edgeId = { source : edgeId.target
+                    , target : edgeId.source
+                    }
 
 dualEdge :: forall graph node edge. Graph graph node edge =>
             edge -> edge
 dualEdge edge =
-  edge # _edgeId .~ { source : (edge ^. _edgeId).target
-                    , target : (edge ^. _edgeId).source
-                    }
+  edge # _edgeId %~ dualEdgeId
 
 lookupChildren :: forall graph node edge. Graph graph node edge =>
                   graph -> node -> Set node
@@ -208,15 +212,16 @@ insertEdge :: forall graph node edge. Graph graph node edge =>
               edge -> graph -> graph
 insertEdge edge graph =
   let
-    edgeId = edge ^. _edgeId
+    edge' = if graph ^. _isDual then dualEdge edge else edge
+    edgeId = edge' ^. _edgeId
   in
-    case graph ^. _isDual of
-      false -> graph
-               # _sourceTarget edgeId.source edgeId.target ?~ edge
-               # _targetSource edgeId.source edgeId.target ?~ edge
-      true ->  graph
-               # _sourceTarget edgeId.target edgeId.source ?~ dualEdge edge
-               # _targetSource edgeId.target edgeId.source ?~ dualEdge edge
+    -- check that source and target both exist in the graph
+    case lookupNode graph edgeId.source <|> lookupNode graph edgeId.target of
+      Nothing -> graph
+      Just _ ->
+        graph
+        # _sourceTarget edgeId.source edgeId.target ?~ edge'
+        # _targetSource edgeId.source edgeId.target ?~ edge'
 
 deleteEdge :: forall graph node edge. Graph graph node edge =>
               edge -> graph -> graph
@@ -233,6 +238,15 @@ deleteEdgeId edgeId graph =
        # _sourceTarget edgeId.source edgeId.target .~ Nothing
        # _targetSource edgeId.source edgeId.target .~ Nothing
 
+modifyEdge :: forall graph node edge. Graph graph node edge =>
+              EdgeId -> (edge -> edge) -> graph -> graph
+modifyEdge edgeId f graph =
+  let
+    edgeId' = if graph ^. _isDual then dualEdgeId edgeId else edgeId
+  in
+    graph
+    # _sourceTarget edgeId'.source edgeId'.target %~ map (dualEdge >>> f >>> dualEdge)
+    # _targetSource edgeId'.source edgeId'.target %~ map (dualEdge >>> f >>> dualEdge)
 
 lookupEdgesBetweenGraphs :: forall graph node edge. Graph graph node edge =>
                             graph -> graph -> Set edge

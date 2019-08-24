@@ -24,7 +24,7 @@ import Data.Symbol (SProxy(..))
 import Data.UUID (genUUID)
 import Effect (Effect)
 import Math as Math
-import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _id, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, deleteNode, glue, insertEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
+import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _id, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, modifyEdge, deleteNode, glue, insertEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
 
 uiGraphVersion :: String
 uiGraphVersion = "0.0.0.0.0.0.1"
@@ -33,6 +33,7 @@ type Point2D = { x :: Number, y :: Number }
 
 type UIEdgeInner =
   { id :: EdgeId
+  , text :: String
   , isValid :: Boolean
   }
 newtype UIEdge = UIEdge UIEdgeInner
@@ -45,6 +46,7 @@ instance showUIEdge :: Show UIEdge where
 freshUIEdge :: EdgeId -> UIEdge
 freshUIEdge edgeId = UIEdge
                      { id : edgeId
+                     , text : ""
                      , isValid : true
                      }
 
@@ -161,8 +163,11 @@ _x = prop (SProxy :: SProxy "x")
 _y :: Lens' Point2D Number
 _y = prop (SProxy :: SProxy "y")
 
-_text :: Lens' UINode String
-_text = _UINode <<< prop (SProxy :: SProxy "text")
+_nodeText :: Lens' UINode String
+_nodeText = _UINode <<< prop (SProxy :: SProxy "text")
+
+_edgeText :: Lens' UIEdge String
+_edgeText = _UIEdge <<< prop (SProxy :: SProxy "text")
 
 _focus :: Lens' UIGraph Focus
 _focus = _UIGraph <<< prop (SProxy :: SProxy "focus")
@@ -595,6 +600,10 @@ toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
 ------
 -- Text
 
+updateEdgeText :: EdgeId -> String -> UIGraph -> UIGraph
+updateEdgeText edgeId newText graph =
+  modifyEdge edgeId (_edgeText .~ newText) graph
+
 graphTitle :: UIGraph -> Maybe String
 graphTitle graph =
   List.head titles >>= String.stripPrefix titlePattern
@@ -602,7 +611,7 @@ graphTitle graph =
     nodesText =
       graph ^. _nodes
       # Map.values
-      <#> view _text
+      <#> view _nodeText
       <#> String.trim
     titlePattern = (Pattern "Title: ")
     titles = List.filter (String.contains titlePattern) nodesText

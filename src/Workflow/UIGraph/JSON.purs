@@ -55,6 +55,7 @@ instance decodeForeignEdgeId :: Decode ForeignEdgeId where
 newtype ForeignUIEdge =
   ForeignUIEdge
   { id :: ForeignEdgeId
+  , text :: String
   , isValid :: Boolean
   }
 derive instance genericForeignUIEdge :: Generic ForeignUIEdge _

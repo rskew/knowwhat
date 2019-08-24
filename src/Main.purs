@@ -62,7 +62,7 @@ demo = do
                          , children : Map.empty
                          , subgraph : emptyUIGraph
                          })
-    # insertNode (UINode { text: "thingo"
+    # insertNode (UINode { text: ""
                          , isValid: true
                          , position : { x : 205.0
                                       , y : 100.0
@@ -85,11 +85,13 @@ demo = do
     # insertEdge (UIEdge { id : { source : thingoId
                                 , target : goofusId
                                 }
+                         , text : ""
                          , isValid : false
                          })
     # insertEdge (UIEdge  { id : { source : titleId
                                  , target : goofusId
                                  }
+                          , text : "hehehe"
                           , isValid : false
                           })
     # _highlighted %~ Set.insert thingoId
