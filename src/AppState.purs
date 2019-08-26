@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.Maybe (Maybe)
 import Data.Symbol (SProxy(..))
 import Data.UUID (UUID)
+import Web.HTML.HTMLElement as WHE
 import Workflow.Core (NodeId, EdgeId, _nodes, _source, _target)
 import Workflow.UIGraph (Point2D, UIEdge, UIGraph, _pos)
 
@@ -27,17 +28,20 @@ newtype GraphSpacePos = GraphSpacePos Point2D
 -- | a mouse position, as distinct from a position in graph space.
 newtype PageSpacePos = PageSpacePos Point2D
 
-toGraphSpace :: PageSpacePos -> Number -> PageSpacePos -> GraphSpacePos
-toGraphSpace (PageSpacePos graphOrigin) zoom (PageSpacePos pagePos) =
-  GraphSpacePos $ { x : (pagePos.x - graphOrigin.x) * zoom
-                  , y : (pagePos.y - graphOrigin.y) * zoom
+toGraphSpace :: WHE.DOMRect -> PageSpacePos -> Number -> PageSpacePos -> GraphSpacePos
+toGraphSpace boundingRect (PageSpacePos graphOrigin) zoom (PageSpacePos pagePos) =
+  GraphSpacePos $ { x : (pagePos.x - boundingRect.left - graphOrigin.x) * zoom
+                  , y : (pagePos.y - boundingRect.top - graphOrigin.y) * zoom
                   }
 
-toPageSpace :: PageSpacePos -> Number -> GraphSpacePos -> PageSpacePos
-toPageSpace (PageSpacePos graphOrigin) zoom (GraphSpacePos graphPos) =
-  PageSpacePos $ { x : (graphPos.x + graphOrigin.x) / zoom
-                 , y : (graphPos.y + graphOrigin.y) / zoom
-                 }
+toPageSpace :: WHE.DOMRect -> Number -> GraphSpacePos -> PageSpacePos
+toPageSpace boundingRect zoom (GraphSpacePos graphPos) =
+  let
+    graphOrigin = { x : boundingRect.left, y : boundingRect.top }
+  in
+    PageSpacePos $ { x : (graphPos.x + boundingRect.left + graphOrigin.x) / zoom
+                   , y : (graphPos.y + boundingRect.top + graphOrigin.y) / zoom
+                   }
 
 type Edge = { source :: NodeId
             , target :: NodeId
@@ -55,8 +59,8 @@ type DrawingEdgeId = NodeId
 drawingEdgeKey :: DrawingEdgeId -> String
 drawingEdgeKey id = "DrawingEdge_" <> show id
 
-data DragSource =
-    NodeDrag
+data DragSource
+  = NodeDrag
   | HaloDrag
   | BackgroundDrag
 derive instance eqDragSource :: Eq DragSource
@@ -78,10 +82,9 @@ type AppStateInner =
   , edgeTextFieldShapes :: Map EdgeId Shape
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId :: Maybe HoveredElementId
-  , windowSize :: Shape
+  , boundingRect :: WHE.DOMRect
   , graphOrigin :: PageSpacePos
   , zoom :: Number
-  , graphId :: GraphId
   }
 
 newtype AppState = AppState AppStateInner
@@ -109,11 +112,14 @@ _graphNodePos :: NodeId -> Traversal' AppState GraphSpacePos
 _graphNodePos nodeId =
   _graph <<<_nodes <<< at nodeId <<< traversed <<< _pos <<< _coerceToGraphSpace
 
-_graphOrigin :: Lens' AppState PageSpacePos
-_graphOrigin = _AppState <<< prop (SProxy :: SProxy "graphOrigin")
-
 _zoom :: Lens' AppState Number
 _zoom = _AppState <<< prop (SProxy :: SProxy "zoom")
+
+_boundingRect :: Lens' AppState WHE.DOMRect
+_boundingRect  = _AppState <<< prop (SProxy :: SProxy "boundingRect")
+
+_graphOrigin :: Lens' AppState PageSpacePos
+_graphOrigin  = _AppState <<< prop (SProxy :: SProxy "graphOrigin")
 
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)

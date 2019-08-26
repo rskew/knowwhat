@@ -24,6 +24,7 @@ import Foreign (Foreign, ForeignError, renderForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericDecodeJSON, genericEncodeJSON, genericEncode, genericDecode)
 import Foreign.Object (Object)
+import Web.HTML.HTMLElement as WHE
 
 
 -- | A whole bunch of boilerplate to use generic JSON serialisation/deserialisation
@@ -72,10 +73,9 @@ newtype ForeignAppState =
   , edgeTextFieldShapes :: Object ForeignShape
   , drawingEdges :: Object ForeignDrawingEdge
   , hoveredElementId :: Maybe ForeignGraphElementId
-  , windowSize :: ForeignShape
+  , boundingRect :: WHE.DOMRect
   , graphOrigin :: ForeignPos
   , zoom :: Number
-  , graphId :: ForeignNodeId
   }
 derive instance genericForeignAppState :: Generic ForeignAppState _
 instance encodeForeignAppState :: Encode ForeignAppState where
@@ -150,8 +150,6 @@ objectifyAppState (AppState state) =
     foreignEdgeTextFieldShapes = objectifyMap ForeignShape edgeIdToString state.edgeTextFieldShapes
     foreignDrawingEdges = objectifyMap objectifyDrawingEdge UUID.toString state.drawingEdges
     foreignHoveredElementId = objectifyGraphElementId <$> state.hoveredElementId
-    foreignGraphId = UUID.toString state.graphId
-    foreignWindowSize = ForeignShape state.windowSize
     PageSpacePos graphOrigin = state.graphOrigin
     foreignGraphOrigin = ForeignPos graphOrigin
   in
@@ -161,9 +159,7 @@ objectifyAppState (AppState state) =
           , edgeTextFieldShapes = foreignEdgeTextFieldShapes
           , drawingEdges = foreignDrawingEdges
           , hoveredElementId = foreignHoveredElementId
-          , windowSize = foreignWindowSize
           , graphOrigin = foreignGraphOrigin
-          , graphId = foreignGraphId
           }
 
 objectifyAppStateMeta :: AppStateMeta -> ForeignAppStateMeta
@@ -229,8 +225,6 @@ unObjectifyAppState (ForeignAppState foreignState) = do
   edgeTextFieldShapes <- unObjectifyMap (\(ForeignShape x) -> Right x) parseEdgeIdEither foreignState.edgeTextFieldShapes
   drawingEdges <- unObjectifyMap unObjectifyDrawingEdge parseUUIDEither foreignState.drawingEdges
   hoveredElementId <- traverse unObjectifyGraphElementId foreignState.hoveredElementId
-  graphId <- parseUUIDEither foreignState.graphId
-  let ForeignShape windowSize = foreignState.windowSize
   let ForeignPos foreignGraphOrigin = foreignState.graphOrigin
   let graphOrigin = PageSpacePos foreignGraphOrigin
   pure $ AppState $
@@ -239,9 +233,7 @@ unObjectifyAppState (ForeignAppState foreignState) = do
                  , edgeTextFieldShapes = edgeTextFieldShapes
                  , drawingEdges = drawingEdges
                  , hoveredElementId = hoveredElementId
-                 , windowSize = windowSize
                  , graphOrigin = graphOrigin
-                 , graphId = graphId
                  }
 
 

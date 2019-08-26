@@ -37,6 +37,7 @@ module Workflow.Core
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Monad.Free (Free)
 import Data.Foldable (foldl, foldr, foldMap)
 import Data.Lens (Lens', Traversal', traversed, view, (^.), (^?), (.~), (%~), (?~))
 import Data.Lens.At (at)
@@ -88,7 +89,8 @@ withDual op graph =
   # op
   # _isDual %~ not
 
-----
+
+------
 -- Lenses
 
 _source :: forall graph node edge. Graph graph node edge =>

@@ -4,28 +4,48 @@
   --focused-color: #fc0;
   --highlighted-color: #08f2;
   --invalid-color: #f662;
-  --text-field-border-color: #eeeb;
+  --text-field-border-color: #dddc;
   --edge-color: #666;
+}
+
+html {
+    height: 100%;
+    width: 100%;
 }
 
 body {
     overflow: hidden;
+    margin: 0;
+    height: 100%;
+    width: 100%;
 }
 
 input {
     visibility: hidden;
 }
 
+.pane {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    width: 100%;
+}
+
+.paneDivider {
+    width: 20px;
+    background-color: var(--text-field-border-color);
+    height: 100%;
+}
+
 svg {
     z-index: -1;
-    position: absolute;
-    width: 100%;
     height: 100%;
+    width: 100%;
 }
 
 .nonsvg {
     z-index: 1;
-    position: absolute;
+    //position: absolute;
 }
 
 .text-field {
@@ -35,7 +55,6 @@ svg {
     min-width: 100px;
     max-width: 100%;
     min-height: 15px;
-    min-height: 50;
     max-height: 100%;
     position: absolute;
     border-radius: 3px;

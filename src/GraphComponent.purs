@@ -2,7 +2,7 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState(..), DrawingEdge, DrawingEdgeId, HoveredElementId(..), GraphId, GraphSpacePos(..), PageSpacePos(..), Shape, _AppState, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _graphOrigin, _zoom, _nodeTextFieldShapes, _edgeTextFieldShapes, drawingEdgeKey, edgeIdStr, toGraphSpace, appStateVersion)
+import AppState (AppState(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _AppState, _drawingEdgePos, _drawingEdges, _edgeTextFieldShapes, _graph, _graphNodePos, _graphOrigin, _nodeTextFieldShapes, _zoom, _boundingRect, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.JSON (appStateFromJSON, appStateToJSON)
 import ContentEditable.Component as ContentEditable
 import Control.Monad.Except.Trans (runExceptT)
@@ -48,6 +48,7 @@ import Web.HTML.Event.EventTypes as WHET
 import Web.HTML.HTMLDocument (HTMLDocument)
 import Web.HTML.HTMLDocument as HTMLDocument
 import Web.HTML.HTMLInputElement as WHIE
+import Web.HTML.HTMLElement as WHE
 import Web.HTML.Window as WHW
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KET
@@ -86,7 +87,7 @@ defaultTextFieldShape = { width : 100.0, height : 50.0 }
 maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
-initialState :: { graphId :: GraphId, windowSize :: Shape, graph :: UIGraph } -> AppState
+initialState :: { boundingRect :: WHE.DOMRect, graph :: UIGraph } -> AppState
 initialState inputs = AppState
   { graph : inputs.graph
   , nodeTextFieldShapes : (\_ -> defaultTextFieldShape) <$> inputs.graph ^. _nodes
@@ -95,17 +96,15 @@ initialState inputs = AppState
                             `Set.map` allEdges inputs.graph
   , drawingEdges : Map.empty
   , hoveredElementId : Nothing
-  , windowSize : inputs.windowSize
+  , boundingRect : inputs.boundingRect
   , graphOrigin : PageSpacePos { x : 0.0, y : 0.0 }
   , zoom : 1.0
-  , graphId : inputs.graphId
   }
 
-data Query a =
-    PreventDefault WE.Event (Query a)
+data Query a
+  = PreventDefault WE.Event (Query a)
   | StopPropagation WE.Event (Query a)
   | Init a
-  | ResizeWindow Shape a
   | BackgroundDragStart PageSpacePos ME.MouseEvent a
   | BackgroundDragMove Drag.DragEvent PageSpacePos a
   | NodeDragStart NodeId GraphSpacePos ME.MouseEvent a
@@ -126,12 +125,18 @@ data Query a =
   | FetchLocalFile WE.Event a
   | LoadLocalFile FileReader.FileReader WE.Event (H.SubscribeStatus -> a)
   | SaveLocalFile a
+  | UpdateBoundingRect a
   | Keypress KE.KeyboardEvent (H.SubscribeStatus -> a)
   | DoNothing a
 
-data Message = Message Unit
+data Message
+  = Focused Focus
+  | DrawEdge DrawingEdge
+  | MappingMode
 
-type Input = { graphId :: GraphId, windowSize :: Shape, graph :: UIGraph }
+type Input = { boundingRect :: WHE.DOMRect
+             , graph :: UIGraph
+             }
 
 data Slot
   = NodeTextField NodeId
@@ -145,7 +150,7 @@ graph =
     { initialState : initialState
     , render : render
     , eval : eval
-    , receiver : HE.input ResizeWindow <<< _.windowSize
+    , receiver : const Nothing
     , initializer : Just $ H.action Init
     , finalizer : Nothing
     }
@@ -431,14 +436,15 @@ graph =
                      $ Array.fromFoldable $ Map.values state.drawingEdges
       PageSpacePos graphOrigin = state.graphOrigin
     in
-      HH.div_
+      HH.div
+      [ HP.ref (H.RefLabel "svg") ]
       [ SE.svg
         [ SA.viewBox
           -- scale then shift
           ( - graphOrigin.x * state.zoom )
           ( - graphOrigin.y * state.zoom )
-          ( state.windowSize.width * state.zoom )
-          ( state.windowSize.height * state.zoom )
+          ( state.boundingRect.width * state.zoom )
+          ( state.boundingRect.height * state.zoom )
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
                                $ H.action $ BackgroundDragStart state.graphOrigin e
@@ -474,6 +480,7 @@ graph =
       eval q
 
     Init next -> next <$ do
+      eval $ H.action UpdateBoundingRect
       -- Update foreignObject wrapper sizes for the initial text
       AppState state <- H.get
       for_ (state.graph ^. _nodes) \node -> do
@@ -483,10 +490,6 @@ graph =
       -- Add keyboard event listener to body
       document <- H.liftEffect $ WHW.document =<< WH.window
       H.subscribe $ ES.eventSource (attachKeydownListener document) (Just <<< H.request <<< Keypress)
-
-    ResizeWindow windowSize next -> next <$ do
-      AppState state <- H.get
-      H.put $ AppState $ state { windowSize = windowSize }
 
     NodeTextInput nodeId (ContentEditable.TextUpdate text) next -> next <$ do
       -- Update foreignObject wrapper shape to fit content.
@@ -543,7 +546,7 @@ graph =
       AppState state <- H.get
       let
         mouseGraphPos = mouseEventPosition mouseEvent
-                        # toGraphSpace state.graphOrigin state.zoom
+                        # toGraphSpace state.boundingRect state.graphOrigin state.zoom
         drawingEdgeSourceId = drawingEdgeId
       H.modify_ $ (_drawingEdges <<< at drawingEdgeId ?~ { pos : mouseGraphPos
                                                          , source : drawingEdgeSourceId
@@ -554,7 +557,7 @@ graph =
     EdgeDrawMove (Drag.Move _ dragData) drawingEdgeId next -> next <$ do
       AppState state <- H.get
       let dragGraphPos = PageSpacePos { x : dragData.x, y : dragData.y }
-                         # toGraphSpace state.graphOrigin state.zoom
+                         # toGraphSpace state.boundingRect state.graphOrigin state.zoom
       H.modify_ $ _drawingEdgePos drawingEdgeId .~ dragGraphPos
 
     EdgeDrawMove (Drag.Done _) drawingEdgeId next -> next <$ do
@@ -578,7 +581,7 @@ graph =
       newNode <- H.liftEffect freshUINode
       AppState state <- H.get
       let
-        GraphSpacePos newPos = mouseEventPosition mouseEvent # toGraphSpace state.graphOrigin state.zoom
+        GraphSpacePos newPos = mouseEventPosition mouseEvent # toGraphSpace state.boundingRect state.graphOrigin state.zoom
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
       H.modify_ $ (_graph %~ insertNode newNode')
@@ -641,10 +644,6 @@ graph =
                          { x : newGraphOriginDim mousePagePos.x graphOrigin.x
                          , y : newGraphOriginDim mousePagePos.y graphOrigin.y
                          }
-      let
-        PageSpacePos asdf = newGraphOrigin
-        GraphSpacePos mpgso = toGraphSpace (PageSpacePos mousePagePos) state.zoom state.graphOrigin
-        GraphSpacePos mpgsn = toGraphSpace (PageSpacePos mousePagePos) newZoom newGraphOrigin
       H.modify_
         $ (_zoom .~ newZoom)
         >>> (_graphOrigin .~ newGraphOrigin)
@@ -692,6 +691,12 @@ graph =
         title = fromMaybe "untitled" $ (graphTitle (state ^. _graph))
       H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
 
+    UpdateBoundingRect next -> next <$ runMaybeT do
+      svgElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "svg")
+      svgRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect svgElement
+      lift $ H.modify_ $ _boundingRect .~ svgRect
+      lift $ H.liftEffect $ log "updating bounding rect"
+
     Keypress keyboardEvent reply -> do
       H.liftEffect $ log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
@@ -710,6 +715,8 @@ graph =
           eval $ DeleteFocus unit
         "Escape" ->
           eval $ FocusOn NoFocus unit
+        "m" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.raise MappingMode
         -- TODO: decide if grouping/ungrouping is useful for ologs
         --"s" -> H.modify_ $ _graph %~ toggleHighlightFocus
         --" " -> H.modify_ $ _graph %~ toggleGroupExpand
