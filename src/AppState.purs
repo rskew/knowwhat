@@ -12,6 +12,8 @@ import Data.UUID (UUID)
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (NodeId, EdgeId, _nodes, _source, _target)
 import Workflow.UIGraph (Point2D, UIEdge, UIGraph, _pos)
+--import Workflow.UIGraph.UIGraphOp (UIGraphOp)
+--import Undoable (Undoable, _current)
 
 
 appStateVersion :: String
@@ -76,7 +78,10 @@ data HoveredElementId
   | EdgeBorderId EdgeId
 derive instance eqGraphElementId :: Eq HoveredElementId
 
+--type UndoableUIGraph = Undoable UIGraph (UIGraphOp Unit)
+
 type AppStateInner =
+  --{ graph :: UndoableUIGraph
   { graph :: UIGraph
   , nodeTextFieldShapes :: Map NodeId Shape
   , edgeTextFieldShapes :: Map EdgeId Shape
@@ -93,6 +98,7 @@ _AppState :: Lens' AppState AppStateInner
 _AppState = lens (\(AppState appState) -> appState) (\_ -> AppState)
 
 _graph :: Lens' AppState UIGraph
+--_graph = _AppState <<< prop (SProxy :: SProxy "graph") <<< _current
 _graph = _AppState <<< prop (SProxy :: SProxy "graph")
 
 _nodeTextFieldShapes :: Lens' AppState (Map NodeId Shape)

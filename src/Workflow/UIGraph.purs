@@ -4,18 +4,23 @@ module Workflow.UIGraph where
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Monad.Free (Free, hoistFree, liftF, resume)
 import Data.Array (sortWith, (!!), null)
 import Data.Array as Array
+import Data.Either (Either(..))
+import Data.Group (class Group)
 import Data.Foldable (length, class Foldable, maximumBy, minimumBy, elem, foldr)
 import Data.Function (on)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', lens, traversed, toListOf, view, (^.), (.~), (%~))
 import Data.Lens.Record (prop)
+import Data.Lens.At (at)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Monoid.Action (class Action)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String (Pattern(..))
@@ -24,7 +29,7 @@ import Data.Symbol (SProxy(..))
 import Data.UUID (genUUID)
 import Effect (Effect)
 import Math as Math
-import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _id, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, modifyEdge, deleteNode, glue, insertEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
+import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _id, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, modifyEdge, deleteNode, glue, insertEdge, deleteEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
 
 uiGraphVersion :: String
 uiGraphVersion = "0.0.0.0.0.0.1"

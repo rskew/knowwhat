@@ -18,7 +18,8 @@
     "purescript-datetime": "^4.1.1",
     "purescript-now": "^4.0.0",
     "purescript-halogen-contenteditable": "git@github.com/rskew/purescript-halogen-contenteditable.git#7f7365d2249708e80ab1451c98b8d121c77f8e7c",
-    "file-saver": "^2.0.2"
+    "file-saver": "^2.0.2",
+    "purescript-group": "^4.1.1"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"
