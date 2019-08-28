@@ -1,26 +1,20 @@
 module Workflow.UIGraph where
 
-
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Monad.Free (Free, hoistFree, liftF, resume)
 import Data.Array (sortWith, (!!), null)
 import Data.Array as Array
-import Data.Either (Either(..))
-import Data.Group (class Group)
 import Data.Foldable (length, class Foldable, maximumBy, minimumBy, elem, foldr)
 import Data.Function (on)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', lens, traversed, toListOf, view, (^.), (.~), (%~))
 import Data.Lens.Record (prop)
-import Data.Lens.At (at)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
-import Data.Monoid.Action (class Action)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.String (Pattern(..))
@@ -29,7 +23,8 @@ import Data.Symbol (SProxy(..))
 import Data.UUID (genUUID)
 import Effect (Effect)
 import Math as Math
-import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _id, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, modifyEdge, deleteNode, glue, insertEdge, deleteEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
+import Workflow.Core (class Graph, EdgeId, NodeId, _edgeId, _nodeId, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, deleteNode, glue, insertEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
+
 
 uiGraphVersion :: String
 uiGraphVersion = "0.0.0.0.0.0.1"
@@ -119,7 +114,7 @@ instance graphUIGraph :: Graph UIGraph UINode UIEdge where
   _nodes = _nodesImpl
   _parents = _parentsImpl
   _children = _childrenImpl
-  _id = _idImpl
+  _nodeId = _nodeIdImpl
   _subgraph = _subgraphImpl
   _edgeId = _edgeIdImpl
 
@@ -144,8 +139,8 @@ _parentsImpl = _UINode <<< prop (SProxy :: SProxy "parents")
 _childrenImpl :: Lens' UINode (Map NodeId UIEdge)
 _childrenImpl = _UINode <<< prop (SProxy :: SProxy "children")
 
-_idImpl :: Lens' UINode NodeId
-_idImpl = _UINode <<< prop (SProxy :: SProxy "id")
+_nodeIdImpl :: Lens' UINode NodeId
+_nodeIdImpl = _UINode <<< prop (SProxy :: SProxy "id")
 
 _subgraphImpl :: Lens' UINode UIGraph
 _subgraphImpl = _UINode <<< prop (SProxy :: SProxy "subgraph")
@@ -199,11 +194,11 @@ removeFocus graph =
           let
             maybeNewFocus =     Set.findMin (lookupParents graph focusNode)
                             <|> Set.findMin (lookupChildren graph focusNode)
-            newFocus = fromMaybe NoFocus $ (FocusNode <<< view _id) <$> maybeNewFocus
+            newFocus = fromMaybe NoFocus $ (FocusNode <<< view _nodeId) <$> maybeNewFocus
           in
             graph
             # _focus .~ newFocus
-            # _highlighted %~ Set.delete (focusNode ^. _id)
+            # _highlighted %~ Set.delete (focusNode ^. _nodeId)
             # deleteNode focusNode
 
 edgeInFocusGroup :: UIGraph -> UIEdge -> Boolean
@@ -330,7 +325,7 @@ changeFocusLeftRight dir graph =
               MoveRight -> sortedByX # Array.findIndex (node # (<=) `on` viewX)
             sortedByX !! nextNodeIndex
         in
-          graph # _focus .~ FocusNode (nextNode ^. _id)
+          graph # _focus .~ FocusNode (nextNode ^. _nodeId)
     FocusEdge edgeId focusGroup ->
       let
         newFocus = if not $ null focusGroup
@@ -391,16 +386,16 @@ newChildOfFocus offset graph = case graph ^. _focus of
     Just node ->
       let
         newChildPos = newChildPosition offset node graph
-        newChildParents = Set.fromFoldable $ [node ^. _id]
+        newChildParents = Set.fromFoldable $ [node ^. _nodeId]
       in do
         newChildNode' <- freshUINode
         let
           newChildNode = newChildNode' # _pos .~ newChildPos
-          newEdge = freshUIEdge { source : nodeId, target : newChildNode ^. _id }
+          newEdge = freshUIEdge { source : nodeId, target : newChildNode ^. _nodeId }
         pure $ graph
              # insertNode newChildNode
              # insertEdge newEdge
-             # _focus .~ FocusNode (newChildNode ^. _id)
+             # _focus .~ FocusNode (newChildNode ^. _nodeId)
   _ -> pure graph
 
 newParentOfFocus :: Point2D -> UIGraph -> Effect UIGraph
@@ -436,7 +431,7 @@ unglueUI nodes graph =
     unglued = unglue nodes graph
     propagateHighlighted subgraph =
       subgraph # _highlighted .~ Set.filter
-        (\nodeId -> List.elem nodeId (toListOf (_nodes <<< traversed <<< _id) subgraph))
+        (\nodeId -> List.elem nodeId (toListOf (_nodes <<< traversed <<< _nodeId) subgraph))
         (graph ^. _highlighted)
     propagateFocus subgraph = subgraph # _focus .~
       case graph ^. _focus of
@@ -497,8 +492,8 @@ groupHighlighted graph =
         subgraph = unglued.childGraph # _highlighted .~ Set.empty
         subgraphEdgeToGroupNode edge =
           if Map.member (edge ^. _source) (subgraph ^. _nodes)
-          then edge # _edgeId .~ { source : groupNode ^. _id, target : edge ^. _target }
-          else edge # _edgeId .~ { source : edge ^. _source, target : groupNode ^. _id }
+          then edge # _edgeId .~ { source : groupNode ^. _nodeId, target : edge ^. _target }
+          else edge # _edgeId .~ { source : edge ^. _source, target : groupNode ^. _nodeId }
         edgesToGroupNode = Set.map subgraphEdgeToGroupNode edgesBetween
         -- Insert subgraph into groupNode
         groupNode' = groupNode # _subgraph .~ subgraph
@@ -507,7 +502,7 @@ groupHighlighted graph =
         unglued.parentGraph
         # insertNode groupNode'
         # (\g -> foldr insertEdge g edgesToGroupNode)
-        # _focus .~ FocusNode (groupNode' ^. _id)
+        # _focus .~ FocusNode (groupNode' ^. _nodeId)
 
 --  case do
 --    defaultGroupNodeId <- Array.index (keys (viewHighlighted g)) 0
@@ -605,10 +600,6 @@ toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
 ------
 -- Text
 
-updateEdgeText :: EdgeId -> String -> UIGraph -> UIGraph
-updateEdgeText edgeId newText graph =
-  modifyEdge edgeId (_edgeText .~ newText) graph
-
 graphTitle :: UIGraph -> Maybe String
 graphTitle graph =
   List.head titles >>= String.stripPrefix titlePattern
@@ -636,4 +627,4 @@ getNearestNeighbor point graph =
                    + (Math.pow (point.y - (node ^. _pos).y) 2.0)
   in do
     closestNode <- minimumBy (comparing distanceToPoint) $ graph ^. _nodes
-    pure { nodeId : closestNode ^. _id, distance : distanceToPoint closestNode }
+    pure { nodeId : closestNode ^. _nodeId, distance : distanceToPoint closestNode }

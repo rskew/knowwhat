@@ -8,7 +8,7 @@ module Workflow.Core
        , _nodes
        , _parents
        , _children
-       , _id
+       , _nodeId
        , _subgraph
        , _edgeId
        , _source
@@ -69,7 +69,7 @@ class (Ord edge, Ord node) <= Graph graph node edge | graph -> node, graph -> ed
   _nodes :: Lens' graph (Map NodeId node)
   _parents :: Lens' node (Map NodeId edge)
   _children :: Lens' node (Map NodeId edge)
-  _id :: Lens' node NodeId
+  _nodeId :: Lens' node NodeId
   _subgraph :: Lens' node graph
   _edgeId :: Lens' edge EdgeId
 
@@ -119,7 +119,7 @@ insertNode :: forall graph node edge. Graph graph node edge =>
               node -> graph -> graph
 insertNode node graph =
   graph
-  # ((_nodes <<< (at (node ^. _id))) ?~ node)
+  # ((_nodes <<< (at (node ^. _nodeId))) ?~ node)
   # (\graph' -> (foldr insertEdge graph' (lookupNodeEdges graph' node)))
 
 deleteNode :: forall graph node edge. Graph graph node edge =>
@@ -127,7 +127,7 @@ deleteNode :: forall graph node edge. Graph graph node edge =>
 deleteNode node graph =
     graph
     # (\graph' -> foldr deleteEdge graph' $ (node ^. _children) <> (node ^. _parents))
-    # (_nodes <<< at (node ^. _id)) .~ Nothing
+    # (_nodes <<< at (node ^. _nodeId)) .~ Nothing
 
 dualEdgeId :: EdgeId -> EdgeId
 dualEdgeId edgeId = { source : edgeId.target
@@ -179,11 +179,11 @@ lookupCoparents g n =
     lookupSiblings dualG n
 
 lookupEdge :: forall graph node edge. Graph graph node edge =>
-              graph -> NodeId -> NodeId -> Maybe edge
-lookupEdge graph source target =
+              graph -> EdgeId -> Maybe edge
+lookupEdge graph edgeId =
   case graph ^. _isDual of
-    false ->              graph ^? _sourceTarget source target # join
-    true -> dualEdge <$> (graph ^? _sourceTarget target source # join)
+    false ->              graph ^? _sourceTarget edgeId.source edgeId.target # join
+    true -> dualEdge <$> (graph ^? _sourceTarget edgeId.target edgeId.source # join)
 
 lookupOutgoingEdges :: forall graph node edge. Graph graph node edge =>
                        graph -> node -> Set edge

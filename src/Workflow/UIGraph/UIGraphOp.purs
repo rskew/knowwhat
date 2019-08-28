@@ -8,13 +8,13 @@ import Data.Group (class Group)
 import Data.Lens (traversed, (^.), (.~))
 import Data.Lens.At (at)
 import Data.Monoid.Action (class Action)
-import Workflow.Core (_edgeId, _id, _nodes, deleteEdge, deleteNode, insertEdge, insertNode, modifyEdge)
+import Workflow.Core (_edgeId, _nodeId, _nodes, deleteEdge, deleteNode, insertEdge, insertNode, modifyEdge)
 import Workflow.UIGraph (UIGraph, UINode, UIEdge, Point2D, _pos, _nodeText, _edgeText)
 
-------
--- Free Monad DSL
---
--- Mostly for supporting Undoable
+
+-- | Free Monad DSL
+-- |
+-- |Mostly for supporting Undoable
 
 data UIGraphOpF next
   = InsertNode UINode next
@@ -24,18 +24,19 @@ data UIGraphOpF next
   | MoveNode UINode Point2D Point2D next
   | UpdateNodeText UINode String String next
   | UpdateEdgeText UIEdge String String next
-  | NoOp next
 derive instance functorUIGraphOpF :: Functor UIGraphOpF
 
 type UIGraphOpM = Free UIGraphOpF
 
 newtype UIGraphOp a = UIGraphOp (UIGraphOpM a)
 
--- | Group instance required by Undoable
-instance semigroupUIGraphOp :: Semigroup (UIGraphOp a) where
-  append (UIGraphOp op1) (UIGraphOp op2) = UIGraphOp $ op1 >>= \_ -> op2
+instance semigroupUIGraphOp :: Semigroup a => Semigroup (UIGraphOp a) where
+  append (UIGraphOp op1) (UIGraphOp op2) = UIGraphOp $ op1 <> op2
+
 instance monoidUIGraphOp :: Monoid a => Monoid (UIGraphOp a) where
-  mempty = UIGraphOp $ liftF $ NoOp mempty
+  mempty = UIGraphOp $ mempty
+
+-- | Group instance required by Undoable
 instance groupUIGraphOp :: Monoid a => Group (UIGraphOp a) where
   ginverse (UIGraphOp op) = UIGraphOp $ (hoistFree invert) op where
     invert :: UIGraphOpF ~> UIGraphOpF
@@ -47,7 +48,6 @@ instance groupUIGraphOp :: Monoid a => Group (UIGraphOp a) where
       MoveNode node from to next       -> MoveNode node to from next
       UpdateNodeText node from to next -> UpdateNodeText node to from next
       UpdateEdgeText edge from to next -> UpdateEdgeText edge to from next
-      NoOp next                        -> NoOp next
 
 
 ------
@@ -69,21 +69,47 @@ interpretUIGraphOp (UIGraphOp op) = case resume op of
     (deleteEdge edge)
     >>> (interpretUIGraphOp $ UIGraphOp next)
   Left (MoveNode node from to next) ->
-    (_nodes <<< at (node ^. _id) <<< traversed <<< _pos .~ to)
+    (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _pos .~ to)
     >>> (interpretUIGraphOp $ UIGraphOp next)
   Left (UpdateNodeText node from to next) ->
-    (_nodes <<< at (node ^. _id) <<< traversed <<< _nodeText .~ to)
+    (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _nodeText .~ to)
     >>> (interpretUIGraphOp $ UIGraphOp next)
   Left (UpdateEdgeText edge from to next) ->
     (modifyEdge (edge ^. _edgeId) (_edgeText .~ to))
     >>> (interpretUIGraphOp $ UIGraphOp next)
-  Left (NoOp next) ->
-    interpretUIGraphOp $ UIGraphOp next
-
 
 -- | Action instance required by Undoable
 instance actUIGraphOpUIGraph :: Action (UIGraphOp a) UIGraph where
   act op = interpretUIGraphOp op
 
+
+------
+-- Interface
+
 insertNodeOp :: UINode -> UIGraphOp Unit
-insertNodeOp node = UIGraphOp $ liftF $ InsertNode node unit
+insertNodeOp node = UIGraphOp $ liftF $
+                    InsertNode node unit
+
+deleteNodeOp :: UINode -> UIGraphOp Unit
+deleteNodeOp node = UIGraphOp $ liftF $
+                    DeleteNode node unit
+
+insertEdgeOp :: UIEdge -> UIGraphOp Unit
+insertEdgeOp edge = UIGraphOp $ liftF $
+                    InsertEdge edge unit
+
+deleteEdgeOp :: UIEdge -> UIGraphOp Unit
+deleteEdgeOp edge = UIGraphOp $ liftF $
+                    DeleteEdge edge unit
+
+moveNodeOp :: UINode -> Point2D -> UIGraphOp Unit
+moveNodeOp node newPos = UIGraphOp $ liftF $
+                       MoveNode node (node ^. _pos) newPos unit
+
+updateNodeTextOp :: UINode -> String -> UIGraphOp Unit
+updateNodeTextOp node newText = UIGraphOp $ liftF $
+                              UpdateNodeText node (node ^. _nodeText) newText unit
+
+updateEdgeTextOp :: UIEdge -> String -> UIGraphOp Unit
+updateEdgeTextOp edge newText = UIGraphOp $ liftF $
+                              UpdateEdgeText edge (edge ^. _edgeText) newText unit
