@@ -1,15 +1,16 @@
+-- TODO: remove. All functionality now in ForeignUIGraph and UIGraph
 module Workflow.UIGraph.JSON where
 
-import Prelude (class Ord, bind, flip, identity, map, pure, show, (#), ($), (<$>), (<<<), (>>>))
+import Prelude
 
 import Workflow.Core (EdgeId)
-import Workflow.UIGraph
+import Workflow.UIGraph (UIGraph(..), UINode(..), UIEdge(..), Focus(..))
+import Workflow.UIGraph.ForeignUIGraph (ForeignUIGraph(..), ForeignUINode(..), ForeignUIEdge(..), ForeignFocus(..), ForeignEdgeId(..), genericEncodeOpts)
 
 import Control.Monad.Except.Trans (ExceptT, runExceptT)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..), note)
-import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity(..))
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Map (Map)
@@ -20,107 +21,12 @@ import Data.Tuple (Tuple(..))
 import Data.UUID (UUID, parseUUID)
 import Data.UUID as UUID
 import Foreign (ForeignError, renderForeignError)
-import Foreign.Class (class Encode, class Decode)
-import Foreign.Generic (defaultOptions, genericDecodeJSON, genericEncodeJSON, genericEncode, genericDecode)
-import Foreign.Generic.Types (SumEncoding)
+import Foreign.Generic (genericDecodeJSON, genericEncodeJSON)
 import Foreign.Object (Object)
 import Foreign.Object as Object
 
 
--- | A whole bunch of boilerplate to use generic JSON serialisation/deserialisation
 -- TODO: use rowToList from the typelevel prelude to convert Map, Set to Object for any type
-
-
-genericEncodeOpts ::
-      { unwrapSingleConstructors :: Boolean
-      , fieldTransform :: String -> String
-      , sumEncoding :: SumEncoding
-      , unwrapSingleArguments :: Boolean
-      }
-genericEncodeOpts = defaultOptions { unwrapSingleConstructors = true }
-
-type ForeignNodeId = String
-
-newtype ForeignEdgeId =
-  ForeignEdgeId
-  { source :: ForeignNodeId
-  , target :: ForeignNodeId
-  }
-derive instance genericForeignEdgeId :: Generic ForeignEdgeId _
-instance encodeForeignEdgeId :: Encode ForeignEdgeId where
-  encode = genericEncode genericEncodeOpts
-instance decodeForeignEdgeId :: Decode ForeignEdgeId where
-  decode = genericDecode genericEncodeOpts
-
-newtype ForeignUIEdge =
-  ForeignUIEdge
-  { id :: ForeignEdgeId
-  , text :: String
-  , isValid :: Boolean
-  }
-derive instance genericForeignUIEdge :: Generic ForeignUIEdge _
-instance encodeForeignUIEdge :: Encode ForeignUIEdge where
-  encode = genericEncode genericEncodeOpts
-instance decodeForeignUIEdge :: Decode ForeignUIEdge where
-  decode = genericDecode genericEncodeOpts
-
-newtype ForeignUINode =
-  ForeignUINode
-  { id :: ForeignNodeId
-  , children :: Object ForeignUIEdge
-  , parents :: Object ForeignUIEdge
-  , subgraph :: ForeignUIGraph
-  , position :: Point2D
-  , text :: String
-  , isValid :: Boolean
-  }
-derive instance genericForeignUINode :: Generic ForeignUINode _
-instance encodeForeignUINode :: Encode ForeignUINode where
-  encode = genericEncode genericEncodeOpts
-instance decodeForeignUINode :: Decode ForeignUINode where
-  decode = genericDecode genericEncodeOpts
-
-data ForeignFocus
-  = ForeignFocusNode ForeignNodeId
-  | ForeignFocusEdge ForeignEdgeId (Array ForeignEdgeId)
-  | ForeignNoFocus
-derive instance genericForeignFocus :: Generic ForeignFocus _
-instance encodeForeignFocus :: Encode ForeignFocus where
-  encode = genericEncode genericEncodeOpts
-instance decodeForeignFocus :: Decode ForeignFocus where
-  decode = genericDecode genericEncodeOpts
-
-newtype ForeignUIGraph =
-  ForeignUIGraph
-  { nodes :: Object ForeignUINode
-  , isDual :: Boolean
-  , focus :: ForeignFocus
-  , highlighted :: Array ForeignNodeId
-  }
-derive instance genericForeignUIGraph :: Generic ForeignUIGraph _
-instance encodeForeignUIGraph :: Encode ForeignUIGraph where
-  encode x = genericEncode genericEncodeOpts x
-instance decodeForeignUIGraph :: Decode ForeignUIGraph where
-  decode x = genericDecode genericEncodeOpts x
-
-type UIGraphMeta = { version :: String
-                   }
-
-type ForeignUIGraphMeta = { version :: String
-                          }
-
-type UIGraphWithMeta = { graph :: UIGraph, metadata :: UIGraphMeta }
-
-newtype ForeignUIGraphWithMeta =
-  ForeignUIGraphWithMeta
-  { graph :: ForeignUIGraph
-  , metadata :: ForeignUIGraphMeta
-  }
-derive instance genericForeignUIGraphWithMeta :: Generic ForeignUIGraphWithMeta _
-instance encodeForeignUIGraphWithMeta :: Encode ForeignUIGraphWithMeta where
-  encode x = genericEncode genericEncodeOpts x
-instance decodeForeignUIGraphWithMeta :: Decode ForeignUIGraphWithMeta where
-  decode x = genericDecode genericEncodeOpts x
 
 ------
 -- Serialisation
@@ -171,19 +77,9 @@ objectifyUIGraph (UIGraph graph) =
         , focus = objectifyFocus graph.focus
         }
 
-objectifyUIGraphMeta :: UIGraphMeta -> ForeignUIGraphMeta
-objectifyUIGraphMeta = identity
-
-uiGraphToJson :: UIGraph -> UIGraphMeta -> String
-uiGraphToJson graph metadata =
-  let
-    foreignUIGraph = objectifyUIGraph graph
-    foreignUIGraphWithMeta = ForeignUIGraphWithMeta
-                             { graph : foreignUIGraph
-                             , metadata : metadata
-                             }
-  in
-    genericEncodeJSON genericEncodeOpts foreignUIGraphWithMeta
+uiGraphToJson :: UIGraph -> String
+uiGraphToJson =
+  objectifyUIGraph >>> genericEncodeJSON genericEncodeOpts
 
 
 ------
@@ -256,22 +152,13 @@ unObjectifyUIGraph (ForeignUIGraph foreignGraph) = do
                  , focus = focus
                  }
 
-unObjectifyUIGraphMeta :: ForeignUIGraphMeta -> Either String UIGraphMeta
-unObjectifyUIGraphMeta = Right <<< identity
-
-unObjectifyUIGraphWithMeta :: ForeignUIGraphWithMeta -> Either String UIGraphWithMeta
-unObjectifyUIGraphWithMeta (ForeignUIGraphWithMeta foreignUIGraphWithMeta) = do
-  graph <- unObjectifyUIGraph foreignUIGraphWithMeta.graph
-  metadata <- unObjectifyUIGraphMeta foreignUIGraphWithMeta.metadata
-  pure $ { graph : graph, metadata : metadata }
-
-uiGraphFromJson :: String -> Either String UIGraphWithMeta
+uiGraphFromJson :: String -> Either String UIGraph
 uiGraphFromJson json =
   let
-    exceptTForeignUIGraphWithMeta :: ExceptT (NonEmptyList ForeignError) Identity ForeignUIGraphWithMeta
+    exceptTForeignUIGraphWithMeta :: ExceptT (NonEmptyList ForeignError) Identity ForeignUIGraph
     exceptTForeignUIGraphWithMeta = genericDecodeJSON genericEncodeOpts json
     Identity (eitherForeignUIGraphWithMeta) = runExceptT exceptTForeignUIGraphWithMeta
   in
     eitherForeignUIGraphWithMeta
     # lmap ((map renderForeignError) >>> show)
-    # (flip bind) unObjectifyUIGraphWithMeta
+    # (flip bind) unObjectifyUIGraph

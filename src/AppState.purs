@@ -9,11 +9,12 @@ import Data.Map (Map)
 import Data.Maybe (Maybe)
 import Data.Symbol (SProxy(..))
 import Data.UUID (UUID)
+import Point2D (Point2D)
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (NodeId, EdgeId, _nodes, _source, _target)
-import Workflow.UIGraph (Point2D, UIEdge, UIGraph, _pos)
---import Workflow.UIGraph.UIGraphOp (UIGraphOp)
---import Undoable (Undoable, _current)
+import Workflow.UIGraph (UIEdge, UIGraph, _pos)
+import Workflow.UIGraph.UIGraphOp (UIGraphOp)
+import Data.Undoable (Undoable, _current)
 
 
 appStateVersion :: String
@@ -82,7 +83,7 @@ derive instance eqGraphElementId :: Eq HoveredElementId
 
 type AppStateInner =
   --{ graph :: UndoableUIGraph
-  { graph :: UIGraph
+  { graph :: Undoable UIGraph (UIGraphOp Unit)
   , nodeTextFieldShapes :: Map NodeId Shape
   , edgeTextFieldShapes :: Map EdgeId Shape
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
@@ -97,9 +98,11 @@ newtype AppState = AppState AppStateInner
 _AppState :: Lens' AppState AppStateInner
 _AppState = lens (\(AppState appState) -> appState) (\_ -> AppState)
 
+_undoableGraph :: Lens' AppState (Undoable UIGraph (UIGraphOp Unit))
+_undoableGraph = _AppState <<< prop (SProxy :: SProxy "graph")
+
 _graph :: Lens' AppState UIGraph
---_graph = _AppState <<< prop (SProxy :: SProxy "graph") <<< _current
-_graph = _AppState <<< prop (SProxy :: SProxy "graph")
+_graph = _undoableGraph <<< _current
 
 _nodeTextFieldShapes :: Lens' AppState (Map NodeId Shape)
 _nodeTextFieldShapes = _AppState <<< prop (SProxy :: SProxy "nodeTextFieldShapes")
