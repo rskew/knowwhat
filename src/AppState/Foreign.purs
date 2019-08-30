@@ -7,7 +7,7 @@ import Control.Monad.Except.Trans (ExceptT, runExceptT)
 import Data.Array ((!!))
 import Data.Bifunctor (lmap)
 import Data.DateTime.Instant (Instant, instant, unInstant)
-import Data.Either (Either(..), note)
+import Data.Either (Either, note)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity(..))
 import Data.List.NonEmpty (NonEmptyList)
@@ -78,8 +78,6 @@ instance decodeForeignUnit :: Decode ForeignUnit where
 newtype ForeignAppState =
   ForeignAppState
   { graph :: Undoable UIGraph (UIGraphOp ForeignUnit)
-  , nodeTextFieldShapes :: Object ForeignShape
-  , edgeTextFieldShapes :: Object ForeignShape
   , drawingEdges :: Object ForeignDrawingEdge
   , hoveredElementId :: Maybe ForeignGraphElementId
   , boundingRect :: WHE.DOMRect
@@ -156,8 +154,6 @@ objectifyAppState :: AppState -> ForeignAppState
 objectifyAppState state =
   let
     foreignGraph = mapActions (map toForeignUnit) state.graph
-    foreignNodeTextFieldShapes = toForeignMap ForeignShape UUID.toString state.nodeTextFieldShapes
-    foreignEdgeTextFieldShapes = toForeignMap ForeignShape edgeIdToString state.edgeTextFieldShapes
     foreignDrawingEdges = toForeignMap objectifyDrawingEdge UUID.toString state.drawingEdges
     foreignHoveredElementId = objectifyGraphElementId <$> state.hoveredElementId
     PageSpacePos graphOrigin = state.graphOrigin
@@ -165,8 +161,6 @@ objectifyAppState state =
   in
     ForeignAppState $
     state { graph = foreignGraph
-          , nodeTextFieldShapes = foreignNodeTextFieldShapes
-          , edgeTextFieldShapes = foreignEdgeTextFieldShapes
           , drawingEdges = foreignDrawingEdges
           , hoveredElementId = foreignHoveredElementId
           , graphOrigin = foreignGraphOrigin
@@ -231,16 +225,12 @@ fromForeignUnit _ = unit
 fromForeignAppState :: ForeignAppState -> Either String AppState
 fromForeignAppState (ForeignAppState foreignState) = do
   let graph = mapActions (map fromForeignUnit) foreignState.graph
-  nodeTextFieldShapes <- fromForeignMap (\(ForeignShape x) -> Right x) parseUUIDEither foreignState.nodeTextFieldShapes
-  edgeTextFieldShapes <- fromForeignMap (\(ForeignShape x) -> Right x) parseEdgeIdEither foreignState.edgeTextFieldShapes
   drawingEdges <- fromForeignMap fromForeignDrawingEdge parseUUIDEither foreignState.drawingEdges
   hoveredElementId <- traverse fromForeignGraphElementId foreignState.hoveredElementId
   let ForeignPos foreignGraphOrigin = foreignState.graphOrigin
   let graphOrigin = PageSpacePos foreignGraphOrigin
   pure $
     foreignState { graph = graph
-                 , nodeTextFieldShapes = nodeTextFieldShapes
-                 , edgeTextFieldShapes = edgeTextFieldShapes
                  , drawingEdges = drawingEdges
                  , hoveredElementId = hoveredElementId
                  , graphOrigin = graphOrigin

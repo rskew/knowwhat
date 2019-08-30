@@ -2,31 +2,31 @@ module Workflow.UIGraph.Types where
 
 import Prelude
 
-import Point2D (Point2D)
+import Control.Monad.Except.Trans (ExceptT, except, withExceptT)
 import Data.Array as Array
-import Data.Traversable (traverse)
+import Data.Either (Either(..), note)
+import Data.Map (Map)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import Data.Either (Either(..), note)
-import Foreign.Class (class Encode, class Decode)
-import Data.Map (Map)
-import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
+import Data.Lens (Lens', lens)
+import Data.Lens.Record (prop)
+import Data.List.NonEmpty (NonEmptyList, singleton)
+import Data.Identity (Identity)
 import Data.Map as Map
 import Data.Set (Set)
 import Data.Set as Set
-import Data.UUID (UUID, parseUUID)
-import Control.Monad.Except.Trans (ExceptT, except, withExceptT)
-import Data.List.NonEmpty (NonEmptyList, singleton)
-import Data.Identity (Identity)
-import Foreign (ForeignError(..))
-import Data.UUID as UUID
+import Data.Symbol (SProxy(..))
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
-import Workflow.Core (class Graph, EdgeId, NodeId)
+import Data.UUID (UUID, parseUUID)
+import Data.UUID as UUID
+import Foreign (ForeignError(..))
+import Foreign.Class (class Encode, class Decode)
+import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
 import Foreign.Object (Object)
 import Foreign.Object as Object
-import Data.Lens (Lens', lens)
-import Data.Lens.Record (prop)
-import Data.Symbol (SProxy(..))
+import Point2D (Point2D)
+import Workflow.Core (class Graph, EdgeId, NodeId)
 
 
 type UIEdgeInner =

@@ -79,10 +79,8 @@ data HoveredElementId
   | EdgeBorderId EdgeId
 derive instance eqGraphElementId :: Eq HoveredElementId
 
-type AppStateInner =
+type AppState =
   { graph :: Undoable UIGraph (UIGraphOp Unit)
-  , nodeTextFieldShapes :: Map NodeId Shape
-  , edgeTextFieldShapes :: Map EdgeId Shape
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId :: Maybe HoveredElementId
   , boundingRect :: WHE.DOMRect
@@ -90,20 +88,11 @@ type AppStateInner =
   , zoom :: Number
   }
 
--- TODO: no newtype worked?
-type AppState = AppStateInner
-
 _undoableGraph :: Lens' AppState (Undoable UIGraph (UIGraphOp Unit))
 _undoableGraph = prop (SProxy :: SProxy "graph")
 
 _graph :: Lens' AppState UIGraph
 _graph = _undoableGraph <<< _current
-
-_nodeTextFieldShapes :: Lens' AppState (Map NodeId Shape)
-_nodeTextFieldShapes = prop (SProxy :: SProxy "nodeTextFieldShapes")
-
-_edgeTextFieldShapes :: Lens' AppState (Map EdgeId Shape)
-_edgeTextFieldShapes = prop (SProxy :: SProxy "edgeTextFieldShapes")
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
 _drawingEdges = prop (SProxy :: SProxy "drawingEdges")
@@ -130,46 +119,3 @@ _hoveredElementId  = prop (SProxy :: SProxy "hoveredElementId")
 
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)
-
---newtype AppState = AppState AppStateInner
---
---_AppState :: Lens' AppState AppStateInner
---_AppState = lens (\(AppState appState) -> appState) (\_ -> AppState)
---
---_undoableGraph :: Lens' AppState (Undoable UIGraph (UIGraphOp Unit))
---_undoableGraph = _AppState <<< prop (SProxy :: SProxy "graph")
---
---_graph :: Lens' AppState UIGraph
---_graph = _undoableGraph <<< _current
---
---_nodeTextFieldShapes :: Lens' AppState (Map NodeId Shape)
---_nodeTextFieldShapes = _AppState <<< prop (SProxy :: SProxy "nodeTextFieldShapes")
---
---_edgeTextFieldShapes :: Lens' AppState (Map EdgeId Shape)
---_edgeTextFieldShapes = _AppState <<< prop (SProxy :: SProxy "edgeTextFieldShapes")
---
---_drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
---_drawingEdges = _AppState <<< prop (SProxy :: SProxy "drawingEdges")
---
---_drawingEdgePos :: DrawingEdgeId -> Traversal' AppState GraphSpacePos
---_drawingEdgePos drawingEdgePos =
---  _drawingEdges <<< at drawingEdgePos <<< traversed <<< prop (SProxy :: SProxy "pos")
---
---_graphNodePos :: NodeId -> Traversal' AppState GraphSpacePos
---_graphNodePos nodeId =
---  _graph <<<_nodes <<< at nodeId <<< traversed <<< _pos <<< _coerceToGraphSpace
---
---_zoom :: Lens' AppState Number
---_zoom = _AppState <<< prop (SProxy :: SProxy "zoom")
---
---_boundingRect :: Lens' AppState WHE.DOMRect
---_boundingRect  = _AppState <<< prop (SProxy :: SProxy "boundingRect")
---
---_graphOrigin :: Lens' AppState PageSpacePos
---_graphOrigin  = _AppState <<< prop (SProxy :: SProxy "graphOrigin")
---
---_hoveredElementId :: Lens' AppState (Maybe HoveredElementId)
---_hoveredElementId  = _AppState <<< prop (SProxy :: SProxy "hoveredElementId")
---
---_coerceToGraphSpace :: Lens' Point2D GraphSpacePos
---_coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)

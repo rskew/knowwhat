@@ -2,9 +2,9 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _edgeTextFieldShapes, _graph, _undoableGraph, _graphNodePos, _nodeTextFieldShapes, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _undoableGraph, _graphNodePos, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
-import ContentEditable.Component as ContentEditable
+import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
 import DOM.HTML.Indexed.InputType (InputType(..))
@@ -96,10 +96,6 @@ maxTextFieldShape = { width : 700.0, height : 500.0 }
 initialState :: { boundingRect :: WHE.DOMRect, graph :: UIGraph } -> AppState
 initialState inputs =
   { graph : initUndoable inputs.graph
-  , nodeTextFieldShapes : (\_ -> defaultTextFieldShape) <$> inputs.graph ^. _nodes
-  , edgeTextFieldShapes : Map.fromFoldable
-                          $ (\edge -> Tuple (edge ^. _edgeId) defaultTextFieldShape)
-                            `Set.map` allEdges inputs.graph
   , drawingEdges : Map.empty
   , hoveredElementId : Nothing
   , boundingRect : inputs.boundingRect
@@ -118,8 +114,8 @@ data Query a
   | NodeDragMove Drag.DragEvent NodeId GraphSpacePos a
   | EdgeDrawStart DrawingEdgeId ME.MouseEvent a
   | EdgeDrawMove Drag.DragEvent DrawingEdgeId a
-  | NodeTextInput NodeId ContentEditable.Message a
-  | EdgeTextInput EdgeId ContentEditable.Message a
+  | NodeTextInput NodeId SVGContentEditable.Message a
+  | EdgeTextInput EdgeId SVGContentEditable.Message a
   | AppCreateNode ME.MouseEvent a
   | AppDeleteNode UINode a
   | AppCreateEdge UIEdge a
@@ -163,7 +159,7 @@ graph =
     }
   where
 
-  svgDefs :: H.ParentHTML Query ContentEditable.Query Slot Aff
+  svgDefs :: H.ParentHTML Query SVGContentEditable.Query Slot Aff
   svgDefs = SE.defs
             [ SE.marker
               [ SA.id "drawing-arrow"
@@ -215,11 +211,9 @@ graph =
               ]
             ]
 
-  renderGraphNode :: UINode -> AppState -> H.ParentHTML Query ContentEditable.Query Slot Aff
+  renderGraphNode :: UINode -> AppState -> H.ParentHTML Query SVGContentEditable.Query Slot Aff
   renderGraphNode node state =
     let
-      textFieldShape = fromMaybe defaultTextFieldShape
-                       (Map.lookup (node ^. _nodeId) state.nodeTextFieldShapes)
       hoveredOverBorder = state.hoveredElementId == (Just $ NodeBorderId $ node ^. _nodeId)
       hoveredOverHalo = state.hoveredElementId == (Just $ NodeHaloId $ node ^. _nodeId)
       noDrawingEdgeFromNode =
@@ -296,24 +290,25 @@ graph =
         , HE.onMouseLeave $ HE.input_ $ Hover Nothing
         ]
       -- Node Textbox
-      , SE.foreignObject
-        [ SA.x nodeTextBoxOffset.x
-        , SA.y nodeTextBoxOffset.y
-        , SA.height textFieldShape.height
-        , SA.width textFieldShape.width
+      , SE.g
+        [ SA.transform [ SA.Translate nodeTextBoxOffset.x nodeTextBoxOffset.y ]
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
                                $ H.action DoNothing
         ]
         [ HH.slot
           (NodeTextField (node ^. _nodeId))
-          ContentEditable.contenteditable
-          (node ^. _nodeText)
+          SVGContentEditable.svgContenteditable
+          { shape : defaultTextFieldShape
+          , initialText : (node ^. _nodeText)
+          , maxShape : maxTextFieldShape
+          , fitContentDynamic : true
+          }
           (HE.input (NodeTextInput (node ^. _nodeId)))
         ]
       ]
 
-  renderEdge :: UIEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
+  renderEdge :: UIEdge -> AppState -> Maybe (H.ParentHTML Query SVGContentEditable.Query Slot Aff)
   renderEdge edge state = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
@@ -330,8 +325,6 @@ graph =
         { x : ((sourceNode ^. _pos).x + (targetNode ^. _pos).x) / 2.0
         , y : ((sourceNode ^. _pos).y + (targetNode ^. _pos).y) / 2.0
         }
-      textFieldShape = fromMaybe defaultTextFieldShape
-                       $ Map.lookup (edge ^. _edgeId) $ state ^. _edgeTextFieldShapes
     pure $
       SE.g [] $
       -- Edge
@@ -347,24 +340,28 @@ graph =
         ]
       ] <> if not focused && ((edge ^. _edgeText) == "") then [] else
       -- Edge Textbox
-      [ SE.foreignObject
-        [ SA.x $ edgeMidPos.x + edgeTextBoxOffset.x
-        , SA.y $ edgeMidPos.y + edgeTextBoxOffset.y
-        , SA.height textFieldShape.height
-        , SA.width textFieldShape.width
+      [ SE.g
+        [ SA.transform [ SA.Translate
+                         (edgeMidPos.x + edgeTextBoxOffset.x)
+                         (edgeMidPos.y + edgeTextBoxOffset.y)
+                       ]
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
                                $ H.action DoNothing
         ]
         [ HH.slot
           (EdgeTextField (edge ^. _edgeId))
-          ContentEditable.contenteditable
-          (edge ^. _edgeText)
+          SVGContentEditable.svgContenteditable
+          { shape : defaultTextFieldShape
+          , initialText : (edge ^. _edgeText)
+          , maxShape : maxTextFieldShape
+          , fitContentDynamic : true
+          }
           (HE.input (EdgeTextInput (edge ^. _edgeId)))
         ]
       ]
 
-  renderEdgeBorder :: UIEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
+  renderEdgeBorder :: UIEdge -> AppState -> Maybe (H.ParentHTML Query SVGContentEditable.Query Slot Aff)
   renderEdgeBorder edge state = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
@@ -391,7 +388,7 @@ graph =
                                $ H.action $ AppDeleteEdge $ edge
       ]
 
-  renderDrawingEdge :: DrawingEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
+  renderDrawingEdge :: DrawingEdge -> AppState -> Maybe (H.ParentHTML Query SVGContentEditable.Query Slot Aff)
   renderDrawingEdge drawingEdgeState state = do
     sourcePos <- preview (_graphNodePos drawingEdgeState.source) state
     let
@@ -410,7 +407,7 @@ graph =
       , SA.markerEnd $ SA.URL "#drawing-arrow"
       ]
 
-  render :: AppState -> H.ParentHTML Query ContentEditable.Query Slot Aff
+  render :: AppState -> H.ParentHTML Query SVGContentEditable.Query Slot Aff
   render state =
     let
       keyedNodes = map
@@ -471,7 +468,7 @@ graph =
         ]
       ]
 
-  eval :: Query ~> H.ParentDSL AppState Query ContentEditable.Query Slot Message Aff
+  eval :: Query ~> H.ParentDSL AppState Query SVGContentEditable.Query Slot Message Aff
   eval = case _ of
     PreventDefault e q -> do
       H.liftEffect $ WE.preventDefault e
@@ -490,36 +487,23 @@ graph =
     UpdateContentEditableText next -> next <$ do
       state <- H.get
       for_ (state ^. _graph <<< _nodes) \node -> do
-        H.query (NodeTextField (node ^. _nodeId)) $ H.action $ ContentEditable.SetText $ node ^. _nodeText
+        H.query (NodeTextField (node ^. _nodeId)) $ H.action $ SVGContentEditable.SetText $ node ^. _nodeText
       for_ (allEdges (state ^. _graph)) \edge -> do
-        H.query (EdgeTextField (edge ^. _edgeId)) $ H.action $ ContentEditable.SetText $ edge ^. _edgeText
+        H.query (EdgeTextField (edge ^. _edgeId)) $ H.action $ SVGContentEditable.SetText $ edge ^. _edgeText
 
-    NodeTextInput nodeId (ContentEditable.TextUpdate text) next -> next <$ do
-      -- Update foreignObject wrapper shape to fit content.
-      -- The actual text box is dynamically sized, but the foreighObject wrapper
-      -- can't be set to fit the text, so we update it manually.
-      maybeMaybeTextFieldScrollShape <- H.query (NodeTextField nodeId) $ H.request ContentEditable.GetScrollShape
-      let scrollShape = clippedScrollShape
-                        $ fromMaybe defaultTextFieldShape
-                        $ join maybeMaybeTextFieldScrollShape
+    NodeTextInput nodeId (SVGContentEditable.TextUpdate text) next -> next <$ do
       state <- H.get
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
         Just node ->
           H.modify_ $ (_undoableGraph %~ (doo $ updateNodeTextOp node text))
-                    >>> (_nodeTextFieldShapes <<< at nodeId ?~ scrollShape)
 
-    EdgeTextInput edgeId (ContentEditable.TextUpdate text) next -> next <$ do
-      maybeMaybeTextFieldScrollShape <- H.query (EdgeTextField edgeId) $ H.request ContentEditable.GetScrollShape
-      let scrollShape = clippedScrollShape
-                        $ fromMaybe defaultTextFieldShape
-                        $ join maybeMaybeTextFieldScrollShape
+    EdgeTextInput edgeId (SVGContentEditable.TextUpdate text) next -> next <$ do
       state <- H.get
       case lookupEdge (state ^. _graph) edgeId of
         Nothing -> pure unit
         Just edge ->
       H.modify_ $ (_undoableGraph %~ (doo $ updateEdgeTextOp edge text))
-                >>> (_edgeTextFieldShapes <<< at edgeId ?~ scrollShape)
 
     BackgroundDragStart initialGraphOrigin mouseEvent next -> next <$ do
       H.modify_ $ _graph <<< _focus .~ NoFocus
@@ -601,25 +585,21 @@ graph =
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
       H.modify_ $ (_undoableGraph %~ (doo $ insertNodeOp newNode'))
-                >>> (_nodeTextFieldShapes <<< at (newNode' ^. _nodeId) ?~ defaultTextFieldShape)
       eval $ FocusOn (FocusNode $ newNode' ^. _nodeId) unit
 
     AppDeleteNode node next -> next <$ do
       state <- H.get
       H.modify_ $ (_undoableGraph %~ (doo $ deleteNodeOp node))
-                >>> (_nodeTextFieldShapes <<< at (node ^. _nodeId) .~ Nothing)
       case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
         Just neighbor -> eval $ FocusOn (FocusNode (neighbor ^. _nodeId)) unit
         Nothing -> pure unit
 
     AppCreateEdge edge next -> next <$ do
       H.modify_ $ (_undoableGraph %~ (doo $ insertEdgeOp edge))
-                  >>> (_edgeTextFieldShapes <<< at (edge ^. _edgeId) ?~ defaultTextFieldShape)
       eval $ FocusOn (FocusEdge (edge ^. _edgeId) []) unit
 
     AppDeleteEdge edge next -> next <$ do
       H.modify_ $ (_undoableGraph %~ (doo $ deleteEdgeOp edge))
-                  >>> (_edgeTextFieldShapes <<< at (edge ^. _edgeId) .~ Nothing)
       eval $ FocusOn (FocusNode (edge ^. _edgeId).source) unit
 
     FocusOn newFocus next -> next <$ do
@@ -690,11 +670,7 @@ graph =
         Right appStateWithMeta -> do
           H.put appStateWithMeta.appState
           -- Update foreignObject wrapper sizes for the initial text
-          state <- H.get
-          for_ (state ^. _graph <<< _nodes) \node -> do
-            eval $ H.action $ (NodeTextInput (node ^. _nodeId)) (ContentEditable.TextUpdate (node ^. _nodeText))
-          for_ (allEdges (state ^. _graph)) \edge -> do
-            eval $ H.action $ (EdgeTextInput (edge ^. _edgeId)) (ContentEditable.TextUpdate (edge ^. _edgeText))
+          eval $ H.action UpdateContentEditableText
       pure $ reply H.Done
 
     SaveLocalFile next -> next <$ do
@@ -777,11 +753,3 @@ attachKeydownListener document fn = do
 drawingEdgeWithinNodeHalo :: DrawingEdge -> UINode -> Boolean
 drawingEdgeWithinNodeHalo drawingEdgeState' node =
   haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
-
-clippedScrollShape :: Shape -> Shape
-clippedScrollShape textFieldScrollShape =
-   { width : min textFieldScrollShape.width
-                 maxTextFieldShape.width
-   , height : min textFieldScrollShape.height
-                  maxTextFieldShape.height
-   }

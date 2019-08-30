@@ -115,7 +115,6 @@ paneComponent =
           listener <- WET.eventListener fn
           WET.addEventListener (WE.EventType "resize") listener false target
       H.subscribe $ ES.eventSource attachResizeListener (Just <<< H.request <<< ResizeWindow)
-      --H.liftEffect $ log "TODO: somehow handle window resize"
 
     ResizeWindow resizeEvent reply -> do
       H.liftEffect $ log "resizing"

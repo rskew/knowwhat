@@ -3,6 +3,7 @@ module Workflow.UIGraph.UIGraphOp where
 import Prelude
 
 import Data.Collapsable (class Collapsable)
+import Data.Generic.Rep (class Generic)
 import Data.Group (class Group)
 import Data.Lens (traversed, (^.), (.~))
 import Data.Lens.At (at)
@@ -14,7 +15,6 @@ import Point2D (Point2D)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, _pos, _nodeText, _edgeText)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Data.Generic.Rep (class Generic)
 
 
 -- | Free Monad DSL
