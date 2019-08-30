@@ -19,7 +19,7 @@ import Web.Event.Event as WE
 import Web.Event.EventTarget as WET
 import Web.HTML as WH
 import Web.HTML.Window as WHW
-import Workflow.UIGraph (UIGraph)
+import Workflow.UIGraph.Types (UIGraph)
 
 data PanePos = LeftPane | RightPane
 derive instance ordPanePos :: Ord PanePos

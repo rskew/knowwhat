@@ -10,7 +10,8 @@ import Data.Lens ((%~), (.~))
 
 import Data.UUID (genUUID)
 
-import Workflow.UIGraph (UIGraph, emptyUIGraph, UINode(..), UIEdge(..), Focus(..), _highlighted, _focus)
+import Workflow.UIGraph.Types (UIGraph, UINode(..), UIEdge(..), Focus(..), _highlighted, _focus)
+import Workflow.UIGraph (emptyUIGraph)
 import Workflow.Core (insertNode, insertEdge)
 
 demo :: Effect UIGraph

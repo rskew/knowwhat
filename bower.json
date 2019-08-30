@@ -20,7 +20,8 @@
     "purescript-halogen-contenteditable": "git@github.com/rskew/purescript-halogen-contenteditable.git#7f7365d2249708e80ab1451c98b8d121c77f8e7c",
     "file-saver": "^2.0.2",
     "purescript-group": "^4.1.1",
-    "purescript-undoable": "/home/rowan/projects/purescript-undoable#b05f6fe10b777e2a24f67ed8f705ce616fad2577"
+    "purescript-undoable": "/home/rowan/projects/purescript-undoable#b05f6fe10b777e2a24f67ed8f705ce616fad2577",
+    "purescript-free": "^5.2.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^4.0.0"

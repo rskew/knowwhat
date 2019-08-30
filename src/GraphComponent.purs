@@ -2,8 +2,8 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _AppState, _drawingEdgePos, _drawingEdges, _edgeTextFieldShapes, _graph, _graphNodePos, _graphOrigin, _nodeTextFieldShapes, _zoom, _boundingRect, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
-import AppState.JSON (appStateFromJSON, appStateToJSON)
+import AppState (AppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _edgeTextFieldShapes, _graph, _undoableGraph, _graphNodePos, _nodeTextFieldShapes, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import ContentEditable.Component as ContentEditable
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
@@ -22,6 +22,7 @@ import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Tuple (Tuple(..))
+import Data.Undoable (initUndoable, doo, undo, redo, _history, _undone)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
@@ -35,6 +36,7 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource as ES
 import Math as Math
+import Point2D (Point2D)
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
@@ -55,8 +57,9 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.UIGraph (UIGraph, UINode, UIEdge, Focus(..), Point2D, _pos, _nodeText, _edgeText, _focus, freshUIEdge, freshUINode, graphTitle, uiGraphVersion)
-import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, interpretUIGraphOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
+import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
+import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
+import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
@@ -91,8 +94,8 @@ maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
 initialState :: { boundingRect :: WHE.DOMRect, graph :: UIGraph } -> AppState
-initialState inputs = AppState
-  { graph : inputs.graph
+initialState inputs =
+  { graph : initUndoable inputs.graph
   , nodeTextFieldShapes : (\_ -> defaultTextFieldShape) <$> inputs.graph ^. _nodes
   , edgeTextFieldShapes : Map.fromFoldable
                           $ (\edge -> Tuple (edge ^. _edgeId) defaultTextFieldShape)
@@ -108,14 +111,15 @@ data Query a
   = PreventDefault WE.Event (Query a)
   | StopPropagation WE.Event (Query a)
   | Init a
+  | UpdateContentEditableText a
   | BackgroundDragStart PageSpacePos ME.MouseEvent a
   | BackgroundDragMove Drag.DragEvent PageSpacePos a
   | NodeDragStart NodeId GraphSpacePos ME.MouseEvent a
   | NodeDragMove Drag.DragEvent NodeId GraphSpacePos a
   | EdgeDrawStart DrawingEdgeId ME.MouseEvent a
   | EdgeDrawMove Drag.DragEvent DrawingEdgeId a
-  | NodeTextInput UINode ContentEditable.Message a
-  | EdgeTextInput UIEdge ContentEditable.Message a
+  | NodeTextInput NodeId ContentEditable.Message a
+  | EdgeTextInput EdgeId ContentEditable.Message a
   | AppCreateNode ME.MouseEvent a
   | AppDeleteNode UINode a
   | AppCreateEdge UIEdge a
@@ -212,7 +216,7 @@ graph =
             ]
 
   renderGraphNode :: UINode -> AppState -> H.ParentHTML Query ContentEditable.Query Slot Aff
-  renderGraphNode node (AppState state) =
+  renderGraphNode node state =
     let
       textFieldShape = fromMaybe defaultTextFieldShape
                        (Map.lookup (node ^. _nodeId) state.nodeTextFieldShapes)
@@ -231,7 +235,7 @@ graph =
       nodeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "node"
-        , if (state.graph ^. _focus == FocusNode (node ^. _nodeId))
+        , if state ^. _graph <<< _focus == FocusNode (node ^. _nodeId)
           then Just "focused"
           else Nothing
         ]
@@ -239,7 +243,7 @@ graph =
           joinWith " " $ Array.catMaybes
           [ Just "nodeBorder"
           -- TODO: decide if grouping/ungrouping is useful for ologs
-          --, if (Set.member (node ^. _nodeId) (state.graph ^. _highlighted))
+          --, if (Set.member (node ^. _nodeId) (state ^. _graph <<< _highlighted))
           --  then Just "highlighted"
           --  else Nothing
           , if hoveredOverBorder
@@ -251,7 +255,7 @@ graph =
       haloClasses =
         joinWith " " $ Array.catMaybes
         [ Just "nodeHalo"
-        , if (state.graph ^. _focus == FocusNode (node ^. _nodeId))
+        , if state ^. _graph <<< _focus == FocusNode (node ^. _nodeId)
              &&
              (not hoveredOverBorder)
           then Just "focused"
@@ -261,13 +265,12 @@ graph =
           else Nothing
         ]
     in
-      SE.g []
+      SE.g
+      [ SA.transform [ SA.Translate (node ^. _pos).x (node ^. _pos).y ] ]
       [ SE.circle
         -- Node Halo, for creating edges from
         [ SA.class_ haloClasses
         , SA.r haloRadius
-        , SA.cx (node ^. _pos).x
-        , SA.cy (node ^. _pos).y
         , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
                                $ H.action $ EdgeDrawStart (node ^. _nodeId) e
         , HE.onMouseEnter $ HE.input_ $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
@@ -279,15 +282,11 @@ graph =
         , SA.r $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
                  then groupNodeRadius
                  else nodeRadius
-        , SA.cx (node ^. _pos).x
-        , SA.cy (node ^. _pos).y
         ]
       -- Node border, for grabbing
       , SE.circle
         [ SA.class_ nodeBorderClasses
         , SA.r nodeBorderRadius
-        , SA.cx (node ^. _pos).x
-        , SA.cy (node ^. _pos).y
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
                                $ H.action $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
@@ -298,8 +297,8 @@ graph =
         ]
       -- Node Textbox
       , SE.foreignObject
-        [ SA.x $ (node ^. _pos).x + nodeTextBoxOffset.x
-        , SA.y $ (node ^. _pos).y + nodeTextBoxOffset.y
+        [ SA.x nodeTextBoxOffset.x
+        , SA.y nodeTextBoxOffset.y
         , SA.height textFieldShape.height
         , SA.width textFieldShape.width
         , HE.onMouseDown \e -> Just
@@ -310,16 +309,16 @@ graph =
           (NodeTextField (node ^. _nodeId))
           ContentEditable.contenteditable
           (node ^. _nodeText)
-          (HE.input (NodeTextInput node))
+          (HE.input (NodeTextInput (node ^. _nodeId)))
         ]
       ]
 
   renderEdge :: UIEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
-  renderEdge edge (AppState state) = do
-    sourceNode <- Map.lookup (edge ^. _source) $ state.graph ^. _nodes
-    targetNode <- Map.lookup (edge ^. _target) $ state.graph ^. _nodes
+  renderEdge edge state = do
+    sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
+    targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
     let
-      focused = (state.graph ^. _focus == FocusEdge (edge ^. _edgeId) [])
+      focused = state ^. _graph <<< _focus == FocusEdge (edge ^. _edgeId) []
       edgeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edge"
@@ -332,7 +331,7 @@ graph =
         , y : ((sourceNode ^. _pos).y + (targetNode ^. _pos).y) / 2.0
         }
       textFieldShape = fromMaybe defaultTextFieldShape
-                       (Map.lookup (edge ^. _edgeId) state.edgeTextFieldShapes)
+                       $ Map.lookup (edge ^. _edgeId) $ state ^. _edgeTextFieldShapes
     pure $
       SE.g [] $
       -- Edge
@@ -361,14 +360,14 @@ graph =
           (EdgeTextField (edge ^. _edgeId))
           ContentEditable.contenteditable
           (edge ^. _edgeText)
-          (HE.input (EdgeTextInput edge))
+          (HE.input (EdgeTextInput (edge ^. _edgeId)))
         ]
       ]
 
   renderEdgeBorder :: UIEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
-  renderEdgeBorder edge (AppState state) = do
-    sourceNode <- Map.lookup (edge ^. _source) $ state.graph ^. _nodes
-    targetNode <- Map.lookup (edge ^. _target) $ state.graph ^. _nodes
+  renderEdgeBorder edge state = do
+    sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
+    targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
     let
       edgeBorderClasses =
         joinWith " " $ Array.catMaybes
@@ -393,8 +392,8 @@ graph =
       ]
 
   renderDrawingEdge :: DrawingEdge -> AppState -> Maybe (H.ParentHTML Query ContentEditable.Query Slot Aff)
-  renderDrawingEdge drawingEdgeState (AppState state) = do
-    sourcePos <- preview (_graphNodePos drawingEdgeState.source) (AppState state)
+  renderDrawingEdge drawingEdgeState state = do
+    sourcePos <- preview (_graphNodePos drawingEdgeState.source) state
     let
       GraphSpacePos sourceGraphPos = sourcePos
       GraphSpacePos drawingEdgeGraphPos = drawingEdgeState.pos
@@ -412,28 +411,28 @@ graph =
       ]
 
   render :: AppState -> H.ParentHTML Query ContentEditable.Query Slot Aff
-  render (AppState state) =
+  render state =
     let
       keyedNodes = map
                    (\node ->
-                     Tuple (show (node ^. _nodeId)) $ renderGraphNode node $ AppState state
+                     Tuple (show (node ^. _nodeId)) $ renderGraphNode node state
                    )
-                   $ Array.fromFoldable $ Map.values $ state.graph ^. _nodes
+                   $ Array.fromFoldable $ Map.values $ state ^. _graph <<< _nodes
       keyedEdges = Array.mapMaybe
                    (\edge -> do
-                       edgeHTML <- renderEdge edge $ AppState state
+                       edgeHTML <- renderEdge edge state
                        pure $ Tuple (edgeIdStr edge) edgeHTML
                    )
-                   $ Array.fromFoldable $ allEdges state.graph
+                   $ Array.fromFoldable $ allEdges $ state ^. _graph
       keyedEdgeBorders = Array.mapMaybe
                      (\edge -> do
-                         edgeHTML <- renderEdgeBorder edge $ AppState state
+                         edgeHTML <- renderEdgeBorder edge state
                          pure $ Tuple ((edgeIdStr edge) <> "_border") edgeHTML
                      )
-                     $ Array.fromFoldable $ allEdges state.graph
+                     $ Array.fromFoldable $ allEdges $ state ^. _graph
       keyedDrawingEdges = Array.mapMaybe
                      (\drawingEdgeState -> do
-                         drawingEdgeHTML <- renderDrawingEdge drawingEdgeState $ AppState state
+                         drawingEdgeHTML <- renderDrawingEdge drawingEdgeState state
                          pure $ Tuple (drawingEdgeKey drawingEdgeState.source) drawingEdgeHTML
                      )
                      $ Array.fromFoldable $ Map.values state.drawingEdges
@@ -484,34 +483,43 @@ graph =
 
     Init next -> next <$ do
       eval $ H.action UpdateBoundingRect
-      -- Update foreignObject wrapper sizes for the initial text
-      AppState state <- H.get
-      for_ (state.graph ^. _nodes) \node -> do
-        eval $ H.action $ (NodeTextInput node) (ContentEditable.TextUpdate (node ^. _nodeText))
-      for_ (allEdges state.graph) \edge -> do
-        eval $ H.action $ (EdgeTextInput edge) (ContentEditable.TextUpdate (edge ^. _edgeText))
       -- Add keyboard event listener to body
       document <- H.liftEffect $ WHW.document =<< WH.window
       H.subscribe $ ES.eventSource (attachKeydownListener document) (Just <<< H.request <<< Keypress)
 
-    NodeTextInput node (ContentEditable.TextUpdate text) next -> next <$ do
+    UpdateContentEditableText next -> next <$ do
+      state <- H.get
+      for_ (state ^. _graph <<< _nodes) \node -> do
+        H.query (NodeTextField (node ^. _nodeId)) $ H.action $ ContentEditable.SetText $ node ^. _nodeText
+      for_ (allEdges (state ^. _graph)) \edge -> do
+        H.query (EdgeTextField (edge ^. _edgeId)) $ H.action $ ContentEditable.SetText $ edge ^. _edgeText
+
+    NodeTextInput nodeId (ContentEditable.TextUpdate text) next -> next <$ do
       -- Update foreignObject wrapper shape to fit content.
       -- The actual text box is dynamically sized, but the foreighObject wrapper
       -- can't be set to fit the text, so we update it manually.
-      maybeMaybeTextFieldScrollShape <- H.query (NodeTextField (node ^. _nodeId)) $ H.request ContentEditable.GetScrollShape
+      maybeMaybeTextFieldScrollShape <- H.query (NodeTextField nodeId) $ H.request ContentEditable.GetScrollShape
       let scrollShape = clippedScrollShape
                         $ fromMaybe defaultTextFieldShape
                         $ join maybeMaybeTextFieldScrollShape
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ updateNodeTextOp node text))
-                >>> (_nodeTextFieldShapes <<< at (node ^. _nodeId) ?~ scrollShape)
+      state <- H.get
+      case lookupNode (state ^. _graph) nodeId of
+        Nothing -> pure unit
+        Just node ->
+          H.modify_ $ (_undoableGraph %~ (doo $ updateNodeTextOp node text))
+                    >>> (_nodeTextFieldShapes <<< at nodeId ?~ scrollShape)
 
-    EdgeTextInput edge (ContentEditable.TextUpdate text) next -> next <$ do
-      maybeMaybeTextFieldScrollShape <- H.query (EdgeTextField (edge ^. _edgeId)) $ H.request ContentEditable.GetScrollShape
+    EdgeTextInput edgeId (ContentEditable.TextUpdate text) next -> next <$ do
+      maybeMaybeTextFieldScrollShape <- H.query (EdgeTextField edgeId) $ H.request ContentEditable.GetScrollShape
       let scrollShape = clippedScrollShape
                         $ fromMaybe defaultTextFieldShape
                         $ join maybeMaybeTextFieldScrollShape
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ updateEdgeTextOp edge text))
-                >>> (_edgeTextFieldShapes <<< at (edge ^. _edgeId) ?~ scrollShape)
+      state <- H.get
+      case lookupEdge (state ^. _graph) edgeId of
+        Nothing -> pure unit
+        Just edge ->
+      H.modify_ $ (_undoableGraph %~ (doo $ updateEdgeTextOp edge text))
+                >>> (_edgeTextFieldShapes <<< at edgeId ?~ scrollShape)
 
     BackgroundDragStart initialGraphOrigin mouseEvent next -> next <$ do
       H.modify_ $ _graph <<< _focus .~ NoFocus
@@ -519,11 +527,11 @@ graph =
         $ \e -> Just $ BackgroundDragMove e initialGraphOrigin H.Listening
 
     BackgroundDragMove (Drag.Move _ dragData) (PageSpacePos initialGraphOrigin) next -> next <$ do
-      AppState state <- H.get
+      state <- H.get
       let newGraphOrigin = PageSpacePos { x : initialGraphOrigin.x + dragData.offsetX
                                         , y : initialGraphOrigin.y + dragData.offsetY
                                         }
-      H.modify_ $ _graphOrigin .~ newGraphOrigin
+      H.modify_ _{ graphOrigin = newGraphOrigin }
 
     BackgroundDragMove (Drag.Done _) _ next -> pure next
 
@@ -533,7 +541,7 @@ graph =
       H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
 
     NodeDragMove (Drag.Move _ dragData) nodeId (GraphSpacePos initialNodePos) next -> next <$ do
-      AppState state <- H.get
+      state <- H.get
       let
         dragOffsetGraphSpace = { x : dragData.offsetX * state.zoom
                                , y : dragData.offsetY * state.zoom
@@ -541,14 +549,14 @@ graph =
         newNodePos = { x : initialNodePos.x + dragOffsetGraphSpace.x
                      , y : initialNodePos.y + dragOffsetGraphSpace.y
                      }
-      case lookupNode state.graph nodeId of
+      case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
-        Just node -> H.modify_ $ _graph %~ (interpretUIGraphOp $ moveNodeOp node newNodePos)
+        Just node -> H.modify_ $ _undoableGraph %~ (doo $ moveNodeOp node newNodePos)
 
     NodeDragMove (Drag.Done _) _ _ next -> pure next
 
     EdgeDrawStart drawingEdgeId mouseEvent next -> next <$ do
-      AppState state <- H.get
+      state <- H.get
       let
         mouseGraphPos = mouseEventPosition mouseEvent
                         # toGraphSpace state.boundingRect state.graphOrigin state.zoom
@@ -560,18 +568,18 @@ graph =
       H.subscribe $ Drag.dragEventSource mouseEvent $ \e -> Just $ EdgeDrawMove e drawingEdgeId H.Listening
 
     EdgeDrawMove (Drag.Move _ dragData) drawingEdgeId next -> next <$ do
-      AppState state <- H.get
+      state <- H.get
       let dragGraphPos = PageSpacePos { x : dragData.x, y : dragData.y }
                          # toGraphSpace state.boundingRect state.graphOrigin state.zoom
       H.modify_ $ _drawingEdgePos drawingEdgeId .~ dragGraphPos
 
     EdgeDrawMove (Drag.Done _) drawingEdgeId next -> next <$ do
       -- Create a new edge if the edge is drawn within the halo of another node
-      AppState state <- H.get
+      state <- H.get
       let
         maybeNewEdgeTarget = do
           drawingEdgeState <- Map.lookup drawingEdgeId state.drawingEdges
-          Map.values (state.graph ^. _nodes)
+          Map.values (state ^. _graph <<< _nodes)
            # (List.filter (drawingEdgeWithinNodeHalo drawingEdgeState))
            # List.head
         drawingEdgeSourceId = drawingEdgeId
@@ -587,30 +595,30 @@ graph =
 
     AppCreateNode mouseEvent next -> next <$ do
       newNode <- H.liftEffect freshUINode
-      AppState state <- H.get
+      state <- H.get
       let
         GraphSpacePos newPos = mouseEventPosition mouseEvent # toGraphSpace state.boundingRect state.graphOrigin state.zoom
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ insertNodeOp newNode'))
+      H.modify_ $ (_undoableGraph %~ (doo $ insertNodeOp newNode'))
                 >>> (_nodeTextFieldShapes <<< at (newNode' ^. _nodeId) ?~ defaultTextFieldShape)
       eval $ FocusOn (FocusNode $ newNode' ^. _nodeId) unit
 
     AppDeleteNode node next -> next <$ do
-      AppState state <- H.get
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ deleteNodeOp node))
+      state <- H.get
+      H.modify_ $ (_undoableGraph %~ (doo $ deleteNodeOp node))
                 >>> (_nodeTextFieldShapes <<< at (node ^. _nodeId) .~ Nothing)
-      case Set.findMin ((lookupParents state.graph node) <> (lookupChildren state.graph node)) of
+      case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
         Just neighbor -> eval $ FocusOn (FocusNode (neighbor ^. _nodeId)) unit
         Nothing -> pure unit
 
     AppCreateEdge edge next -> next <$ do
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ insertEdgeOp edge))
+      H.modify_ $ (_undoableGraph %~ (doo $ insertEdgeOp edge))
                   >>> (_edgeTextFieldShapes <<< at (edge ^. _edgeId) ?~ defaultTextFieldShape)
       eval $ FocusOn (FocusEdge (edge ^. _edgeId) []) unit
 
     AppDeleteEdge edge next -> next <$ do
-      H.modify_ $ (_graph %~ (interpretUIGraphOp $ deleteEdgeOp edge))
+      H.modify_ $ (_undoableGraph %~ (doo $ deleteEdgeOp edge))
                   >>> (_edgeTextFieldShapes <<< at (edge ^. _edgeId) .~ Nothing)
       eval $ FocusOn (FocusNode (edge ^. _edgeId).source) unit
 
@@ -629,7 +637,7 @@ graph =
           Just edge -> eval $ AppDeleteEdge edge unit
 
     Hover maybeElementId next -> next <$ do
-      H.modify_ $ _AppState %~ _{ hoveredElementId = maybeElementId }
+      H.modify_ _{ hoveredElementId = maybeElementId }
 
     -- | Zoom in/out holding the mouse position invariant in graph space
     -- |
@@ -640,7 +648,7 @@ graph =
     -- | => newGraphOrigin = p - ((p - oldGraphOrigin) * (oldZoom / newZoom))
     -- | So if newZoom --> inf, newGraphOrigin --> mousePos, as expected.
     Zoom wheelEvent next -> next <$ do
-      AppState state <- H.get
+      state <- H.get
       let
         scaledZoom = (WhE.deltaY wheelEvent) * zoomScaling
         PageSpacePos mousePagePos = mouseEventPosition $ WhE.toMouseEvent wheelEvent
@@ -655,10 +663,10 @@ graph =
                          }
       H.modify_
         $ (_zoom .~ newZoom)
-        >>> (_graphOrigin .~ newGraphOrigin)
+        >>> _{ graphOrigin = newGraphOrigin }
 
     CenterGraphOrigin next -> next <$ do
-      H.modify $ _graphOrigin .~ PageSpacePos { x : 0.0, y : 0.0 }
+      H.modify _{ graphOrigin = PageSpacePos { x : 0.0, y : 0.0 } }
 
     FetchLocalFile changeEvent next -> next <$ runMaybeT do
       target <- MaybeT $ pure $ WE.target changeEvent
@@ -682,11 +690,11 @@ graph =
         Right appStateWithMeta -> do
           H.put appStateWithMeta.appState
           -- Update foreignObject wrapper sizes for the initial text
-          AppState state <- H.get
-          for_ (state.graph ^. _nodes) \node -> do
-            eval $ H.action $ (NodeTextInput node) (ContentEditable.TextUpdate (node ^. _nodeText))
-          for_ (allEdges state.graph) \edge -> do
-            eval $ H.action $ (EdgeTextInput edge) (ContentEditable.TextUpdate (edge ^. _edgeText))
+          state <- H.get
+          for_ (state ^. _graph <<< _nodes) \node -> do
+            eval $ H.action $ (NodeTextInput (node ^. _nodeId)) (ContentEditable.TextUpdate (node ^. _nodeText))
+          for_ (allEdges (state ^. _graph)) \edge -> do
+            eval $ H.action $ (EdgeTextInput (edge ^. _edgeId)) (ContentEditable.TextUpdate (edge ^. _edgeText))
       pure $ reply H.Done
 
     SaveLocalFile next -> next <$ do
@@ -695,7 +703,6 @@ graph =
       let
         stateJSON = appStateToJSON state { version : appStateVersion
                                          , timestamp : timestamp
-                                         , graphMetadata : { version : uiGraphVersion}
                                          }
         title = fromMaybe "untitled" $ (graphTitle (state ^. _graph))
       H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
@@ -703,12 +710,28 @@ graph =
     UpdateBoundingRect next -> next <$ runMaybeT do
       svgElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "svg")
       svgRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect svgElement
-      lift $ H.modify_ $ _boundingRect .~ svgRect
+      lift $ H.modify_ _{ boundingRect = svgRect }
       lift $ H.liftEffect $ log "updating bounding rect"
 
     Keypress keyboardEvent reply -> do
       H.liftEffect $ log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
+        "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          H.liftEffect $ log $ "Undoable history: " <> show (state.graph ^. _history)
+          H.modify_ $ _undoableGraph %~ undo
+          -- Keep text state in sync
+          eval $ H.action $ UpdateContentEditableText
+        "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          H.liftEffect $ log $ "Undoable undone: " <> show (state.graph ^. _undone)
+          H.modify_ $ _undoableGraph %~ redo
+          -- Keep text state in sync
+          eval $ H.action $ UpdateContentEditableText
         "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ loadFile
         "s" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
