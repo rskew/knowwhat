@@ -7,23 +7,8 @@
     "output"
   ],
   "dependencies": {
-    "purescript-prelude": "^4.1.0",
-    "purescript-foreign-generic": "^7.0.0",
-    "purescript-uuid": "^6.0.0",
-    "purescript-generics-rep": "^6.1.1",
-    "purescript-parsing": "^5.0.3",
-    "purescript-halogen": "4.0.0",
-    "purescript-halogen-svg": "git@github.com/rskew/purescript-halogen-svg.git#d71b1fc744c1d390558ecf9aef603257ba5f49dd",
-    "purescript-quickcheck": "^5.0.0",
-    "purescript-datetime": "^4.1.1",
-    "purescript-now": "^4.0.0",
-    "purescript-halogen-contenteditable": "git@github.com/rskew/purescript-halogen-contenteditable.git#e9e09b787333cea70dc344abec3974410c283148",
-    "file-saver": "^2.0.2",
-    "purescript-group": "^4.1.1",
-    "purescript-undoable": "/home/rowan/projects/purescript-undoable#0caae5f022a7fc1900aba9a0501fce23bad5e0d7",
-    "purescript-free": "^5.2.0"
+    "file-saver": "^2.0.2"
   },
   "devDependencies": {
-    "purescript-psci-support": "^4.0.0"
   }
 }

@@ -14,3 +14,4 @@ package-lock.json
 /.psc*
 /.purs*
 /.psa*
+.spago

@@ -1,5 +1,5 @@
-Graph drawing for knowledge engineering.
+Graph drawing for mindmapping, knowledge engineering and creative-tool-making.
 
-To try it, run `bower install` then `pulp build` to download libraries and compile the purescript sources to javascript modules. Then run `parcel index.html` to compile for the browser and run the hotloading server at `localhost:1234`
+To build and run, you'll need to use [spago](https://github.com/spacchetti/spago) to download purescript dependencies, [bower](https://bower.io/) to download the javascript dependencies, then spago to build. Then build and run the compiled javascript with [parcel](https://parceljs.org/).
 
 ![example graph](https://github.com/rskew/workflow/raw/master/exampleGraph.png)

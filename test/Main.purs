@@ -1,124 +1,135 @@
 module Test.Main where
 
-import Effect (Effect)
-import Effect.Console (logShow, log)
-import Effect.Random
-import Data.Array as Array
-import Data.NonEmpty (NonEmpty)
-import Data.Map as Map
-import Data.Lens
-import Data.Maybe (Maybe(..))
-import Data.List.Lazy (replicateM)
-import Data.NonEmpty (NonEmpty(..))
-import Data.Foldable (foldl)
-import Data.Unfoldable
-import Data.Foldable
-import Prelude
-import Test.QuickCheck
-import Test.QuickCheck.Gen
-import Data.UUID
-import Unsafe.Coerce (unsafeCoerce)
+--import Effect (Effect)
+--import Effect.Console (logShow, log)
+--import Effect.Random
+--import Data.Array as Array
+--import Data.NonEmpty (NonEmpty)
+--import Data.Map as Map
+--import Data.Lens
+--import Data.Maybe (Maybe(..))
+--import Data.List.Lazy (replicateM)
+--import Data.NonEmpty (NonEmpty(..))
+--import Data.Foldable (foldl)
+--import Data.Unfoldable
+--import Data.Foldable
+--import Prelude
+--import Test.QuickCheck
+--import Test.QuickCheck.Gen
+--import Data.UUID
+--import Unsafe.Coerce (unsafeCoerce)
+--
+--import Workflow.Core
+--import Workflow.UIGraph
+--import Workflow.UIGraph.Types
 
-import Workflow.Core
-import Workflow.UIGraph
+-- TODO: uncomment if using subgraph collapse/expand feature, otherwise delete
 
-freshNode :: UUID -> UINode
-freshNode id = UINode
-  { id : id
-  , children : Map.empty
-  , parents : Map.empty
-  , subgraph : emptyUIGraph
-  , position : { x : 0.0, y : 0.0 }
-  , text : ""
-  , isValid : true
-  }
+--freshNode :: UUID -> UINode
+--freshNode id = UINode
+--  { id : id
+--  , children : Map.empty
+--  , parents : Map.empty
+--  , subgraph : emptyUIGraph
+--  , position : { x : 0.0, y : 0.0 }
+--  , text : ""
+--  , isValid : true
+--  }
+--
+--freshEdge :: NodeId -> NodeId -> UIEdge
+--freshEdge source target = UIEdge { source : source, target : target, isValid : true }
+--
+--nodeGen :: Gen UINode
+--nodeGen = do
+--  idStr <- (arbitrary :: Gen String)
+--  let id = unsafeCoerce idStr
+--  pure $ freshNode id
+--
+--edgeGen :: UIGraph -> NonEmpty Array UINode -> Gen (Array UIEdge)
+--edgeGen graph nodes = do
+--  let nNodes = Map.size $ graph ^. _nodes
+--  nEdges <- chooseInt 0 nNodes
+--  Array.fromFoldable <$> replicateM nEdges (do
+--    source <- elements nodes
+--    target <- elements nodes
+--    pure $ freshEdge (source ^. _nodeId) (target ^. _nodeId))
+--
+--subset :: forall a. Array a -> Gen (Array a)
+--subset stuff = do
+--  case Array.uncons stuff of
+--    Nothing -> pure []
+--    Just consStuff -> do
+--      let nonEmptyStuff = NonEmpty consStuff.head consStuff.tail
+--      let nStuffs = length stuff
+--      nSubStuffs <- chooseInt 0 nStuffs
+--      subStuff <- replicateM nSubStuffs
+--        $ elements nonEmptyStuff
+--      pure $ Array.fromFoldable subStuff
+--
+--data TestGraph = TestGraph UIGraph (Array UINode) (Array UINode) (Array UIEdge)
+--
+--graphGen :: Gen TestGraph
+--graphGen = do
+--  -- Generate a bunch of nodes, add them to graph
+--  graphNodes <- arrayOf nodeGen
+--  node <- nodeGen
+--  let nodes = NonEmpty node graphNodes
+--
+--  let graph = foldl insertNode emptyUIGraph nodes
+--
+--  -- generate a bunch of edges between the nodes
+--  edges <- edgeGen graph nodes
+--  let graph' = foldl insertEdge graph edges
+--
+--  subgraphNodes <- subset $ Array.fromFoldable $ Map.values $ graph' ^. _nodes
+--
+--  extraNodes <- arrayOf nodeGen
+--  extraEdges <- edgeGen graph' nodes
+--
+--  pure $ TestGraph graph' subgraphNodes extraNodes extraEdges
+--
+--instance testGraphArbitrary :: Arbitrary TestGraph where
+--  arbitrary = graphGen
+--
+--prop_UnglueGlue :: TestGraph -> Result
+--prop_UnglueGlue (TestGraph graph subgraphNodes _ _) =
+--  let
+--    unglued = unglue subgraphNodes graph
+--    --reglued = glue unglued.childGraph unglued.parentGraph
+--    reglued = glue unglued.parentGraph unglued.childGraph
+--  in
+--    case graph == reglued of
+--      true -> Success
+--      false -> Failed $ "Graph: \n"
+--               <> show (graph ^. _nodes)
+--               <> "\ndoesn't equal reglued: \n"
+--               <> show (reglued ^. _nodes)
+--               <> "\nwith subgraphNodes: \n"
+--               <> (show $ (\node -> node ^. _nodeId) <$> subgraphNodes)
+--
+--prop_InsertDualEdges :: TestGraph -> Result
+--prop_InsertDualEdges (TestGraph graph _ _ extraEdges) =
+--  let
+--    dualEdges = dualEdge <$> extraEdges
+--    nonDualInsertGraph = foldl insertEdge graph extraEdges
+--    dualInsertGraph = graph # withDual \g -> foldl insertEdge g dualEdges
+--  in
+--    nonDualInsertGraph === dualInsertGraph
+--
+--
+--
+--main :: Effect Unit
+--main = do
+--  quickCheck prop_UnglueGlue
+--  quickCheck prop_InsertDualEdges
 
-freshEdge :: NodeId -> NodeId -> UIEdge
-freshEdge source target = UIEdge { source : source, target : target, isValid : true }
-
-nodeGen :: Gen UINode
-nodeGen = do
-  idStr <- (arbitrary :: Gen String)
-  let id = unsafeCoerce idStr
-  pure $ freshNode id
-
-edgeGen :: UIGraph -> NonEmpty Array UINode -> Gen (Array UIEdge)
-edgeGen graph nodes = do
-  let nNodes = Map.size $ graph ^. _nodes
-  nEdges <- chooseInt 0 nNodes
-  Array.fromFoldable <$> replicateM nEdges (do
-    source <- elements nodes
-    target <- elements nodes
-    pure $ freshEdge (source ^. _id) (target ^. _id))
-
-subset :: forall a. Array a -> Gen (Array a)
-subset stuff = do
-  case Array.uncons stuff of
-    Nothing -> pure []
-    Just consStuff -> do
-      let nonEmptyStuff = NonEmpty consStuff.head consStuff.tail
-      let nStuffs = length stuff
-      nSubStuffs <- chooseInt 0 nStuffs
-      subStuff <- replicateM nSubStuffs
-        $ elements nonEmptyStuff
-      pure $ Array.fromFoldable subStuff
-
-data TestGraph = TestGraph UIGraph (Array UINode) (Array UINode) (Array UIEdge)
-
-graphGen :: Gen TestGraph
-graphGen = do
-  -- Generate a bunch of nodes, add them to graph
-  graphNodes <- arrayOf nodeGen
-  node <- nodeGen
-  let nodes = NonEmpty node graphNodes
-
-  let graph = foldl insertNode emptyUIGraph nodes
-
-  -- generate a bunch of edges between the nodes
-  edges <- edgeGen graph nodes
-  let graph' = foldl insertEdge graph edges
-
-  subgraphNodes <- subset $ Array.fromFoldable $ Map.values $ graph' ^. _nodes
-
-  extraNodes <- arrayOf nodeGen
-  extraEdges <- edgeGen graph' nodes
-
-  pure $ TestGraph graph' subgraphNodes extraNodes extraEdges
-
-instance testGraphArbitrary :: Arbitrary TestGraph where
-  arbitrary = graphGen
-
-prop_UnglueGlue :: TestGraph -> Result
-prop_UnglueGlue (TestGraph graph subgraphNodes _ _) =
-  let
-    unglued = unglue subgraphNodes graph
-    --reglued = glue unglued.childGraph unglued.parentGraph
-    reglued = glue unglued.parentGraph unglued.childGraph
-  in
-    case graph == reglued of
-      true -> Success
-      false -> Failed $ "Graph: \n"
-               <> show (graph ^. _nodes)
-               <> "\ndoesn't equal reglued: \n"
-               <> show (reglued ^. _nodes)
-               <> "\nwith subgraphNodes: \n"
-               <> (show $ (\node -> node ^. _id) <$> subgraphNodes)
-
-prop_InsertDualEdges :: TestGraph -> Result
-prop_InsertDualEdges (TestGraph graph _ _ extraEdges) =
-  let
-    dualEdges = dualEdge <$> extraEdges
-    nonDualInsertGraph = foldl insertEdge graph extraEdges
-    dualInsertGraph = graph # withDual \g -> foldl insertEdge g dualEdges
-  in
-    nonDualInsertGraph === dualInsertGraph
 
 
 
-main :: Effect Unit
-main = do
-  quickCheck prop_UnglueGlue
-  quickCheck prop_InsertDualEdges
+
+
+
+
 
 
 

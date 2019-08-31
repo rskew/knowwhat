@@ -9,6 +9,8 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+Minor modifications by Rowan Skewes 2019
 -}
 
 module Halogen.Component.Utils.Drag
@@ -24,8 +26,6 @@ import Prelude
 import Effect.Aff.Class (class MonadAff)
 import Effect (Effect)
 import Effect.Ref (new, read, write) as Ref
-
-import Data.Maybe (Maybe)
 
 import Web.Event.EventTarget (eventListener, addEventListener, removeEventListener)
 import Web.Event.Event (Event)
@@ -60,9 +60,9 @@ dragEventSource
   ∷ ∀ f m
   . MonadAff m
   ⇒ MouseEvent
-  → (DragEvent → Maybe (f ES.SubscribeStatus))
-  → ES.EventSource f m
-dragEventSource mouseEvent = ES.eventSource' \emit → do
+  → (DragEvent → f)
+  → ES.EventSource m f
+dragEventSource mouseEvent callback = ES.effectEventSource \emitter → do
   let initEv = mouseEventToPageCoord mouseEvent
   eventRef ← Ref.new initEv
   remover ← Ref.new (pure unit :: Effect Unit)
@@ -87,11 +87,11 @@ dragEventSource mouseEvent = ES.eventSource' \emit → do
   mouseMove <- eventListener \ev → do
     let ev' = unsafeEventToPageCoord ev
     Ref.write ev' eventRef
-    emit $ Move (unsafeEventToMouseEvent ev) $ dragData ev
+    ES.emit emitter $ callback $ Move (unsafeEventToMouseEvent ev) $ dragData ev
 
   mouseUp <- eventListener \ev → do
     join $ Ref.read remover
-    emit $ Done (unsafeEventToMouseEvent ev)
+    ES.emit emitter $ callback $ Done (unsafeEventToMouseEvent ev)
 
   let
     removeListeners ∷ Effect Unit
@@ -105,7 +105,7 @@ dragEventSource mouseEvent = ES.eventSource' \emit → do
   win ← Window.toEventTarget <$> window
   addEventListener mousemove mouseMove false win
   addEventListener mouseup mouseUp false win
-  pure removeListeners
+  pure $ ES.Finalizer removeListeners
 
 unsafeEventToPageCoord ∷ Event → PageCoord
 unsafeEventToPageCoord = unsafeCoerce
