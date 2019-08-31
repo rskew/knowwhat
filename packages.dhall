@@ -172,6 +172,31 @@ let additions =
       , version =
           "c8d83ac4cc7b3b112399fef53641e0736e7a49d5"
       }
+  , webaudio =
+      { dependencies =
+          [ "aff"
+          , "affjax"
+          , "arraybuffer"
+          , "arraybuffer-types"
+          , "arrays"
+          , "assert"
+          , "console"
+          , "effect"
+          , "foldable-traversable"
+          , "js-timers"
+          , "lists"
+          , "math"
+          , "maybe"
+          , "psci-support"
+          , "refs"
+          , "strings"
+          , "tuples"
+          ]
+      , repo =
+          "https://github.com/rskew/purescript-webaudio.git"
+      , version =
+          "7935e9f9195b21157f944eda5910b2ae124a806f"
+      }
   }
 
 in  upstream // overrides // additions

@@ -20,6 +20,7 @@ You can edit this file as you like.
     , "halogen-contenteditable"
     , "halogen-svg"
     , "undoable"
+    , "webaudio"
     ]
 , packages =
     ./packages.dhall

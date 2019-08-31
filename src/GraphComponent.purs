@@ -61,6 +61,10 @@ import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
 import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
+import Audio.WebAudio.BaseAudioContext (createOscillator, newAudioContext, destination)
+import Audio.WebAudio.Types (connect)
+import Audio.WebAudio.Oscillator as Osc
+
 
 foreign import loadFile :: Effect Unit
 foreign import saveJSON :: String -> String -> Effect Unit
@@ -705,6 +709,23 @@ graph =
     Keypress keyboardEvent -> do
       H.liftEffect $ log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
+        " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ log "beeping:"
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          H.liftEffect do
+            ctx <- newAudioContext
+            osc1 <- createOscillator ctx
+            osc2 <- createOscillator ctx
+            _ <- Osc.setFrequency 100.0 osc1
+            _ <- Osc.setFrequency 111.0 osc2
+            dest <- destination ctx
+            _ <- connect osc1 dest
+            _ <- connect osc2 dest
+            _ <- Osc.startOscillator 0.0 osc1
+            _ <- Osc.startOscillator 0.0 osc2
+            pure unit
+          H.liftEffect $ log "beeping!"
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
