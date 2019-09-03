@@ -141,7 +141,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-undoable.git"
       , version =
-          "01a7a34cdc784282af2c1e6a39a53d3c6ec2f0d7"
+          "3e3074049766d921eea5de6a69418732a5d49b01"
       }
   , halogen-contenteditable =
       { dependencies =
@@ -195,7 +195,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-webaudio.git"
       , version =
-          "7935e9f9195b21157f944eda5910b2ae124a806f"
+          "b96b2c177f2447bbc7b2b24a4e2b3479aa749403"
       }
   }
 

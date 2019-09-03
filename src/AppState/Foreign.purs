@@ -2,7 +2,7 @@ module AppState.Foreign where
 
 import Prelude
 
-import AppState (AppState, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape)
+import AppState (UninitializedAppState, AppState, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape, _graph, _drawingEdges, _graphOrigin, _hoveredElementId, _boundingRect, _zoom)
 import Control.Monad.Except.Trans (ExceptT, runExceptT)
 import Data.Array ((!!))
 import Data.Bifunctor (lmap)
@@ -10,6 +10,7 @@ import Data.DateTime.Instant (Instant, instant, unInstant)
 import Data.Either (Either, note)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity(..))
+import Data.Lens ((^.), (.~), (%~))
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe)
 import Data.String (Pattern(..), split)
@@ -17,13 +18,13 @@ import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse)
 import Data.UUID (parseUUID)
 import Data.UUID as UUID
-import Data.Undoable (Undoable, mapActions)
+import Data.Undoable (Undoable, mapActions, _current)
 import Foreign (Foreign, ForeignError, renderForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericDecodeJSON, genericEncodeJSON, genericEncode, genericDecode, defaultOptions)
 import Foreign.Object (Object)
-import Web.HTML.HTMLElement as WHE
 import Point2D (Point2D)
+import Web.HTML.HTMLElement as WHE
 import Workflow.Core (EdgeId)
 import Workflow.UIGraph.Types (UIGraph, ForeignNodeId, ForeignEdgeId(..), toForeignMap, fromForeignMap, parseUUIDEither)
 import Workflow.UIGraph.UIGraphOp (UIGraphOp)
@@ -75,15 +76,19 @@ instance encodeForeignUnit :: Encode ForeignUnit where
 instance decodeForeignUnit :: Decode ForeignUnit where
   decode x = genericDecode defaultOptions x
 
-newtype ForeignAppState =
-  ForeignAppState
-  { graph :: Undoable UIGraph (UIGraphOp ForeignUnit)
+type ForeignAppStateInner =
+  { graph :: UIGraph
   , drawingEdges :: Object ForeignDrawingEdge
   , hoveredElementId :: Maybe ForeignGraphElementId
   , boundingRect :: WHE.DOMRect
   , graphOrigin :: ForeignPos
   , zoom :: Number
   }
+
+type UndoableForeignAppState = Undoable ForeignAppStateInner (UIGraphOp ForeignUnit)
+
+newtype ForeignAppState =
+  ForeignAppState UndoableForeignAppState
 derive instance genericForeignAppState :: Generic ForeignAppState _
 instance encodeForeignAppState :: Encode ForeignAppState where
   encode x = genericEncode defaultOptions x
@@ -105,9 +110,10 @@ instance encodeForeignAppStateMeta :: Encode ForeignAppStateMeta where
 instance decodeForeignAppStateMeta :: Decode ForeignAppStateMeta where
   decode x = genericDecode defaultOptions x
 
-type AppStateWithMeta = { appState :: AppState
-                        , metadata :: AppStateMeta
-                        }
+type UninitializedAppStateWithMeta =
+  { uninitializedAppState :: UninitializedAppState
+  , metadata :: AppStateMeta
+  }
 
 newtype ForeignAppStateWithMeta =
   ForeignAppStateWithMeta
@@ -123,8 +129,8 @@ instance decodeForeignAppStateWithMeta :: Decode ForeignAppStateWithMeta where
 ------
 -- Serialisation
 
-objectifyDrawingEdge :: DrawingEdge -> ForeignDrawingEdge
-objectifyDrawingEdge drawingEdge =
+toForeignDrawingEdge :: DrawingEdge -> ForeignDrawingEdge
+toForeignDrawingEdge drawingEdge =
   let
     GraphSpacePos drawingEdgePos = drawingEdge.pos
   in
@@ -133,10 +139,10 @@ objectifyDrawingEdge drawingEdge =
                 , pos = ForeignPos drawingEdgePos
                 }
 
-objectifyGraphElementId :: HoveredElementId -> ForeignGraphElementId
-objectifyGraphElementId (NodeHaloId nodeId) = ForeignNodeHaloId $ UUID.toString nodeId
-objectifyGraphElementId (NodeBorderId nodeId) = ForeignNodeBorderId $ UUID.toString nodeId
-objectifyGraphElementId (EdgeBorderId edgeId) =
+toForeignGraphElementId :: HoveredElementId -> ForeignGraphElementId
+toForeignGraphElementId (NodeHaloId nodeId) = ForeignNodeHaloId $ UUID.toString nodeId
+toForeignGraphElementId (NodeBorderId nodeId) = ForeignNodeBorderId $ UUID.toString nodeId
+toForeignGraphElementId (EdgeBorderId edgeId) =
   ForeignEdgeBorderId $ ForeignEdgeId
   { source : UUID.toString edgeId.source
   , target : UUID.toString edgeId.target
@@ -150,24 +156,27 @@ edgeIdToString edgeId = UUID.toString edgeId.source
 toForeignUnit :: Unit -> ForeignUnit
 toForeignUnit _ = ForeignUnit
 
-objectifyAppState :: AppState -> ForeignAppState
-objectifyAppState state =
+toForeignAppState :: AppState -> ForeignAppState
+toForeignAppState state =
   let
-    foreignGraph = mapActions (map toForeignUnit) state.graph
-    foreignDrawingEdges = toForeignMap objectifyDrawingEdge UUID.toString state.drawingEdges
-    foreignHoveredElementId = objectifyGraphElementId <$> state.hoveredElementId
-    PageSpacePos graphOrigin = state.graphOrigin
+    foreignHistory = mapActions (map toForeignUnit) state
+    foreignDrawingEdges = toForeignMap toForeignDrawingEdge UUID.toString $ state ^. _drawingEdges
+    foreignHoveredElementId = toForeignGraphElementId <$> (state ^. _hoveredElementId)
+    PageSpacePos graphOrigin = state ^. _graphOrigin
     foreignGraphOrigin = ForeignPos graphOrigin
   in
-    ForeignAppState $
-    state { graph = foreignGraph
-          , drawingEdges = foreignDrawingEdges
-          , hoveredElementId = foreignHoveredElementId
-          , graphOrigin = foreignGraphOrigin
-          }
+    ForeignAppState
+    $ foreignHistory
+    # _current .~ { graph : state ^. _graph
+                  , drawingEdges : foreignDrawingEdges
+                  , hoveredElementId : foreignHoveredElementId
+                  , graphOrigin : foreignGraphOrigin
+                  , boundingRect : state ^. _boundingRect
+                  , zoom : state ^. _zoom
+                  }
 
-objectifyAppStateMeta :: AppStateMeta -> ForeignAppStateMeta
-objectifyAppStateMeta metadata =
+toForeignAppStateMeta :: AppStateMeta -> ForeignAppStateMeta
+toForeignAppStateMeta metadata =
   let
     Milliseconds millis = unInstant metadata.timestamp
   in
@@ -179,8 +188,8 @@ appStateToJSON appState metadata =
   let
     foreignAppStateWithMeta =
       ForeignAppStateWithMeta
-      { appState : objectifyAppState appState
-      , metadata : objectifyAppStateMeta metadata
+      { appState : toForeignAppState appState
+      , metadata : toForeignAppStateMeta metadata
       }
     appState' = appState
   in
@@ -222,19 +231,19 @@ parseEdgeIdEither edgeIdStr =
 fromForeignUnit :: ForeignUnit -> Unit
 fromForeignUnit _ = unit
 
-fromForeignAppState :: ForeignAppState -> Either String AppState
+fromForeignAppState :: ForeignAppState -> Either String UninitializedAppState
 fromForeignAppState (ForeignAppState foreignState) = do
-  let graph = mapActions (map fromForeignUnit) foreignState.graph
-  drawingEdges <- fromForeignMap fromForeignDrawingEdge parseUUIDEither foreignState.drawingEdges
-  hoveredElementId <- traverse fromForeignGraphElementId foreignState.hoveredElementId
-  let ForeignPos foreignGraphOrigin = foreignState.graphOrigin
+  let undoableHistory = mapActions (map fromForeignUnit) foreignState
+  drawingEdges <- fromForeignMap fromForeignDrawingEdge parseUUIDEither (foreignState ^. _current).drawingEdges
+  hoveredElementId <- traverse fromForeignGraphElementId (foreignState ^. _current).hoveredElementId
+  let ForeignPos foreignGraphOrigin = (foreignState ^. _current).graphOrigin
   let graphOrigin = PageSpacePos foreignGraphOrigin
   pure $
-    foreignState { graph = graph
-                 , drawingEdges = drawingEdges
-                 , hoveredElementId = hoveredElementId
-                 , graphOrigin = graphOrigin
-                 }
+    undoableHistory
+    # _current %~ _{ drawingEdges = drawingEdges
+                   , hoveredElementId = hoveredElementId
+                   , graphOrigin = graphOrigin
+                   }
 
 
 fromForeignAppStateMeta :: ForeignAppStateMeta -> Either String AppStateMeta
@@ -243,13 +252,15 @@ fromForeignAppStateMeta (ForeignAppStateMeta foreignMeta) = do
                $ instant $ Milliseconds foreignMeta.timestamp
   pure $ foreignMeta { timestamp = timestamp }
 
-fromForeignAppStateWithMeta :: ForeignAppStateWithMeta -> Either String AppStateWithMeta
+fromForeignAppStateWithMeta :: ForeignAppStateWithMeta -> Either String UninitializedAppStateWithMeta
 fromForeignAppStateWithMeta (ForeignAppStateWithMeta foreignAppStateWithMeta) = do
-  appState <- fromForeignAppState foreignAppStateWithMeta.appState
+  uninitializedAppState <- fromForeignAppState foreignAppStateWithMeta.appState
   metadata <- fromForeignAppStateMeta foreignAppStateWithMeta.metadata
-  pure $ { appState : appState, metadata : metadata }
+  pure $ { uninitializedAppState : uninitializedAppState
+         , metadata : metadata
+         }
 
-appStateFromJSON :: String -> Either String AppStateWithMeta
+appStateFromJSON :: String -> Either String UninitializedAppStateWithMeta
 appStateFromJSON json =
   let
     exceptTForeignAppStateWithMeta :: ExceptT (NonEmptyList ForeignError) Identity ForeignAppStateWithMeta

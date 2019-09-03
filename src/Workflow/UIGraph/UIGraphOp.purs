@@ -8,7 +8,6 @@ import Data.Group (class Group)
 import Data.Lens (traversed, (^.), (.~))
 import Data.Lens.At (at)
 import Data.Maybe (Maybe(..))
-import Data.Monoid.Action (class Action)
 import Data.Tuple (Tuple(..))
 import Workflow.Core (_edgeId, _nodeId, _nodes, deleteEdge, deleteNode, insertEdge, insertNode, modifyEdge)
 import Point2D (Point2D)
@@ -115,10 +114,6 @@ interpretUIGraphOp (UIGraphOp op) = interpretUIGraphOpM op where
     Free (UpdateEdgeText edge from to next) ->
       (modifyEdge (edge ^. _edgeId) (_edgeText .~ to))
       >>> (interpretUIGraphOpM next)
-
--- | Action instance required by Undoable
-instance actUIGraphOpUIGraph :: Monoid a => Action (UIGraphOp a) UIGraph where
-  act op = interpretUIGraphOp op
 
 
 ------

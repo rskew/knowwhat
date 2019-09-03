@@ -2,6 +2,7 @@ module GraphPaneComponent where
 
 import Prelude
 
+import Audio.WebAudio.Types (AudioContext) as WebAudio
 import AppState (Shape)
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
@@ -29,6 +30,7 @@ data PaneConfiguration = SinglePane | DoublePane
 type State = { configuration :: PaneConfiguration
              , windowShape :: Shape
              , demoGraph :: UIGraph
+             , audioContext :: WebAudio.AudioContext
              }
 
 data Action
@@ -40,7 +42,10 @@ data Action
 
 data Query a = ResizeWindow WE.Event a
 
-type Input = { windowShape :: Shape, demoGraph :: UIGraph }
+type Input = { windowShape :: Shape
+             , demoGraph :: UIGraph
+             , audioContext :: WebAudio.AudioContext
+             }
 
 type Slots = ( panes :: GraphComponent.Slot PanePos )
 
@@ -64,22 +69,24 @@ paneComponent =
     { configuration : SinglePane
     , windowShape : inputs.windowShape
     , demoGraph : inputs.demoGraph
+    , audioContext : inputs.audioContext
     }
 
-  renderPane :: PanePos -> Shape -> UIGraph -> H.ComponentHTML Action Slots Aff
-  renderPane pos windowShape demoGraph =
+  renderPane :: PanePos -> State -> H.ComponentHTML Action Slots Aff
+  renderPane pos state =
     HH.slot
     _panes
     pos
     GraphComponent.graph
     { boundingRect : { left : 0.0
-                     , width : windowShape.width
-                     , right : windowShape.width
+                     , width : state.windowShape.width
+                     , right : state.windowShape.width
                      , top : 0.0
-                     , height : windowShape.height
-                     , bottom : windowShape.height
+                     , height : state.windowShape.height
+                     , bottom : state.windowShape.height
                      }
-    , graph : demoGraph
+    , graph : state.demoGraph
+    , audioContext : state.audioContext
     }
     (Just <<< PaneMessage pos)
 
@@ -95,11 +102,11 @@ paneComponent =
     [ HP.classes [ HH.ClassName "pane" ] ]
     case state.configuration of
       SinglePane ->
-        [ Tuple "LeftPane" $ renderPane LeftPane state.windowShape state.demoGraph ]
+        [ Tuple "LeftPane" $ renderPane LeftPane state ]
       DoublePane ->
-        [ Tuple "LeftPane" $ renderPane LeftPane state.windowShape state.demoGraph
+        [ Tuple "LeftPane" $ renderPane LeftPane state
         , Tuple "divider" renderDivider
-        , Tuple "RightPane" $ renderPane RightPane state.windowShape state.demoGraph
+        , Tuple "RightPane" $ renderPane RightPane state
         ]
 
   handleAction :: Action -> H.HalogenM State Action Slots Unit Aff Unit

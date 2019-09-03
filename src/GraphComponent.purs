@@ -2,8 +2,10 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _undoableGraph, _graphNodePos, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateInner(..), UninitializedAppStateInner, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
+import Audio.WebAudio.BaseAudioContext (newAudioContext)
+import Audio.WebAudio.Types (AudioContext) as WebAudio
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
@@ -11,10 +13,10 @@ import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Foldable (for_)
+import Data.Foldable (for_, foldM)
 import Data.Identity (Identity(..))
 import Data.Int (toNumber)
-import Data.Lens (preview, (%~), (.~), (?~), (^.))
+import Data.Lens (preview, (.~), (?~), (^.))
 import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
@@ -23,7 +25,7 @@ import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
-import Data.Undoable (initUndoable, doo, undo, redo, _history, _undone)
+import Data.Undoable (initUndoable, dooM, undoM, redoM, _current, _history, _undone)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
@@ -57,13 +59,10 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
+import Workflow.Synth (SynthState, SynthNodeState(..), interpretSynth, deleteSynthNode, tryCreateSynthNode)
 import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
-import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
-
-import Audio.WebAudio.BaseAudioContext (createOscillator, newAudioContext, destination)
-import Audio.WebAudio.Types (connect)
-import Audio.WebAudio.Oscillator as Osc
+import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..), deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
@@ -97,15 +96,24 @@ defaultTextFieldShape = { width : 100.0, height : 50.0 }
 maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
-initialState :: { boundingRect :: WHE.DOMRect, graph :: UIGraph } -> AppState
-initialState inputs =
-  { graph : initUndoable inputs.graph
-  , drawingEdges : Map.empty
-  , hoveredElementId : Nothing
-  , boundingRect : inputs.boundingRect
-  , graphOrigin : PageSpacePos { x : 0.0, y : 0.0 }
-  , zoom : 1.0
-  }
+type Input = { boundingRect :: WHE.DOMRect
+             , graph :: UIGraph
+             , audioContext :: WebAudio.AudioContext
+             }
+
+initialState :: Input -> AppState
+initialState inputs = initUndoable
+  $ AppStateInner
+    { graph : inputs.graph
+    , drawingEdges : Map.empty
+    , hoveredElementId : Nothing
+    , boundingRect : inputs.boundingRect
+    , graphOrigin : PageSpacePos { x : 0.0, y : 0.0 }
+    , zoom : 1.0
+    , synthState : { audioContext : inputs.audioContext
+                   , synthNodes : Map.empty
+                   }
+    }
 
 data Action
   = PreventDefault WE.Event Action
@@ -143,10 +151,6 @@ data Message
   | MappingMode
 
 type Slot = H.Slot Query Message
-
-type Input = { boundingRect :: WHE.DOMRect
-             , graph :: UIGraph
-             }
 
 type Slots =
   ( nodeTextField :: SVGContentEditable.Slot NodeId
@@ -226,12 +230,12 @@ graph =
   renderGraphNode :: UINode -> AppState -> H.ComponentHTML Action Slots Aff
   renderGraphNode node state =
     let
-      hoveredOverBorder = state.hoveredElementId == (Just $ NodeBorderId $ node ^. _nodeId)
-      hoveredOverHalo = state.hoveredElementId == (Just $ NodeHaloId $ node ^. _nodeId)
+      hoveredOverBorder = (state ^. _hoveredElementId) == (Just $ NodeBorderId $ node ^. _nodeId)
+      hoveredOverHalo = (state ^. _hoveredElementId) == (Just $ NodeHaloId $ node ^. _nodeId)
       noDrawingEdgeFromNode =
-        Map.isEmpty (Map.filter (\drawingEdge -> drawingEdge.source == node ^. _nodeId) state.drawingEdges)
+        Map.isEmpty (Map.filter (\drawingEdge -> drawingEdge.source == node ^. _nodeId) (state ^. _drawingEdges))
       existsDrawingEdgeHoveredOverNode =
-        (0 < Map.size (Map.filter ((flip drawingEdgeWithinNodeHalo) node) state.drawingEdges))
+        (0 < Map.size (Map.filter ((flip drawingEdgeWithinNodeHalo) node) (state ^. _drawingEdges)))
       drawingEdgeOverNode =
         (hoveredOverBorder || hoveredOverHalo)
         &&
@@ -383,7 +387,7 @@ graph =
       edgeBorderClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edgeBorder"
-        , if state.hoveredElementId == (Just $ EdgeBorderId $ edge ^. _edgeId)
+        , if (state ^. _hoveredElementId) == (Just $ EdgeBorderId $ edge ^. _edgeId)
           then Just "hover"
           else Nothing
         ]
@@ -446,21 +450,21 @@ graph =
                          drawingEdgeHTML <- renderDrawingEdge drawingEdgeState state
                          pure $ Tuple (drawingEdgeKey drawingEdgeState.source) drawingEdgeHTML
                      )
-                     $ Array.fromFoldable $ Map.values state.drawingEdges
-      PageSpacePos graphOrigin = state.graphOrigin
+                     $ Array.fromFoldable $ Map.values (state ^. _drawingEdges)
+      PageSpacePos graphOrigin = (state ^. _graphOrigin)
     in
       HH.div
       [ HP.ref (H.RefLabel "svg") ]
       [ SE.svg
         [ SA.viewBox
           -- scale then shift
-          ( - graphOrigin.x * state.zoom )
-          ( - graphOrigin.y * state.zoom )
-          ( state.boundingRect.width * state.zoom )
-          ( state.boundingRect.height * state.zoom )
+          ( - graphOrigin.x * (state ^. _zoom) )
+          ( - graphOrigin.y * (state ^. _zoom) )
+          ( (state ^. _boundingRect).width * (state ^. _zoom) )
+          ( (state ^. _boundingRect).height * (state ^. _zoom) )
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
-                               $ BackgroundDragStart state.graphOrigin e
+                               $ BackgroundDragStart (state ^. _graphOrigin) e
         , HE.onDoubleClick \e -> Just
                                  $ StopPropagation (ME.toEvent e)
                                  $ AppCreateNode e
@@ -510,15 +514,15 @@ graph =
       state <- H.get
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
-        Just node ->
-          H.modify_ $ (_undoableGraph %~ (doo $ updateNodeTextOp node text))
+        Just node -> do
+          modifyM $ dooM $ updateNodeTextOp node text
 
     EdgeTextInput edgeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
       case lookupEdge (state ^. _graph) edgeId of
         Nothing -> pure unit
-        Just edge ->
-          H.modify_ $ _undoableGraph %~ (doo $ updateEdgeTextOp edge text)
+        Just edge -> do
+          modifyM $ dooM $ updateEdgeTextOp edge text
 
     BackgroundDragStart initialGraphOrigin mouseEvent -> do
       H.modify_ $ _graph <<< _focus .~ NoFocus
@@ -531,7 +535,7 @@ graph =
       let newGraphOrigin = PageSpacePos { x : initialGraphOrigin.x + dragData.offsetX
                                         , y : initialGraphOrigin.y + dragData.offsetY
                                         }
-      H.modify_ _{ graphOrigin = newGraphOrigin }
+      H.modify_ $ _graphOrigin .~ newGraphOrigin
 
     BackgroundDragMove (Drag.Done _) _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -545,15 +549,16 @@ graph =
     NodeDragMove (Drag.Move _ dragData) nodeId (GraphSpacePos initialNodePos) _ -> do
       state <- H.get
       let
-        dragOffsetGraphSpace = { x : dragData.offsetX * state.zoom
-                               , y : dragData.offsetY * state.zoom
+        dragOffsetGraphSpace = { x : dragData.offsetX * (state ^. _zoom)
+                               , y : dragData.offsetY * (state ^. _zoom)
                                }
         newNodePos = { x : initialNodePos.x + dragOffsetGraphSpace.x
                      , y : initialNodePos.y + dragOffsetGraphSpace.y
                      }
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
-        Just node -> H.modify_ $ _undoableGraph %~ (doo $ moveNodeOp node newNodePos)
+        Just node -> do
+          modifyM $ dooM $ moveNodeOp node newNodePos
 
     NodeDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -562,7 +567,7 @@ graph =
       state <- H.get
       let
         mouseGraphPos = mouseEventPosition mouseEvent
-                        # toGraphSpace state.boundingRect state.graphOrigin state.zoom
+                        # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
         drawingEdgeSourceId = drawingEdgeId
       H.modify_ $ (_drawingEdges <<< at drawingEdgeId ?~ { pos : mouseGraphPos
                                                          , source : drawingEdgeSourceId
@@ -574,7 +579,7 @@ graph =
     EdgeDrawMove (Drag.Move _ dragData) drawingEdgeId _ -> do
       state <- H.get
       let dragGraphPos = PageSpacePos { x : dragData.x, y : dragData.y }
-                         # toGraphSpace state.boundingRect state.graphOrigin state.zoom
+                         # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
       H.modify_ $ _drawingEdgePos drawingEdgeId .~ dragGraphPos
 
     EdgeDrawMove (Drag.Done _) drawingEdgeId subscriptionId -> do
@@ -582,7 +587,7 @@ graph =
       state <- H.get
       let
         maybeNewEdgeTarget = do
-          drawingEdgeState <- Map.lookup drawingEdgeId state.drawingEdges
+          drawingEdgeState <- Map.lookup drawingEdgeId $ state ^. _drawingEdges
           Map.values (state ^. _graph <<< _nodes)
            # (List.filter (drawingEdgeWithinNodeHalo drawingEdgeState))
            # List.head
@@ -602,25 +607,26 @@ graph =
       newNode <- H.liftEffect freshUINode
       state <- H.get
       let
-        GraphSpacePos newPos = mouseEventPosition mouseEvent # toGraphSpace state.boundingRect state.graphOrigin state.zoom
+        GraphSpacePos newPos = mouseEventPosition mouseEvent
+                               # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
-      H.modify_ $ (_undoableGraph %~ (doo $ insertNodeOp newNode'))
+      modifyM $ dooM $ insertNodeOp newNode'
       handleAction $ FocusOn (FocusNode $ newNode' ^. _nodeId)
 
     AppDeleteNode node -> do
+      modifyM $ dooM $ deleteNodeOp node
       state <- H.get
-      H.modify_ $ (_undoableGraph %~ (doo $ deleteNodeOp node))
       case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
         Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
         Nothing -> pure unit
 
     AppCreateEdge edge -> do
-      H.modify_ $ (_undoableGraph %~ (doo $ insertEdgeOp edge))
+      modifyM $ dooM $ insertEdgeOp edge
       handleAction $ FocusOn (FocusEdge (edge ^. _edgeId) [])
 
     AppDeleteEdge edge -> do
-      H.modify_ $ (_undoableGraph %~ (doo $ deleteEdgeOp edge))
+      modifyM $ dooM $ deleteEdgeOp edge
       handleAction $ FocusOn (FocusNode (edge ^. _edgeId).source)
 
     FocusOn newFocus -> do
@@ -638,7 +644,7 @@ graph =
           Just edge -> handleAction $ AppDeleteEdge edge
 
     Hover maybeElementId -> do
-      H.modify_ _{ hoveredElementId = maybeElementId }
+      H.modify_ $ _hoveredElementId .~ maybeElementId
 
     -- | Zoom in/out holding the mouse position invariant in graph space
     -- |
@@ -653,21 +659,20 @@ graph =
       let
         scaledZoom = (WhE.deltaY wheelEvent) * zoomScaling
         PageSpacePos mousePagePos = mouseEventPosition $ WhE.toMouseEvent wheelEvent
-        PageSpacePos graphOrigin = state.graphOrigin
-        newZoom = Math.exp (scaledZoom + (Math.log state.zoom))
+        PageSpacePos graphOrigin = state ^. _graphOrigin
+        newZoom = Math.exp (scaledZoom + (Math.log (state ^. _zoom)))
         -- keep graph-space mouse pos invariant
         newGraphOriginDim mousePos oldGraphOrigin =
-          mousePos - ((mousePos - oldGraphOrigin) * (state.zoom / newZoom))
+          mousePos - ((mousePos - oldGraphOrigin) * ((state ^. _zoom) / newZoom))
         newGraphOrigin = PageSpacePos
                          { x : newGraphOriginDim mousePagePos.x graphOrigin.x
                          , y : newGraphOriginDim mousePagePos.y graphOrigin.y
                          }
-      H.modify_
-        $ (_zoom .~ newZoom)
-        >>> _{ graphOrigin = newGraphOrigin }
+      H.modify_ $ (_zoom .~ newZoom)
+                >>> (_graphOrigin .~ newGraphOrigin)
 
     CenterGraphOrigin -> do
-      H.modify_ _{ graphOrigin = PageSpacePos { x : 0.0, y : 0.0 } }
+      H.modify_ $ _graphOrigin .~ PageSpacePos { x : 0.0, y : 0.0 }
 
     FetchLocalFile changeEvent -> unit <$ runMaybeT do
       target <- MaybeT $ pure $ WE.target changeEvent
@@ -691,8 +696,12 @@ graph =
            >>= appStateFromJSON of
         Left errors -> H.liftEffect $ log errors
         Right appStateWithMeta -> do
-          H.put appStateWithMeta.appState
-          -- Update foreignObject wrapper sizes for the initial text
+          appState <- H.get
+          bareSynthState <- H.liftEffect $ tearDownSynthState appState
+          let uninitializedAppStateInner = appStateWithMeta.uninitializedAppState ^. _current
+          newAppStateCurrent <- H.liftEffect $ initializeSynthState uninitializedAppStateInner bareSynthState
+          H.put $ initUndoable newAppStateCurrent
+          -- Keep text fields in sync
           handleAction $ UpdateContentEditableText
       H.unsubscribe subscriptionId
 
@@ -710,36 +719,40 @@ graph =
       H.liftEffect $ log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
         " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ log "beeping:"
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           H.liftEffect do
-            ctx <- newAudioContext
-            osc1 <- createOscillator ctx
-            osc2 <- createOscillator ctx
-            _ <- Osc.setFrequency 100.0 osc1
-            _ <- Osc.setFrequency 111.0 osc2
-            dest <- destination ctx
-            _ <- connect osc1 dest
-            _ <- connect osc2 dest
-            _ <- Osc.startOscillator 0.0 osc1
-            _ <- Osc.startOscillator 0.0 osc2
-            pure unit
-          H.liftEffect $ log "beeping!"
+            log "beeping:"
+            audioContext <- newAudioContext
+            let synthState = { audioContext : audioContext, synthNodes : Map.empty }
+            destinationNode <- freshUINode
+            let destinationOp = UIGraphOp $ Free $ UpdateNodeText destinationNode "" "destination"
+                                                 $ Pure unit
+            log $ show $ ((Map.values synthState.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
+            synthState' <- interpretSynth destinationOp synthState
+            log $ show $ ((Map.values synthState'.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
+            oscillatorNode <- freshUINode
+            let oscillatorDestinationEdge = freshUIEdge { source : oscillatorNode ^. _nodeId, target : destinationNode ^. _nodeId }
+            let oscillatorOp = UIGraphOp $ Free $ UpdateNodeText oscillatorNode "" "oscillator"
+                                                $ Free $ InsertEdge oscillatorDestinationEdge
+                                                       $ Pure unit
+            synthState'' <- interpretSynth oscillatorOp synthState'
+            log $ show $ ((Map.values synthState''.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
+            log "beeping!"
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ log $ "Undoable history: " <> show (state.graph ^. _history)
-          H.modify_ $ _undoableGraph %~ undo
+          H.liftEffect $ log $ "Undoable history: " <> show (state ^. _history)
+          modifyM undoM
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
         "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ log $ "Undoable undone: " <> show (state.graph ^. _undone)
-          H.modify_ $ _undoableGraph %~ redo
+          H.liftEffect $ log $ "Undoable undone: " <> show (state ^. _undone)
+          modifyM redoM
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
         "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
@@ -772,7 +785,7 @@ graph =
     UpdateBoundingRect a -> map (const a) <$> runMaybeT do
       svgElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "svg")
       svgRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect svgElement
-      lift $ H.modify_ _{ boundingRect = svgRect }
+      lift $ H.modify_ $ _boundingRect .~ svgRect
       lift $ H.liftEffect $ log "updating bounding rect"
 
 
@@ -790,3 +803,33 @@ euclideanDistance (GraphSpacePos pos1) (GraphSpacePos pos2) =
 drawingEdgeWithinNodeHalo :: DrawingEdge -> UINode -> Boolean
 drawingEdgeWithinNodeHalo drawingEdgeState' node =
   haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
+
+
+tearDownSynthState :: AppState -> Effect SynthState
+tearDownSynthState appState =
+  foldM
+  (flip deleteSynthNode)
+  (appState ^. _synthState)
+  $ appState ^. _graph <<< _nodes
+
+initializeSynthState :: UninitializedAppStateInner -> SynthState -> Effect AppStateInner
+initializeSynthState uninitializedAppState bareSynthState = do
+  newSynthState <- foldM
+                   (flip tryCreateSynthNode)
+                   bareSynthState
+                   (uninitializedAppState.graph ^. _nodes)
+  pure $ AppStateInner
+         { synthState : newSynthState
+         , graph : uninitializedAppState.graph
+         , drawingEdges : uninitializedAppState.drawingEdges
+         , hoveredElementId : uninitializedAppState.hoveredElementId
+         , boundingRect : uninitializedAppState.boundingRect
+         , graphOrigin : uninitializedAppState.graphOrigin
+         , zoom : uninitializedAppState.zoom
+         }
+
+modifyM :: (AppState -> Effect AppState) -> H.HalogenM AppState Action Slots Message Aff Unit
+modifyM op = do
+  state <- H.get
+  updatedState <- H.liftEffect $ op state
+  H.put updatedState

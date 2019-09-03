@@ -1,20 +1,18 @@
 module Main where
 
 import Prelude
+
+import Audio.WebAudio.BaseAudioContext (newAudioContext)
+import Data.Int (toNumber)
+import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Class.Console (log)
-
-import Data.Int (toNumber)
-
+import GraphPaneComponent as GP
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
 import Web.HTML (window)
 import Web.HTML.Window (innerWidth, innerHeight)
-
-import GraphPaneComponent as GP
-
-import DemoGraph (demo)
 
 main :: Effect Unit
 main =
@@ -28,4 +26,9 @@ main =
                     , height : toNumber windowHeight
                     }
   demoGraph <- H.liftEffect demo
-  runUI GP.paneComponent { windowShape : windowShape, demoGraph : demoGraph } body
+  audioContext <- H.liftEffect newAudioContext
+  runUI GP.paneComponent { windowShape : windowShape
+                         , demoGraph : demoGraph
+                         , audioContext : audioContext
+                         }
+                         body

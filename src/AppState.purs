@@ -6,15 +6,21 @@ import Data.Lens (Lens', Traversal', lens, traversed, (^.))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe)
+import Data.Monoid.Action (class ActionM)
+import Data.Newtype (class Newtype)
 import Data.Symbol (SProxy(..))
 import Data.UUID (UUID)
+import Data.Undoable (Undoable, _current)
+import Effect (Effect)
+import Effect.Console (log)
 import Point2D (Point2D)
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (NodeId, EdgeId, _nodes, _source, _target)
+import Workflow.Synth (SynthState, SynthNodeState(..), interpretSynth)
 import Workflow.UIGraph.Types (UIEdge, UIGraph, _pos)
-import Workflow.UIGraph.UIGraphOp (UIGraphOp)
-import Data.Undoable (Undoable, _current)
+import Workflow.UIGraph.UIGraphOp (UIGraphOp, interpretUIGraphOp)
 
 
 appStateVersion :: String
@@ -79,23 +85,28 @@ data HoveredElementId
   | EdgeBorderId EdgeId
 derive instance eqGraphElementId :: Eq HoveredElementId
 
-type AppState =
-  { graph :: Undoable UIGraph (UIGraphOp Unit)
+type AppStateInner_ =
+  { graph :: UIGraph
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId :: Maybe HoveredElementId
   , boundingRect :: WHE.DOMRect
   , graphOrigin :: PageSpacePos
   , zoom :: Number
+  , synthState :: SynthState
   }
+newtype AppStateInner = AppStateInner AppStateInner_
+derive instance newtypeAppStateInner :: Newtype AppStateInner _
 
-_undoableGraph :: Lens' AppState (Undoable UIGraph (UIGraphOp Unit))
-_undoableGraph = prop (SProxy :: SProxy "graph")
+type AppState = Undoable AppStateInner (UIGraphOp Unit)
+
+_AppStateInner :: Lens' AppStateInner AppStateInner_
+_AppStateInner = (lens (\(AppStateInner appStateInner) -> appStateInner) (\_ -> AppStateInner))
 
 _graph :: Lens' AppState UIGraph
-_graph = _undoableGraph <<< _current
+_graph = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "graph")
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
-_drawingEdges = prop (SProxy :: SProxy "drawingEdges")
+_drawingEdges = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "drawingEdges")
 
 _drawingEdgePos :: DrawingEdgeId -> Traversal' AppState GraphSpacePos
 _drawingEdgePos drawingEdgePos =
@@ -105,17 +116,45 @@ _graphNodePos :: NodeId -> Traversal' AppState GraphSpacePos
 _graphNodePos nodeId =
   _graph <<<_nodes <<< at nodeId <<< traversed <<< _pos <<< _coerceToGraphSpace
 
-_zoom :: Lens' AppState Number
-_zoom = prop (SProxy :: SProxy "zoom")
-
-_boundingRect :: Lens' AppState WHE.DOMRect
-_boundingRect  = prop (SProxy :: SProxy "boundingRect")
-
-_graphOrigin :: Lens' AppState PageSpacePos
-_graphOrigin  = prop (SProxy :: SProxy "graphOrigin")
+_synthState :: Lens' AppState SynthState
+_synthState = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "synthState")
 
 _hoveredElementId :: Lens' AppState (Maybe HoveredElementId)
-_hoveredElementId  = prop (SProxy :: SProxy "hoveredElementId")
+_hoveredElementId = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "hoveredElementId")
+
+_graphOrigin :: Lens' AppState PageSpacePos
+_graphOrigin = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "graphOrigin")
+
+_boundingRect :: Lens' AppState WHE.DOMRect
+_boundingRect = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "boundingRect")
+
+_zoom :: Lens' AppState Number
+_zoom = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "zoom")
 
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)
+
+type UninitializedAppStateInner =
+  { graph :: UIGraph
+  , drawingEdges :: Map DrawingEdgeId DrawingEdge
+  , hoveredElementId :: Maybe HoveredElementId
+  , boundingRect :: WHE.DOMRect
+  , graphOrigin :: PageSpacePos
+  , zoom :: Number
+  }
+
+type UninitializedAppState =
+  Undoable UninitializedAppStateInner (UIGraphOp Unit)
+
+interpretAppState :: forall a. UIGraphOp a -> (AppStateInner -> Effect AppStateInner)
+interpretAppState op (AppStateInner appStateInner) = do
+  let updatedGraph = interpretUIGraphOp op $ appStateInner.graph
+  updatedSynthState <- interpretSynth op $ appStateInner.synthState
+  log $ show $ ((Map.values updatedSynthState.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
+  pure $ AppStateInner $ appStateInner { graph = updatedGraph
+                                       , synthState = updatedSynthState
+                                       }
+
+-- | Action instance required by Undoable
+instance actUIGraphOpAppState :: Monoid a => ActionM Effect (UIGraphOp a) AppStateInner where
+  actM op = interpretAppState op
