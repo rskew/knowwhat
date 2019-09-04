@@ -2,9 +2,10 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState, AppStateInner(..), UninitializedAppStateInner, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateInner(..), UninitializedAppStateInner, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext)
+import Audio.WebAudio.GainNode (setGain) as WebAudio
 import Audio.WebAudio.Types (AudioContext) as WebAudio
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
@@ -16,7 +17,7 @@ import Data.Either (Either(..))
 import Data.Foldable (for_, foldM)
 import Data.Identity (Identity(..))
 import Data.Int (toNumber)
-import Data.Lens (preview, (.~), (?~), (^.))
+import Data.Lens (preview, traversed, (.~), (?~), (^.), (^?))
 import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
@@ -59,7 +60,7 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.Synth (SynthState, SynthNodeState(..), interpretSynth, deleteSynthNode, tryCreateSynthNode)
+import Workflow.Synth (SynthState, SynthNodeState(..), SynthNodeParams(..), interpretSynth, deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode)
 import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
 import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..), deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
@@ -83,6 +84,15 @@ haloRadius = 40.0
 
 nodeTextBoxOffset :: Point2D
 nodeTextBoxOffset = { x : 20.0, y : - 10.0 }
+
+amplifierTextBoxOffset :: Point2D
+amplifierTextBoxOffset = { x : -30.0, y : -50.0 }
+
+amplifierBoxSize :: Number
+amplifierBoxSize = 50.0
+
+amplifierHaloWidth :: Number
+amplifierHaloWidth = 15.0
 
 edgeTextBoxOffset :: Point2D
 edgeTextBoxOffset = { x : 10.0, y : - 20.0 }
@@ -142,6 +152,8 @@ data Action
   | SaveLocalFile
   | Keypress KE.KeyboardEvent
   | DoNothing
+  | GainDragStart NodeId Number ME.MouseEvent
+  | GainDragMove Drag.DragEvent NodeId Number H.SubscriptionId
 
 data Query a = UpdateBoundingRect a
 
@@ -150,6 +162,7 @@ data Message
   | DrawEdge DrawingEdge
   | MappingMode
 
+-- Slot type for parent components using a child GraphComponent
 type Slot = H.Slot Query Message
 
 type Slots =
@@ -274,56 +287,120 @@ graph =
           then Just "ready"
           else Nothing
         ]
+      textBoxHTML textBoxOffset =
+        [ SE.g
+          [ SA.transform [ SA.Translate textBoxOffset.x textBoxOffset.y ]
+          , HE.onMouseDown \e -> Just
+                                 $ StopPropagation (ME.toEvent e)
+                                 $ DoNothing
+          ]
+          [ HH.slot
+            _nodeTextField
+            (node ^. _nodeId)
+            SVGContentEditable.svgContenteditable
+            { shape : defaultTextFieldShape
+            , initialText : (node ^. _nodeText)
+            , maxShape : maxTextFieldShape
+            , fitContentDynamic : true
+            }
+            (Just <<< NodeTextInput (node ^. _nodeId))
+          ]
+        ]
+      graphNodeHTML =
+        -- Node Halo, for creating edges from
+        [ SE.circle
+          [ SA.class_ haloClasses
+          , SA.r haloRadius
+          , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+                                 $ EdgeDrawStart (node ^. _nodeId) e
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+          ]
+          -- Node center
+        , SE.circle
+          [ SA.class_ nodeClasses
+          , SA.r $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
+                   then groupNodeRadius
+                   else nodeRadius
+          ]
+          -- Node border, for grabbing
+        , SE.circle
+          [ SA.class_ nodeBorderClasses
+          , SA.r nodeBorderRadius
+          , HE.onMouseDown \e -> Just
+                                 $ StopPropagation (ME.toEvent e)
+                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+          , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                                   $ AppDeleteNode node
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+          ]
+        ] <> textBoxHTML nodeTextBoxOffset
+      amplifierNodeHTML gain =
+        -- Node Halo, for creating edges from
+        [ SE.path [ let
+                      b = amplifierHaloWidth + amplifierBoxSize / 2.0
+                    in
+                      SA.d [ SA.Abs (SA.M (-b) (-b))
+                           , SA.Abs (SA.L b (-b))
+                           , SA.Abs (SA.L b b)
+                           , SA.Abs (SA.L (-b) b)
+                           , SA.Abs SA.Z
+                           ]
+                  , SA.class_ haloClasses
+                  , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+                                         $ EdgeDrawStart (node ^. _nodeId) e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
+                  ]
+          -- Draggable amplifier control
+        , SE.path [ SA.class_ nodeClasses
+                  , let
+                      b = amplifierBoxSize / 2.0
+                      bHorn = 2.0 * b
+                      bHornGain = 2.0 * b * gain
+                    in
+                      SA.d [ SA.Abs (SA.M (-b) (-b))
+                           , SA.Abs (SA.L b (-b))
+                           , SA.Abs (SA.L bHorn (-bHornGain))
+                           , SA.Abs (SA.L bHorn bHornGain)
+                           , SA.Abs (SA.L b b)
+                           , SA.Abs (SA.L (-b) b)
+                           , SA.Abs SA.Z
+                           ]
+                  , HE.onMouseDown \e -> Just
+                                         $ StopPropagation (ME.toEvent e)
+                                         $ GainDragStart (node ^. _nodeId) gain e
+                  ]
+          -- Node border, for grabbing
+        , SE.path [ let
+                       b = amplifierBoxSize / 2.0
+                    in
+                       SA.d [ SA.Abs (SA.M (-b) (-b))
+                            , SA.Abs (SA.L b (-b))
+                            , SA.Abs (SA.L b b)
+                            , SA.Abs (SA.L (-b) b)
+                            , SA.Abs SA.Z
+                            ]
+                  , SA.class_ nodeBorderClasses
+                  , HE.onMouseDown \e -> Just
+                                         $ StopPropagation (ME.toEvent e)
+                                         $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                  , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                                           $ AppDeleteNode node
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
+                  ]
+        ] <> textBoxHTML amplifierTextBoxOffset
+      nodeHTML = case Map.lookup (node ^. _nodeId) (state ^. _synthState).synthNodes of
+        Nothing -> graphNodeHTML
+        Just (SynthNodeState synthNodeState) -> case synthNodeState.synthNodeParams of
+          AmplifierParams gain -> amplifierNodeHTML gain
+          _ -> graphNodeHTML
     in
       SE.g
       [ SA.transform [ SA.Translate (node ^. _pos).x (node ^. _pos).y ] ]
-      [ SE.circle
-        -- Node Halo, for creating edges from
-        [ SA.class_ haloClasses
-        , SA.r haloRadius
-        , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                    $ EdgeDrawStart (node ^. _nodeId) e
-        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
-        , HE.onMouseLeave \_ -> Just $ Hover Nothing
-        ]
-      -- Node center
-      , SE.circle
-        [ SA.class_ nodeClasses
-        , SA.r $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
-                 then groupNodeRadius
-                 else nodeRadius
-        ]
-      -- Node border, for grabbing
-      , SE.circle
-        [ SA.class_ nodeBorderClasses
-        , SA.r nodeBorderRadius
-        , HE.onMouseDown \e -> Just
-                               $ StopPropagation (ME.toEvent e)
-                               $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
-        , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-                                 $ AppDeleteNode node
-        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
-        , HE.onMouseLeave \_ -> Just $ Hover Nothing
-        ]
-      -- Node Textbox
-      , SE.g
-        [ SA.transform [ SA.Translate nodeTextBoxOffset.x nodeTextBoxOffset.y ]
-        , HE.onMouseDown \e -> Just
-                               $ StopPropagation (ME.toEvent e)
-                               $ DoNothing
-        ]
-        [ HH.slot
-          _nodeTextField
-          (node ^. _nodeId)
-          SVGContentEditable.svgContenteditable
-          { shape : defaultTextFieldShape
-          , initialText : (node ^. _nodeText)
-          , maxShape : maxTextFieldShape
-          , fitContentDynamic : true
-          }
-          (Just <<< NodeTextInput (node ^. _nodeId))
-        ]
-      ]
+      nodeHTML
 
   renderEdge :: UIEdge -> AppState -> Maybe (H.ComponentHTML Action Slots Aff)
   renderEdge edge state = do
@@ -528,7 +605,7 @@ graph =
       H.modify_ $ _graph <<< _focus .~ NoFocus
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-        $ \e -> BackgroundDragMove e initialGraphOrigin subscriptionId
+          \e -> BackgroundDragMove e initialGraphOrigin subscriptionId
 
     BackgroundDragMove (Drag.Move _ dragData) (PageSpacePos initialGraphOrigin) _ -> do
       state <- H.get
@@ -543,7 +620,7 @@ graph =
     NodeDragStart nodeId initialNodePos mouseEvent -> do
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-        $ \e -> NodeDragMove e nodeId initialNodePos subscriptionId
+          \e -> NodeDragMove e nodeId initialNodePos subscriptionId
       H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
 
     NodeDragMove (Drag.Move _ dragData) nodeId (GraphSpacePos initialNodePos) _ -> do
@@ -779,6 +856,29 @@ graph =
 
     DoNothing ->
       pure unit
+
+    GainDragStart nodeId initialGain mouseEvent -> do
+      H.subscribe' \subscriptionId ->
+        Drag.dragEventSource mouseEvent
+          \e -> GainDragMove e nodeId initialGain subscriptionId
+      H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
+
+    GainDragMove (Drag.Move _ dragData) nodeId initialGain _ -> do
+      state <- H.get
+      let
+        gainOffset = - dragData.offsetY * (state ^. _zoom)
+        newGain = Math.max 0.0 $ initialGain + (1.0 / amplifierBoxSize) * gainOffset
+      case Map.lookup nodeId (state ^. _synthState).synthNodes of
+        Nothing -> pure unit
+        Just synthNodeState -> do
+          H.modify_ $ _synthNodeState nodeId <<< traversed <<< _synthNodeGain .~ newGain
+          case synthNodeState ^? _gainNode of
+            Nothing -> pure unit
+            Just gainNode -> H.liftEffect $ WebAudio.setGain newGain gainNode
+
+    GainDragMove (Drag.Done _) _ _ subscriptionId ->
+      H.unsubscribe subscriptionId
+
 
   handleQuery :: forall a. Query a -> H.HalogenM AppState Action Slots Message Aff (Maybe a)
   handleQuery = case _ of

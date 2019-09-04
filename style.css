@@ -52,7 +52,7 @@ svg {
     border: 1px solid var(--text-field-border-color);
     width: auto;
     min-width: 5%;
-    min-width: 100px;
+    min-width: 50px;
     max-width: 100%;
     min-height: 15px;
     max-height: 100%;

@@ -119,6 +119,9 @@ _graphNodePos nodeId =
 _synthState :: Lens' AppState SynthState
 _synthState = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "synthState")
 
+_synthNodeState :: NodeId -> Lens' AppState (Maybe SynthNodeState)
+_synthNodeState nodeId = _synthState <<< prop (SProxy :: SProxy "synthNodes") <<< at nodeId
+
 _hoveredElementId :: Lens' AppState (Maybe HoveredElementId)
 _hoveredElementId = _current <<< _AppStateInner <<< prop (SProxy :: SProxy "hoveredElementId")
 

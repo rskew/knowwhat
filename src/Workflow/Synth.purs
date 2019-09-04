@@ -10,15 +10,19 @@ import Audio.WebAudio.DelayNode (delayTime) as WebAudio
 import Audio.WebAudio.GainNode (setGain) as WebAudio
 import Audio.WebAudio.AudioParam (setValue) as WebAudio
 import Audio.WebAudio.Oscillator (OscillatorType(..), setFrequency, setOscillatorType, startOscillator, stopOscillator) as WebAudio
-import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, connect, disconnect, connectParam) as WebAudio
+import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, connect, disconnect, connectParam) as WebAudio
 import Data.Array as Array
 import Data.ArrayBuffer.Types (ByteLength)
-import Data.Lens ((^.))
+import Data.Foldable (for_)
+import Data.Lens (Lens', Prism', Optic', lens, prism', (^.))
+import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap)
-import Data.Foldable (for_)
+import Data.Profunctor.Choice (class Choice)
+import Data.Profunctor.Strong (class Strong)
+import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
@@ -30,7 +34,7 @@ defaultOscillatorFreq :: Freq
 defaultOscillatorFreq = 120.0
 
 defaultOscillatorType :: WebAudio.OscillatorType
-defaultOscillatorType = WebAudio.Sawtooth
+defaultOscillatorType = WebAudio.Sine
 
 defaultAmplifierGain :: Gain
 defaultAmplifierGain = 0.5
@@ -99,12 +103,12 @@ type SynthState = { synthNodes :: Map NodeId SynthNodeState
                   , audioContext :: WebAudio.AudioContext
                   }
 
-newtype SynthNodeState =
-  SynthNodeState
-  { audioNode :: WebAudio.AudioNode
-  , synthNodeType :: SynthNodeType
-  , synthNodeParams :: SynthNodeParams
-  }
+type SynthNodeState_ = { audioNode :: WebAudio.AudioNode
+                       , synthNodeType :: SynthNodeType
+                       , synthNodeParams :: SynthNodeParams
+                       }
+
+newtype SynthNodeState = SynthNodeState SynthNodeState_
 derive instance newtypeSynthNodeState :: Newtype SynthNodeState _
 
 instance connectableSynthNodeState :: WebAudio.Connectable SynthNodeState where
@@ -169,6 +173,32 @@ type Reduction = Number
 type Attack = Number
 type Release = Number
 type Pan = Number
+
+_SynthNodeState :: Lens' SynthNodeState SynthNodeState_
+_SynthNodeState = lens unwrap (\_ -> SynthNodeState)
+
+_synthNodeParams :: Lens' SynthNodeState SynthNodeParams
+_synthNodeParams = _SynthNodeState <<< prop (SProxy :: SProxy "synthNodeParams")
+
+_gain :: Prism' SynthNodeParams Gain
+_gain = prism' AmplifierParams (case _ of
+                                   AmplifierParams gain -> Just gain
+                                   _ -> Nothing
+                               )
+
+_synthNodeGain :: forall p. Choice p => Strong p =>
+                  Optic' p SynthNodeState Gain
+_synthNodeGain = _synthNodeParams <<< _gain
+
+_audioNode :: Lens' SynthNodeState WebAudio.AudioNode
+_audioNode = _SynthNodeState <<< prop (SProxy :: SProxy "audioNode")
+
+_gainNode :: forall p. Choice p => Strong p =>
+             Optic' p SynthNodeState WebAudio.GainNode
+_gainNode = _audioNode <<< prism' WebAudio.Gain (case _ of
+                                           WebAudio.Gain gainNode -> Just gainNode
+                                           _ -> Nothing
+                                       )
 
 -- | Compile an operation on the graph to an operation on the synthesiser
 -- | that changes the synth context as an Effect and returns a function that
