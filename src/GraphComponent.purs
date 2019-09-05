@@ -21,7 +21,7 @@ import Data.Lens (preview, traversed, (.~), (?~), (^.), (^?))
 import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
@@ -223,6 +223,22 @@ graph =
                         ]
               ]
             , SE.marker
+              [ SA.id "arrow-to-synth-node"
+              , SA.markerWidth 10.0
+              , SA.markerHeight 10.0
+              , SA.refX 57.0
+              , SA.refY 5.0
+              , SA.orient SA.AutoOrient
+              , SA.markerUnits SA.UserSpaceOnUse
+              ]
+              [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
+                               , SA.Abs (SA.L 0.0 10.0)
+                               , SA.Abs (SA.L 8.0 5.0)
+                               , SA.Abs SA.Z
+                               ]
+                        ]
+              ]
+            , SE.marker
               [ SA.id "arrow-to-group"
               , SA.markerWidth 10.0
               , SA.markerHeight 10.0
@@ -316,14 +332,14 @@ graph =
           , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
-          -- Node center
+        -- Node center
         , SE.circle
           [ SA.class_ nodeClasses
           , SA.r $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
                    then groupNodeRadius
                    else nodeRadius
           ]
-          -- Node border, for grabbing
+        -- Node border, for grabbing
         , SE.circle
           [ SA.class_ nodeBorderClasses
           , SA.r nodeBorderRadius
@@ -353,7 +369,7 @@ graph =
                   , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
-          -- Draggable amplifier control
+        -- Draggable amplifier control
         , SE.path [ SA.class_ nodeClasses
                   , let
                       b = amplifierBoxSize / 2.0
@@ -372,7 +388,7 @@ graph =
                                          $ StopPropagation (ME.toEvent e)
                                          $ GainDragStart (node ^. _nodeId) gain e
                   ]
-          -- Node border, for grabbing
+        -- Node border, for grabbing
         , SE.path [ let
                        b = amplifierBoxSize / 2.0
                     in
@@ -419,6 +435,12 @@ graph =
         { x : ((sourceNode ^. _pos).x + (targetNode ^. _pos).x) / 2.0
         , y : ((sourceNode ^. _pos).y + (targetNode ^. _pos).y) / 2.0
         }
+      markerRef = if (Map.isEmpty (targetNode ^. _subgraph <<< _nodes))
+                  then "url(#arrow)"
+                  else "url(#arrow-to-group)"
+      markerRef' = if isJust $ Map.lookup (edge ^. _target) $ (state ^. _synthState).synthNodes
+                   then "url(#arrow-to-synth-node)"
+                   else markerRef
     pure $
       SE.g [] $
       -- Edge
@@ -428,9 +450,7 @@ graph =
         , SA.y1 (sourceNode ^. _pos).y
         , SA.x2 (targetNode ^. _pos).x
         , SA.y2 (targetNode ^. _pos).y
-        , SA.markerEnd $ if (Map.isEmpty (targetNode ^. _subgraph <<< _nodes))
-                         then "url(#arrow)"
-                         else "url(#arrow-to-group)"
+        , SA.markerEnd markerRef'
         ]
       ] <> if not focused && ((edge ^. _edgeText) == "") then [] else
       -- Edge Textbox

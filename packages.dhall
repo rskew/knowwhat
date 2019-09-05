@@ -170,7 +170,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-svg.git"
       , version =
-          "c8d83ac4cc7b3b112399fef53641e0736e7a49d5"
+          "efb414b111cee30520f32e10d759f9539a9342be"
       }
   , webaudio =
       { dependencies =
