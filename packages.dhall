@@ -155,7 +155,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-contenteditable.git"
       , version =
-          "0bf71b766d1bbb1b27f4f3c720d8b6fb089ec122"
+          "23f9467a4307ea1f8615f08afc152103ade74ba3"
       }
   , halogen-svg =
       { dependencies =
@@ -170,7 +170,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-svg.git"
       , version =
-          "efb414b111cee30520f32e10d759f9539a9342be"
+          "a9ad4422ee0fad84537558b46626b824f1883332"
       }
   , webaudio =
       { dependencies =
@@ -195,7 +195,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-webaudio.git"
       , version =
-          "b96b2c177f2447bbc7b2b24a4e2b3479aa749403"
+          "0bea1467032688d7925bdc8f7856d8e21747441c"
       }
   }
 

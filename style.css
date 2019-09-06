@@ -1,6 +1,6 @@
 :root {
   --node-color: #000;
-  --node-border-color: #0001;
+  --node-border-color: #0002;
   --focused-color: #fc0;
   --highlighted-color: #08f2;
   --invalid-color: #f662;
@@ -52,7 +52,7 @@ svg {
     border: 1px solid var(--text-field-border-color);
     width: auto;
     min-width: 5%;
-    min-width: 50px;
+    min-width: 20px;
     max-width: 100%;
     min-height: 15px;
     max-height: 100%;
@@ -72,19 +72,53 @@ foreignObject {
     fill: var(--node-color);
 }
 
-.node.focused {
+.node.delay {
+    fill: url(#pattern-delay-fill);
+    stroke: black;
+    stroke-width: 2;
+}
+
+.node.focused.delay {
+    fill: url(#pattern-delay-fill);
+    stroke: var(--focused-color);
+}
+
+.node.delay.border-shadow {
+    stroke: var(--node-border-color);
+    fill: #fff0;
+}
+
+.pattern-delay-fill-rect1 {
+    fill: #0003
+}
+
+.pattern-delay-fill-rect2 {
+    fill: #0001
+}
+
+.node.focused.amplifier-below-unity {
+    fill: url(#pattern-amplifier-below-unity);
+}
+
+.amplifier-below-unity-triangle {
     fill: var(--focused-color);
 }
 
-//// probably wont implement this
-//circle.node.focused.insert {
-//    fill: #909;
-//}
+.node.focused.amplifier-above-unity {
+    fill: url(#pattern-amplifier-above-unity);
+}
 
-//// probably wont implement this
-//circle.node.focused.move {
-//    fill: #f40;
-//}
+.amplifier-above-unity-triangle {
+    fill: var(--focused-color);
+}
+
+.pattern-amplifier-unity-background {
+    fill: #000c;
+}
+
+.node.focused {
+    fill: var(--focused-color);
+}
 
 .nodeBorder {
     fill: var(--node-border-color);
@@ -149,11 +183,6 @@ foreignObject {
 .edgeBorder.hover {
     opacity: 1.0;
 }
-
-//.edgeBorder.focusGroup {
-//    stroke: var(--highlight-color);
-//    stroke-width: 25px;
-//}
 
 .edgeBorder.invalid {
     stroke: var(--invalid-color);

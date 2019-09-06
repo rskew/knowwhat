@@ -16,6 +16,73 @@ import Workflow.Core (insertNode, insertEdge)
 
 demo :: Effect UIGraph
 demo = do
+  oscillatorId <- genUUID
+  delayId <- genUUID
+  amplifierId <- genUUID
+  destinationId <- genUUID
+  pure $
+    emptyUIGraph
+    # insertNode (UINode { text: "oscillator"
+                         , isValid: true
+                         , position : { x: 450.0
+                                      , y: 270.0
+                                      }
+                         , id : oscillatorId
+                         , parents : Map.empty
+                         , children : Map.empty
+                         , subgraph : emptyUIGraph
+                         })
+    # insertNode (UINode { text: "delay"
+                         , isValid: true
+                         , position : { x: 550.0
+                                      , y: 370.0
+                                      }
+                         , id : delayId
+                         , parents : Map.empty
+                         , children : Map.empty
+                         , subgraph : emptyUIGraph
+                         })
+    # insertNode (UINode { text: "gain"
+                         , isValid: true
+                         , position : { x: 650.0
+                                      , y: 270.0
+                                      }
+                         , id : amplifierId
+                         , parents : Map.empty
+                         , children : Map.empty
+                         , subgraph : emptyUIGraph
+                         })
+    # insertNode (UINode { text: "destination"
+                         , isValid: true
+                         , position : { x: 750.0
+                                      , y: 320.0
+                                      }
+                         , id : destinationId
+                         , parents : Map.empty
+                         , children : Map.empty
+                         , subgraph : emptyUIGraph
+                         })
+    # insertEdge (UIEdge  { id : { source : oscillatorId
+                                 , target : delayId
+                                 }
+                          , text : ""
+                          , isValid : false
+                          })
+    # insertEdge (UIEdge  { id : { source : delayId
+                                 , target : amplifierId
+                                 }
+                          , text : ""
+                          , isValid : false
+                          })
+    # insertEdge (UIEdge  { id : { source : amplifierId
+                                 , target : destinationId
+                                 }
+                          , text : ""
+                          , isValid : false
+                          })
+
+demo_ :: Effect UIGraph
+demo_ = do
   goofusId <- genUUID
   thingoId <- genUUID
   titleId <- genUUID

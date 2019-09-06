@@ -2,10 +2,11 @@ module GraphComponent where
 
 import Prelude
 
-import AppState (AppState, AppStateInner(..), UninitializedAppStateInner, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateCurrent(..), UninitializedAppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
-import Audio.WebAudio.BaseAudioContext (newAudioContext)
-import Audio.WebAudio.GainNode (setGain) as WebAudio
+import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
+import Audio.WebAudio.GainNode (gain) as WebAudio
+import Audio.WebAudio.DelayNode (delayTime) as WebAudio
 import Audio.WebAudio.Types (AudioContext) as WebAudio
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
@@ -22,6 +23,7 @@ import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Newtype (unwrap)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
@@ -60,10 +62,10 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.Synth (SynthState, SynthNodeState(..), SynthNodeParams(..), interpretSynth, deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode)
+import Workflow.Synth (SynthState, SynthNodeState(..), SynthNodeParams(..), deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode, _synthNodeDelayPeriod, _delayNode, setTargetValue)
 import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
-import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..), deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
+import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
@@ -85,14 +87,39 @@ haloRadius = 40.0
 nodeTextBoxOffset :: Point2D
 nodeTextBoxOffset = { x : 20.0, y : - 10.0 }
 
-amplifierTextBoxOffset :: Point2D
-amplifierTextBoxOffset = { x : -30.0, y : -50.0 }
-
 amplifierBoxSize :: Number
-amplifierBoxSize = 50.0
+amplifierBoxSize = 15.0
 
-amplifierHaloWidth :: Number
-amplifierHaloWidth = 15.0
+amplifierTextBoxOffset :: Point2D
+amplifierTextBoxOffset = { x : - 0.0 - amplifierBoxSize
+                         , y : - 23.5 - amplifierBoxSize
+                         }
+
+amplifierHaloOffset :: Number
+amplifierHaloOffset = 17.5
+
+amplifierGainToControl :: Number -> Number
+amplifierGainToControl gain = Math.sqrt gain
+
+controlToAmplifierGain :: Number -> Number
+controlToAmplifierGain controlPos = Math.pow controlPos 2.0
+
+delayPeriodToPageSpace :: Number -> Number
+delayPeriodToPageSpace = (*) 1000.0
+
+pageSpaceToDelayPeriod :: Number -> Number
+pageSpaceToDelayPeriod pageSpacePos = pageSpacePos / 1000.0
+
+delayRectHeight :: Number
+delayRectHeight = 20.0
+
+delayRectHaloOffset :: Number
+delayRectHaloOffset = 19.0
+
+delayTextBoxOffset :: Point2D
+delayTextBoxOffset = { x : 0.0
+                     , y : -23.5  - delayRectHeight / 2.0
+                     }
 
 edgeTextBoxOffset :: Point2D
 edgeTextBoxOffset = { x : 10.0, y : - 20.0 }
@@ -113,7 +140,7 @@ type Input = { boundingRect :: WHE.DOMRect
 
 initialState :: Input -> AppState
 initialState inputs = initUndoable
-  $ AppStateInner
+  $ AppStateCurrent
     { graph : inputs.graph
     , drawingEdges : Map.empty
     , hoveredElementId : Nothing
@@ -154,6 +181,8 @@ data Action
   | DoNothing
   | GainDragStart NodeId Number ME.MouseEvent
   | GainDragMove Drag.DragEvent NodeId Number H.SubscriptionId
+  | DelayDragStart NodeId Number ME.MouseEvent
+  | DelayDragMove Drag.DragEvent NodeId Number H.SubscriptionId
 
 data Query a = UpdateBoundingRect a
 
@@ -250,6 +279,69 @@ graph =
               [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
                                , SA.Abs (SA.L 0.0 10.0)
                                , SA.Abs (SA.L 8.0 5.0)
+                               , SA.Abs SA.Z
+                               ]
+                        ]
+              ]
+            , SE.pattern
+              [ SA.id "pattern-delay-fill"
+              , SA.height $ SA.Length $ SA.Px 20.0
+              , SA.width $ SA.Length $ SA.Px 20.0
+              , SA.x $ - delayRectHeight / 2.0
+              , SA.y $ - delayRectHeight / 2.0
+              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              ]
+              let
+                patternRect x y cssClass =
+                  SE.rect
+                  [ SA.class_ cssClass
+                  , SA.height $ SA.Length $ SA.Px 10.0
+                  , SA.width $ SA.Length $ SA.Px 10.0
+                  , SA.x x
+                  , SA.y y
+                  ]
+              in
+                [ patternRect 0.0 0.0 "pattern-delay-fill-rect1"
+                , patternRect 10.0 0.0 "pattern-delay-fill-rect2"
+                , patternRect 10.0 10.0 "pattern-delay-fill-rect1"
+                , patternRect 0.0 10.0 "pattern-delay-fill-rect2"
+                ]
+            , SE.pattern
+              [ SA.id "pattern-amplifier-below-unity"
+              , SA.height $ SA.Length $ SA.Px 10.0
+              , SA.width $ SA.Length $ SA.Px 10.0
+              , SA.y $ - amplifierBoxSize / 3.0
+              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              ]
+              [ SE.rect
+                [ SA.height $ SA.Length $ SA.Px 10.0
+                , SA.width $ SA.Length $ SA.Px 10.0
+                , SA.class_ "pattern-amplifier-unity-background"
+                ]
+              , SE.path [ SA.class_ "amplifier-below-unity-triangle"
+                        , SA.d [ SA.Abs (SA.M 0.0 0.0)
+                               , SA.Abs (SA.L 5.0 10.0)
+                               , SA.Abs (SA.L 10.0 0.0)
+                               , SA.Abs SA.Z
+                               ]
+                        ]
+              ]
+            , SE.pattern
+              [ SA.id "pattern-amplifier-above-unity"
+              , SA.height $ SA.Length $ SA.Px 10.0
+              , SA.width $ SA.Length $ SA.Px 10.0
+              , SA.y $ - amplifierBoxSize / 3.0
+              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              ]
+              [ SE.rect
+                [ SA.height $ SA.Length $ SA.Px 10.0
+                , SA.width $ SA.Length $ SA.Px 10.0
+                , SA.class_ "pattern-amplifier-unity-background"
+                ]
+              , SE.path [ SA.class_ "amplifier-above-unity-triangle"
+                        , SA.d [ SA.Abs (SA.M 0.0 10.0)
+                               , SA.Abs (SA.L 5.0 0.0)
+                               , SA.Abs (SA.L 10.0 10.0)
                                , SA.Abs SA.Z
                                ]
                         ]
@@ -352,10 +444,22 @@ graph =
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
         ] <> textBoxHTML nodeTextBoxOffset
+      -- Amplifier node with draggable gain control
+      --
+      -- Drag the back of the speaker to move it around
+      -- Drag the horn of the speaker up and down to change the gain
+      --
+      ---          /|
+      ---      ___/ |
+      ---      |    |
+      ---      |__  |
+      ---         \ |
+      ---          \|
+
       amplifierNodeHTML gain =
         -- Node Halo, for creating edges from
         [ SE.path [ let
-                      b = amplifierHaloWidth + amplifierBoxSize / 2.0
+                      b = amplifierHaloOffset + amplifierBoxSize
                     in
                       SA.d [ SA.Abs (SA.M (-b) (-b))
                            , SA.Abs (SA.L b (-b))
@@ -370,16 +474,17 @@ graph =
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         -- Draggable amplifier control
-        , SE.path [ SA.class_ nodeClasses
+        , SE.path [ SA.class_ $ nodeClasses <> if gain < 1.0
+                                               then " amplifier-below-unity"
+                                               else " amplifier-above-unity"
                   , let
-                      b = amplifierBoxSize / 2.0
-                      bHorn = 2.0 * b
-                      bHornGain = 2.0 * b * gain
+                      b = amplifierBoxSize
+                      hornSize = 3.0 * amplifierBoxSize * (amplifierGainToControl gain)
                     in
                       SA.d [ SA.Abs (SA.M (-b) (-b))
                            , SA.Abs (SA.L b (-b))
-                           , SA.Abs (SA.L bHorn (-bHornGain))
-                           , SA.Abs (SA.L bHorn bHornGain)
+                           , SA.Abs (SA.L (3.0 * b) (- hornSize))
+                           , SA.Abs (SA.L (3.0 * b) hornSize)
                            , SA.Abs (SA.L b b)
                            , SA.Abs (SA.L (-b) b)
                            , SA.Abs SA.Z
@@ -390,7 +495,7 @@ graph =
                   ]
         -- Node border, for grabbing
         , SE.path [ let
-                       b = amplifierBoxSize / 2.0
+                       b = amplifierBoxSize
                     in
                        SA.d [ SA.Abs (SA.M (-b) (-b))
                             , SA.Abs (SA.L b (-b))
@@ -408,10 +513,63 @@ graph =
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         ] <> textBoxHTML amplifierTextBoxOffset
+      -- Delay node with draggable delay-period control
+      --
+      -- Drag left box handle to move around
+      --
+      -- Drag delay tube left/right to change the delay period
+      --
+      ---   ____________________
+      ---   |_-_-_-_-_-_-_-_-_-|
+      ---   --------------------
+      ---
+      delayNodeHTML period =
+        -- Node Halo, for creating edges from
+        [ SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight + 2.0 * delayRectHaloOffset
+                  , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) + 2.0 * delayRectHaloOffset
+                  , SA.x $ - delayRectHaloOffset
+                  , SA.y $ - delayRectHaloOffset - delayRectHeight / 2.0
+                  , SA.class_ $ haloClasses
+                  , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+                                         $ EdgeDrawStart (node ^. _nodeId) e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
+                  ]
+        -- Inner border shadow for delay period control
+        , SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
+                  , SA.height $ SA.Length $ SA.Px $ delayRectHeight - 4.0
+                  , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) - 4.0
+                  , SA.x $ 2.0
+                  , SA.y $ 2.0 - delayRectHeight / 2.0
+                  ]
+        -- Draggable delay period control
+        , SE.rect [ SA.class_ $ nodeClasses <> " delay"
+                  , SA.height $ SA.Length $ SA.Px delayRectHeight
+                  , SA.width $ SA.Length $ SA.Px $ delayPeriodToPageSpace period
+                  , SA.y $ - delayRectHeight / 2.0
+                  , HE.onMouseDown \e -> Just
+                                         $ StopPropagation (ME.toEvent e)
+                                         $ DelayDragStart (node ^. _nodeId) period e
+                  ]
+        -- Node border, for grabbing
+        , SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight / 2.0
+                  , SA.width $ SA.Length $ SA.Px $ Math.min delayRectHeight (delayPeriodToPageSpace period)
+                  , SA.class_ $ nodeBorderClasses <> " delay"
+                  , SA.y $ - delayRectHeight / 2.0
+                  , HE.onMouseDown \e -> Just
+                                         $ StopPropagation (ME.toEvent e)
+                                         $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                  , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                                           $ AppDeleteNode node
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
+                  ]
+        ] <> textBoxHTML delayTextBoxOffset
       nodeHTML = case Map.lookup (node ^. _nodeId) (state ^. _synthState).synthNodes of
         Nothing -> graphNodeHTML
         Just (SynthNodeState synthNodeState) -> case synthNodeState.synthNodeParams of
           AmplifierParams gain -> amplifierNodeHTML gain
+          DelayParams delayPeriod -> delayNodeHTML delayPeriod
           _ -> graphNodeHTML
     in
       SE.g
@@ -431,23 +589,31 @@ graph =
           then Just "focused"
           else Nothing
         ]
-      edgeMidPos =
-        { x : ((sourceNode ^. _pos).x + (targetNode ^. _pos).x) / 2.0
-        , y : ((sourceNode ^. _pos).y + (targetNode ^. _pos).y) / 2.0
-        }
       markerRef = if (Map.isEmpty (targetNode ^. _subgraph <<< _nodes))
                   then "url(#arrow)"
                   else "url(#arrow-to-group)"
-      markerRef' = if isJust $ Map.lookup (edge ^. _target) $ (state ^. _synthState).synthNodes
+      markerRef' = if isJust $ Map.lookup (edge ^. _target) (state ^. _synthState).synthNodes
                    then "url(#arrow-to-synth-node)"
                    else markerRef
+      sourcePos = case Map.lookup (edge ^. _source) (state ^. _synthState).synthNodes
+                       >>= (unwrap >>> _.synthNodeParams >>> Just) of
+                    Just (DelayParams delayPeriod) ->
+                      { x : (sourceNode ^. _pos).x
+                            + (delayPeriodToPageSpace delayPeriod)
+                      , y : (sourceNode ^. _pos).y
+                      }
+                    _  -> sourceNode ^. _pos
+      edgeMidPos =
+        { x : (sourcePos.x + (targetNode ^. _pos).x) / 2.0
+        , y : (sourcePos.y + (targetNode ^. _pos).y) / 2.0
+        }
     pure $
       SE.g [] $
       -- Edge
       [ SE.line
         [ SA.class_ edgeClasses
-        , SA.x1 (sourceNode ^. _pos).x
-        , SA.y1 (sourceNode ^. _pos).y
+        , SA.x1 sourcePos.x
+        , SA.y1 sourcePos.y
         , SA.x2 (targetNode ^. _pos).x
         , SA.y2 (targetNode ^. _pos).y
         , SA.markerEnd markerRef'
@@ -488,11 +654,19 @@ graph =
           then Just "hover"
           else Nothing
         ]
+      sourcePos = case Map.lookup (edge ^. _source) (state ^. _synthState).synthNodes
+                       >>= (unwrap >>> _.synthNodeParams >>> Just) of
+                    Just (DelayParams delayPeriod) ->
+                      { x : (sourceNode ^. _pos).x
+                            + (delayPeriodToPageSpace delayPeriod)
+                      , y : (sourceNode ^. _pos).y
+                      }
+                    _  -> sourceNode ^. _pos
     pure $
       SE.line
       [ SA.class_ edgeBorderClasses
-      , SA.x1 (sourceNode ^. _pos).x
-      , SA.y1 (sourceNode ^. _pos).y
+      , SA.x1 sourcePos.x
+      , SA.y1 sourcePos.y
       , SA.x2 (targetNode ^. _pos).x
       , SA.y2 (targetNode ^. _pos).y
       , SA.strokeLinecap SA.Butt
@@ -512,11 +686,19 @@ graph =
       drawingEdgeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edge" ]
+      sourcePos' = case Map.lookup drawingEdgeState.source (state ^. _synthState).synthNodes
+                        >>= (unwrap >>> _.synthNodeParams >>> Just) of
+                     Just (DelayParams delayPeriod) ->
+                       { x : sourceGraphPos.x
+                         + (delayPeriodToPageSpace delayPeriod)
+                       , y : sourceGraphPos.y
+                       }
+                     _  -> sourceGraphPos
     pure $
       SE.line
       [ SA.class_ drawingEdgeClasses
-      , SA.x1 sourceGraphPos.x
-      , SA.y1 sourceGraphPos.y
+      , SA.x1 sourcePos'.x
+      , SA.y1 sourcePos'.y
       , SA.x2 drawingEdgeGraphPos.x
       , SA.y2 drawingEdgeGraphPos.y
       , SA.markerEnd "url(#drawing-arrow)"
@@ -598,7 +780,11 @@ graph =
       -- Add keyboard event listener to body
       document <- H.liftEffect $ WHW.document =<< WH.window
       _ <- H.subscribe $ ES.eventListenerEventSource KET.keydown (HTMLDocument.toEventTarget document) (map Keypress <<< KE.fromEvent)
-      pure unit
+      -- Initialize synth state
+      state <- H.get
+      uninitializedState <- H.liftEffect $ toUninitializedAppState state
+      reinitializedState <- H.liftEffect $ initializeSynthState uninitializedState
+      H.put reinitializedState
 
     UpdateContentEditableText -> do
       state <- H.get
@@ -793,11 +979,10 @@ graph =
            >>= appStateFromJSON of
         Left errors -> H.liftEffect $ log errors
         Right appStateWithMeta -> do
-          appState <- H.get
-          bareSynthState <- H.liftEffect $ tearDownSynthState appState
-          let uninitializedAppStateInner = appStateWithMeta.uninitializedAppState ^. _current
-          newAppStateCurrent <- H.liftEffect $ initializeSynthState uninitializedAppStateInner bareSynthState
-          H.put $ initUndoable newAppStateCurrent
+          state <- H.get
+          H.liftEffect $ WebAudio.close (state ^. _synthState).audioContext
+          newAppState <- H.liftEffect $ initializeSynthState appStateWithMeta.uninitializedAppState
+          H.put newAppState
           -- Keep text fields in sync
           handleAction $ UpdateContentEditableText
       H.unsubscribe subscriptionId
@@ -818,24 +1003,8 @@ graph =
         " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
-          H.liftEffect do
-            log "beeping:"
-            audioContext <- newAudioContext
-            let synthState = { audioContext : audioContext, synthNodes : Map.empty }
-            destinationNode <- freshUINode
-            let destinationOp = UIGraphOp $ Free $ UpdateNodeText destinationNode "" "destination"
-                                                 $ Pure unit
-            log $ show $ ((Map.values synthState.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
-            synthState' <- interpretSynth destinationOp synthState
-            log $ show $ ((Map.values synthState'.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
-            oscillatorNode <- freshUINode
-            let oscillatorDestinationEdge = freshUIEdge { source : oscillatorNode ^. _nodeId, target : destinationNode ^. _nodeId }
-            let oscillatorOp = UIGraphOp $ Free $ UpdateNodeText oscillatorNode "" "oscillator"
-                                                $ Free $ InsertEdge oscillatorDestinationEdge
-                                                       $ Pure unit
-            synthState'' <- interpretSynth oscillatorOp synthState'
-            log $ show $ ((Map.values synthState''.synthNodes) <#> \(SynthNodeState sns) -> sns.synthNodeType)
-            log "beeping!"
+          state <- H.get
+          H.liftEffect $ WebAudio.close (state ^. _synthState).audioContext
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
@@ -880,23 +1049,52 @@ graph =
     GainDragStart nodeId initialGain mouseEvent -> do
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-          \e -> GainDragMove e nodeId initialGain subscriptionId
+        \e -> GainDragMove e nodeId initialGain subscriptionId
       H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
 
     GainDragMove (Drag.Move _ dragData) nodeId initialGain _ -> do
       state <- H.get
       let
-        gainOffset = - dragData.offsetY * (state ^. _zoom)
-        newGain = Math.max 0.0 $ initialGain + (1.0 / amplifierBoxSize) * gainOffset
+        gainOffsetPageSpace = - dragData.offsetY * (state ^. _zoom)
+        initialGainPageSpace = amplifierBoxSize * (amplifierGainToControl initialGain)
+        newGainPageSpace = Math.max 0.0 (initialGainPageSpace + gainOffsetPageSpace)
+        newGain = Math.max 0.0 $ controlToAmplifierGain (newGainPageSpace / amplifierBoxSize)
       case Map.lookup nodeId (state ^. _synthState).synthNodes of
         Nothing -> pure unit
         Just synthNodeState -> do
           H.modify_ $ _synthNodeState nodeId <<< traversed <<< _synthNodeGain .~ newGain
           case synthNodeState ^? _gainNode of
             Nothing -> pure unit
-            Just gainNode -> H.liftEffect $ WebAudio.setGain newGain gainNode
+            Just gainNode -> do
+              _ <- H.liftEffect $ setTargetValue newGain (state ^. _synthState).audioContext =<< WebAudio.gain gainNode
+              pure unit
 
     GainDragMove (Drag.Done _) _ _ subscriptionId ->
+      H.unsubscribe subscriptionId
+
+    DelayDragStart nodeId initialPeriod mouseEvent -> do
+      H.subscribe' \subscriptionId ->
+        Drag.dragEventSource mouseEvent
+          \e -> DelayDragMove e nodeId initialPeriod subscriptionId
+      H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
+
+    DelayDragMove (Drag.Move _ dragData) nodeId initialPeriod _ -> do
+      state <- H.get
+      let
+        periodOffsetPageSpace = dragData.offsetX * (state ^. _zoom)
+        initialPeriodPageSpace = delayPeriodToPageSpace initialPeriod
+        newPeriod = Math.max 0.0 $ pageSpaceToDelayPeriod (periodOffsetPageSpace + initialPeriodPageSpace)
+      case Map.lookup nodeId (state ^. _synthState).synthNodes of
+        Nothing -> pure unit
+        Just synthNodeState -> do
+          H.modify_ $ _synthNodeState nodeId <<< traversed <<< _synthNodeDelayPeriod .~ newPeriod
+          case synthNodeState ^? _delayNode of
+            Nothing -> pure unit
+            Just delayNode -> do
+              _ <- H.liftEffect $ setTargetValue newPeriod (state ^. _synthState).audioContext =<< WebAudio.delayTime delayNode
+              pure unit
+
+    DelayDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
 
@@ -924,7 +1122,6 @@ drawingEdgeWithinNodeHalo :: DrawingEdge -> UINode -> Boolean
 drawingEdgeWithinNodeHalo drawingEdgeState' node =
   haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
 
-
 tearDownSynthState :: AppState -> Effect SynthState
 tearDownSynthState appState =
   foldM
@@ -932,21 +1129,35 @@ tearDownSynthState appState =
   (appState ^. _synthState)
   $ appState ^. _graph <<< _nodes
 
-initializeSynthState :: UninitializedAppStateInner -> SynthState -> Effect AppStateInner
-initializeSynthState uninitializedAppState bareSynthState = do
+initializeSynthState :: UninitializedAppState -> Effect AppState
+initializeSynthState uninitializedAppState = do
+  audioContext <- WebAudio.newAudioContext
+  let bareSynthState = { audioContext : audioContext, synthNodes : Map.empty }
   newSynthState <- foldM
                    (flip tryCreateSynthNode)
                    bareSynthState
-                   (uninitializedAppState.graph ^. _nodes)
-  pure $ AppStateInner
-         { synthState : newSynthState
-         , graph : uninitializedAppState.graph
-         , drawingEdges : uninitializedAppState.drawingEdges
-         , hoveredElementId : uninitializedAppState.hoveredElementId
-         , boundingRect : uninitializedAppState.boundingRect
-         , graphOrigin : uninitializedAppState.graphOrigin
-         , zoom : uninitializedAppState.zoom
-         }
+                   ((uninitializedAppState ^. _current).graph ^. _nodes)
+  pure $ uninitializedAppState
+         # _current .~ AppStateCurrent
+                       { graph : (uninitializedAppState ^. _current).graph
+                       , drawingEdges : (uninitializedAppState ^. _current).drawingEdges
+                       , hoveredElementId : (uninitializedAppState ^. _current).hoveredElementId
+                       , boundingRect : (uninitializedAppState ^. _current).boundingRect
+                       , graphOrigin : (uninitializedAppState ^. _current).graphOrigin
+                       , zoom : (uninitializedAppState ^. _current).zoom
+                       , synthState : newSynthState
+                       }
+
+toUninitializedAppState :: AppState -> Effect UninitializedAppState
+toUninitializedAppState state = do
+  WebAudio.close (state ^. _synthState).audioContext
+  pure $ state # _current .~ { graph : state ^. _graph
+                             , drawingEdges : state ^. _drawingEdges
+                             , hoveredElementId : state ^. _hoveredElementId
+                             , boundingRect : state ^. _boundingRect
+                             , graphOrigin : state ^. _graphOrigin
+                             , zoom : state ^. _zoom
+                             }
 
 modifyM :: (AppState -> Effect AppState) -> H.HalogenM AppState Action Slots Message Aff Unit
 modifyM op = do

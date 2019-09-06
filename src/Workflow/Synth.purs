@@ -4,13 +4,13 @@ import Prelude
 
 import Effect.Console (log)
 import Audio.WebAudio.AudioBufferSourceNode (stopBufferSource) as WebAudio
-import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, destination) as WebAudio
+import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, destination, currentTime) as WebAudio
 import Audio.WebAudio.BiquadFilterNode (BiquadFilterType(..), setFilterType, filterFrequency, quality, gain) as WebAudio
 import Audio.WebAudio.DelayNode (delayTime) as WebAudio
 import Audio.WebAudio.GainNode (setGain) as WebAudio
-import Audio.WebAudio.AudioParam (setValue) as WebAudio
+import Audio.WebAudio.AudioParam (linearRampToValueAtTime) as WebAudio
 import Audio.WebAudio.Oscillator (OscillatorType(..), setFrequency, setOscillatorType, startOscillator, stopOscillator) as WebAudio
-import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, connect, disconnect, connectParam) as WebAudio
+import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, DelayNode, AudioParam, Value, connect, disconnect, connectParam) as WebAudio
 import Data.Array as Array
 import Data.ArrayBuffer.Types (ByteLength)
 import Data.Foldable (for_)
@@ -29,9 +29,11 @@ import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
 import Workflow.UIGraph.Types (UINode, _nodeText)
 import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..))
 
+updateValueRampTime :: WebAudio.Seconds
+updateValueRampTime = 0.1
 
 defaultOscillatorFreq :: Freq
-defaultOscillatorFreq = 120.0
+defaultOscillatorFreq = 220.0
 
 defaultOscillatorType :: WebAudio.OscillatorType
 defaultOscillatorType = WebAudio.Sine
@@ -190,15 +192,32 @@ _synthNodeGain :: forall p. Choice p => Strong p =>
                   Optic' p SynthNodeState Gain
 _synthNodeGain = _synthNodeParams <<< _gain
 
+_delayPeriod :: Prism' SynthNodeParams PeriodSeconds
+_delayPeriod = prism' DelayParams (case _ of
+                                      DelayParams period -> Just period
+                                      _ -> Nothing
+                                  )
+
+_synthNodeDelayPeriod :: forall p. Choice p => Strong p =>
+                         Optic' p SynthNodeState PeriodSeconds
+_synthNodeDelayPeriod = _synthNodeParams <<< _delayPeriod
+
 _audioNode :: Lens' SynthNodeState WebAudio.AudioNode
 _audioNode = _SynthNodeState <<< prop (SProxy :: SProxy "audioNode")
 
 _gainNode :: forall p. Choice p => Strong p =>
              Optic' p SynthNodeState WebAudio.GainNode
 _gainNode = _audioNode <<< prism' WebAudio.Gain (case _ of
-                                           WebAudio.Gain gainNode -> Just gainNode
-                                           _ -> Nothing
-                                       )
+                                                   WebAudio.Gain gainNode -> Just gainNode
+                                                   _ -> Nothing
+                                                )
+
+_delayNode :: forall p. Choice p => Strong p =>
+              Optic' p SynthNodeState WebAudio.DelayNode
+_delayNode = _audioNode <<< prism' WebAudio.Delay (case _ of
+                                                      WebAudio.Delay delayNode -> Just delayNode
+                                                      _ -> Nothing
+                                                  )
 
 -- | Compile an operation on the graph to an operation on the synthesiser
 -- | that changes the synth context as an Effect and returns a function that
@@ -207,7 +226,6 @@ interpretSynth :: forall a. UIGraphOp a -> (SynthState -> Effect SynthState)
 interpretSynth (UIGraphOp op) = interpretSynthM op where
   interpretSynthM = case _ of
     Pure _ -> \asdf -> do
-      log "interpretSynth Pure"
       pure asdf
 
     -- If the node text is a valid synth node type, create the corresponding
@@ -280,7 +298,7 @@ interpretSynth (UIGraphOp op) = interpretSynthM op where
 parseSynthNodeType :: String -> Maybe SynthNodeType
 parseSynthNodeType = case _ of
   "oscillator" -> Just NodeTypeOscillator
-  "amplifier" -> Just NodeTypeAmplifier
+  "gain" -> Just NodeTypeAmplifier
   "delay" -> Just NodeTypeDelay
   "filter" -> Just NodeTypeFilter
   "destination" -> Just NodeTypeDestination
@@ -315,7 +333,7 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
 
   NodeTypeDelay -> do
     delayNode <- WebAudio.createDelay audioContext
-    WebAudio.setValue defaultDelayPeriod =<< WebAudio.delayTime delayNode
+    setTargetValue defaultDelayPeriod audioContext =<< WebAudio.delayTime delayNode
     pure $ SynthNodeState { audioNode :       WebAudio.Delay delayNode
                           , synthNodeType :   NodeTypeDelay
                           , synthNodeParams : DelayParams defaultDelayPeriod
@@ -324,9 +342,9 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
   NodeTypeFilter -> do
     filterNode <- WebAudio.createBiquadFilter audioContext
     WebAudio.setFilterType defaultFilterType filterNode
-    WebAudio.setValue defaultFilterCutoff  =<< WebAudio.filterFrequency filterNode
-    WebAudio.setValue defaultFilterQFactor =<< WebAudio.quality filterNode
-    WebAudio.setValue defaultFilterGain    =<< WebAudio.gain filterNode
+    setTargetValue defaultFilterCutoff  audioContext =<< WebAudio.filterFrequency filterNode
+    setTargetValue defaultFilterQFactor audioContext =<< WebAudio.quality filterNode
+    setTargetValue defaultFilterGain    audioContext =<< WebAudio.gain filterNode
     pure $ SynthNodeState { audioNode :       WebAudio.BiquadFilter filterNode
                           , synthNodeType :   NodeTypeFilter
                           , synthNodeParams : FilterParams defaultFilterType defaultFilterCutoff defaultFilterQFactor defaultFilterGain
@@ -422,3 +440,9 @@ deleteSynthNode node synthState = do
         _ -> pure unit
       let updatedNodes = Map.delete (node ^. _nodeId) synthState.synthNodes
       pure $ synthState { synthNodes = updatedNodes }
+
+setTargetValue :: WebAudio.Value -> WebAudio.AudioContext -> WebAudio.AudioParam -> Effect Unit
+setTargetValue value audioContext param = do
+  now <- WebAudio.currentTime audioContext
+  _ <- WebAudio.linearRampToValueAtTime value (now + updateValueRampTime) param
+  pure unit
