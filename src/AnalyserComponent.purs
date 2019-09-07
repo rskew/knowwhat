@@ -5,45 +5,58 @@ import Prelude
 import AppState (Shape)
 import Audio.WebAudio.AnalyserNode (getByteFrequencyData) as WebAudio
 import Audio.WebAudio.Types (AnalyserNode) as WebAudio
-import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
-import Data.ArrayBuffer.Typed (traverseWithIndex_)
+import Data.Array as Array
+import Data.ArrayBuffer.Typed (toArray)
 import Data.ArrayBuffer.Types (Uint8Array)
-import Data.Int (toNumber, round)
+import Data.Foldable (foldl)
+import Data.Int (toNumber)
 import Data.Maybe (Maybe(..))
+import Data.Traversable (for_)
+import Data.Tuple (Tuple(..))
 import Data.UInt as UInt
 import Effect (Effect)
 import Effect.Aff (Aff)
+import Effect.Console (log)
 import Effect.Ref (Ref)
-import Graphics.Canvas (Context2D)
-import Graphics.Canvas as Canvas
 import Halogen as H
 import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Svg.Attributes as SA
 import Svg.Elements as SE
-import Unsafe.Coerce (unsafeCoerce)
 import Utils (animationFrameLoop)
-import Web.HTML.HTMLCanvasElement as HTMLCanvasElement
+import Web.DOM.Document as Document
+import Web.DOM.Element as Element
+import Web.DOM.Node as DN
+import Web.DOM.NodeList as NL
+import Web.HTML as WH
+import Web.HTML.HTMLDocument as HTMLDocument
+import Web.HTML.HTMLElement as HTMLElement
+import Web.HTML.Window as WHW
 import Workflow.Synth (defaultFrequencyBinCount)
 
 
-canvasRefLabel :: H.RefLabel
-canvasRefLabel = H.RefLabel "canvas"
+analyserRefLabel :: H.RefLabel
+analyserRefLabel = H.RefLabel "analyser"
+
+initialZoom :: Number
+initialZoom = 1.0
 
 type State = { analyserNode :: WebAudio.AnalyserNode
              , spectrumBuffer :: Uint8Array
              , drawLoopStopSignal :: Ref Boolean
              , shape :: Shape
+             , zoom :: Number
+             , zoomRef :: Maybe (Ref Number)
              }
 
 type Input = State
 
-initialState :: Input -> State
-initialState = identity
+data Action
+  = Init
 
-data Action = Init
-
-data Query a = Resize Shape a
+data Query a
+  = Resize Shape a
 
 type Message = Unit
 
@@ -55,7 +68,7 @@ type Slots = ()
 analyser :: H.Component HH.HTML Query Input Message Aff
 analyser =
   H.mkComponent
-    { initialState : initialState
+    { initialState : identity
     , render : render
     , eval: H.mkEval (H.defaultEval { handleAction = handleAction
                                     , handleQuery = handleQuery
@@ -66,48 +79,68 @@ analyser =
 
   render :: State -> H.ComponentHTML Action Slots Aff
   render state =
-    SE.foreignObject
+    SE.g
     [ SA.class_ "analyser"
-    , SA.height $ SA.Length $ SA.Px state.shape.height
-    , SA.width $ SA.Length $ SA.Px state.shape.width
+    , HP.ref analyserRefLabel
     ]
-    [ HH.canvas
-      [ HP.ref canvasRefLabel
-      , HP.classes [ H.ClassName "analyser-canvas" ]
-      , HP.height $ round state.shape.height
-      , HP.width $ round state.shape.width
+    [ SE.rect
+      [ HE.onClick \_ -> Just Init
+      , SA.height $ SA.Length $ SA.Px 100.0
+      , SA.width $ SA.Length $ SA.Px 100.0
       ]
     ]
 
   handleAction :: Action -> H.HalogenM State Action Slots Message Aff Unit
   handleAction = case _ of
     Init -> do
+      H.liftEffect $  log "initialising spectrum vis"
       state <- H.get
       let
         widthMultiplier = state.shape.width / (toNumber defaultFrequencyBinCount)
         heightMultiplier = state.shape.height / 256.0
-        drawSpectrumOnCanvas :: Context2D -> WebAudio.AnalyserNode -> Uint8Array -> Effect Unit
-        drawSpectrumOnCanvas context2D analyserNode' spectrumBuffer = do
-          WebAudio.getByteFrequencyData analyserNode' spectrumBuffer
-          Canvas.clearRect context2D { x : 0.0
-                                     , y : 0.0
-                                     , width : state.shape.width
-                                     , height : state.shape.height
-                                     }
-          Canvas.beginPath context2D
-          spectrumBuffer # traverseWithIndex_ \index freqUInt ->
-              Canvas.lineTo context2D ((toNumber index) * widthMultiplier) ((UInt.toNumber freqUInt) * heightMultiplier)
-          Canvas.stroke context2D
-      void $ runMaybeT do
-        htmlElement <- MaybeT $ H.getHTMLElementRef canvasRefLabel
-        canvasElement <- MaybeT $ pure $ HTMLCanvasElement.fromHTMLElement htmlElement
-        MaybeT $ Just <$> do
-          context2D <- H.liftEffect $ Canvas.getContext2D $ unsafeCoerce canvasElement
+        drawSpectrumSVG :: Element.Element -> Effect Unit
+        drawSpectrumSVG analyserElement = do
+          log "entering drawSpectrumSVG"
+          WebAudio.getByteFrequencyData state.analyserNode state.spectrumBuffer
+          spectrumArray <- toArray state.spectrumBuffer
+          let
+            spectrumPositions = spectrumArray # Array.mapWithIndex \index binAmplitude ->
+              Tuple ((toNumber index) * widthMultiplier) ((UInt.toNumber binAmplitude) * heightMultiplier)
+            spectrumPath = foldl (<>) "M0.0,0.0 "
+              (spectrumPositions <#> \(Tuple x y) -> "L" <> show x <> "," <> show y <> " ")
+          -- Create the new spectrum SVG element and append it to the analyser g
+          let analyserNode = Element.toNode analyserElement
+          -- Remove existing spectrum
+          children <- DN.childNodes analyserNode >>= NL.toArray
+          for_ children \child -> DN.removeChild child analyserNode
+          -- Add new spectrum
+          window <- WH.window
+          documentHTML <- WHW.document window
+          let document = HTMLDocument.toDocument documentHTML
+          newPathElement <- Document.createElement "path" document
+          Element.setAttribute "d" spectrumPath newPathElement
+          Element.setAttribute "class" "spectrum-path" newPathElement
+          let newPathNode = Element.toNode newPathElement
+          _ <- DN.appendChild newPathNode analyserNode
+          log "drew spectrum SVG"
+          pure unit
+      maybeAnalyserElement <- getAnalyserElement
+      case maybeAnalyserElement of
+        Nothing -> pure unit
+        Just analyserElement -> do
+          H.liftEffect $ log "starting loop"
           stopLoop <- H.liftEffect $ animationFrameLoop state.drawLoopStopSignal
-                                   $ drawSpectrumOnCanvas context2D state.analyserNode state.spectrumBuffer
+                                   $ drawSpectrumSVG analyserElement
           pure unit
 
   handleQuery :: forall a. Query a -> H.HalogenM State Action Slots Message Aff (Maybe a)
   handleQuery = case _ of
     Resize newShape a -> Just a <$ do
       H.modify_ _{ shape = newShape }
+
+getAnalyserElement :: H.HalogenM State Action Slots Message Aff (Maybe Element.Element)
+getAnalyserElement = H.getHTMLElementRef analyserRefLabel >>= case _ of
+  Nothing -> do
+    H.liftEffect $ log "couldn't get analyser element"
+    pure Nothing
+  Just htmlElement -> pure $ Just $ HTMLElement.toElement htmlElement

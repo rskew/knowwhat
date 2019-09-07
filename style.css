@@ -121,9 +121,8 @@ foreignObject {
 }
 
 .analyser-canvas {
-    width: 1024;
-    height: 1024;
-    border: 1px solid var(--text-field-border-color);
+    width: 30.0;
+    height: 50.0;
 }
 
 .node.focused {

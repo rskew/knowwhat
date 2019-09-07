@@ -20,6 +20,7 @@ demo = do
   delayId <- genUUID
   amplifierId <- genUUID
   destinationId <- genUUID
+  filterId <- genUUID
   pure $
     emptyUIGraph
     # insertNode (UINode { text: "oscillator"
@@ -62,6 +63,16 @@ demo = do
                          , children : Map.empty
                          , subgraph : emptyUIGraph
                          })
+    # insertNode (UINode { text: "analyser"
+                         , isValid: true
+                         , position : { x: 550.0
+                                      , y: 370.0
+                                      }
+                         , id : filterId
+                         , parents : Map.empty
+                         , children : Map.empty
+                         , subgraph : emptyUIGraph
+                         })
     # insertEdge (UIEdge  { id : { source : oscillatorId
                                  , target : delayId
                                  }
@@ -76,6 +87,12 @@ demo = do
                           })
     # insertEdge (UIEdge  { id : { source : amplifierId
                                  , target : destinationId
+                                 }
+                          , text : ""
+                          , isValid : false
+                          })
+    # insertEdge (UIEdge  { id : { source : amplifierId
+                                 , target : filterId
                                  }
                           , text : ""
                           , isValid : false

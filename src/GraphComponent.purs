@@ -139,8 +139,8 @@ maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
 filterShape :: Shape
-filterShape = { height : 50.0
-              , width : 300.0
+filterShape = { height : 100.0
+              , width : 600.0
               }
 
 filterTextBoxOffset :: Point2D
@@ -600,30 +600,32 @@ graph =
       ---   |../  \/ \[[/  \/]]|
       ---   --------------------
       ---
-      filterNodeHTML :: NodeId -> WebAudio.AnalyserNode -> Uint8Array -> Ref Boolean -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
-      filterNodeHTML nodeId analyserNode spectrumBuffer drawLoopStopSignal lopassCutoff hipassCutoff =
+      filterNodeHTML :: NodeId -> WebAudio.AnalyserNode -> Uint8Array -> Ref Boolean -> Number -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
+      filterNodeHTML nodeId analyserNode spectrumBuffer drawLoopStopSignal zoom lopassCutoff hipassCutoff =
         -- Spectrum display
         [ HH.slot
           _analyser
           (node ^. _nodeId)
           AnalyserComponent.analyser
             { shape : filterShape
+            , zoom : zoom
             , analyserNode : analyserNode
             , spectrumBuffer : spectrumBuffer
             , drawLoopStopSignal : drawLoopStopSignal
+            , zoomRef : Nothing
             }
             (const Nothing)
-        -- Node Halo, for creating edges from
-        , SE.rect [ SA.height $ SA.Length $ SA.Px $ filterShape.height + 2.0 * delayRectHaloOffset
-                  , SA.width $ SA.Length $ SA.Px $ filterShape.width + 2.0 * delayRectHaloOffset
-                  , SA.x $ - delayRectHaloOffset
-                  , SA.y $ - delayRectHaloOffset
-                  , SA.class_ $ haloClasses
-                  , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                         $ EdgeDrawStart (node ^. _nodeId) e
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
-                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
-                  ]
+        ---- Node Halo, for creating edges from
+        --, SE.rect [ SA.height $ SA.Length $ SA.Px $ filterShape.height + 2.0 * delayRectHaloOffset
+        --          , SA.width $ SA.Length $ SA.Px $ filterShape.width + 2.0 * delayRectHaloOffset
+        --          , SA.x $ - delayRectHaloOffset
+        --          , SA.y $ - delayRectHaloOffset
+        --          , SA.class_ $ haloClasses
+        --          , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+        --                                 $ EdgeDrawStart (node ^. _nodeId) e
+        --          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+        --          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+        --          ]
         ---- Inner border shadow for delay period control
         --, SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
         --          , SA.height $ SA.Length $ SA.Px $ delayRectHeight - 4.0
@@ -661,7 +663,7 @@ graph =
           DelayParams delayPeriod -> delayNodeHTML delayPeriod
           AnalyserParams _ _ _ _ spectrumBuffer drawLoopSignal -> case synthNodeState ^? _analyserNode of
             Nothing -> graphNodeHTML
-            Just analyserNode -> filterNodeHTML (node ^. _nodeId) analyserNode spectrumBuffer drawLoopSignal 0.0 0.0
+            Just analyserNode -> filterNodeHTML (node ^. _nodeId) analyserNode spectrumBuffer drawLoopSignal (state ^. _zoom) 0.0 0.0
           _ -> graphNodeHTML
     in
       SE.g
