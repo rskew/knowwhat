@@ -120,6 +120,12 @@ foreignObject {
     stroke: #0005;
 }
 
+.analyser-canvas {
+    width: 1024;
+    height: 1024;
+    border: 1px solid var(--text-field-border-color);
+}
+
 .node.focused {
     fill: var(--focused-color);
 }

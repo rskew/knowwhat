@@ -12,7 +12,8 @@ import Audio.WebAudio.GainNode (setGain) as WebAudio
 import Audio.WebAudio.Oscillator (OscillatorType(..), setFrequency, setOscillatorType, startOscillator, stopOscillator) as WebAudio
 import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, DelayNode, AnalyserNode, AudioParam, Value, connect, disconnect, connectParam) as WebAudio
 import Data.Array as Array
-import Data.ArrayBuffer.Types (ByteLength)
+import Data.ArrayBuffer.Types (Uint8Array, ByteLength)
+import Data.ArrayBuffer.Typed (empty)
 import Data.Foldable (for_)
 import Data.Lens (Lens', Prism', Optic', lens, prism', (^.))
 import Data.Lens.Record (prop)
@@ -25,6 +26,8 @@ import Data.Profunctor.Strong (class Strong)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
+import Effect.Ref as Ref
+import Effect.Ref (Ref)
 import Effect.Console (log)
 import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
 import Workflow.UIGraph.Types (UINode, _nodeText)
@@ -67,7 +70,7 @@ defaultMaxDecibels :: MaxDecibels
 defaultMaxDecibels = -30.0
 
 defaultSmoothingTimeConstant :: SmoothingTimeConstant
-defaultSmoothingTimeConstant = 0.8
+defaultSmoothingTimeConstant = 0.2
 
 defaultLoopStart :: LoopStart
 defaultLoopStart = 0.0
@@ -148,14 +151,12 @@ data SynthNodeParams
   | DelayParams PeriodSeconds
   | FilterParams WebAudio.BiquadFilterType Cutoff QFactor Gain
   | DestinationParams
-  | AnalyserParams FrequencyBinCount MinDecibels MaxDecibels SmoothingTimeConstant
+  | AnalyserParams FrequencyBinCount MinDecibels MaxDecibels SmoothingTimeConstant Uint8Array (Ref Boolean)
   | AudioBufferSourceParams LoopStart LoopEnd LoopOn
   | ConvolverParams Normalize
   | DynamicsCompressorParams Threshold Knee Ratio Reduction Attack Release
   | MediaElementAudioSourceParams
   | StereoPannerParams Pan
-derive instance eqSynthNodeParams :: Eq SynthNodeParams
-derive instance ordSynthNodeParams :: Ord SynthNodeParams
 
 type Freq = Number
 type Gain = Number
@@ -379,7 +380,9 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
   NodeTypeAnalyser -> do
     log "creating analyser"
     analyserNode <- WebAudio.createAnalyser audioContext
-    WebAudio.setSmoothingTimeConstant 0.0 analyserNode
+    WebAudio.setSmoothingTimeConstant defaultSmoothingTimeConstant analyserNode
+    spectrumBuffer <- empty defaultFrequencyBinCount
+    drawLoopStopSignal <- Ref.new false
     pure $ SynthNodeState { audioNode : WebAudio.Analyser analyserNode
                           , synthNodeType : NodeTypeFilter
                           , synthNodeParams : AnalyserParams
@@ -387,6 +390,8 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
                                               defaultMinDecibels
                                               defaultMaxDecibels
                                               defaultSmoothingTimeConstant
+                                              spectrumBuffer
+                                              drawLoopStopSignal
                           }
 
   --NodeTypeAudioBufferSource ->
