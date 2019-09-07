@@ -2,15 +2,15 @@ module Workflow.Synth where
 
 import Prelude
 
-import Effect.Console (log)
+import Audio.WebAudio.AnalyserNode (setSmoothingTimeConstant) as WebAudio
 import Audio.WebAudio.AudioBufferSourceNode (stopBufferSource) as WebAudio
-import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, destination, currentTime) as WebAudio
+import Audio.WebAudio.AudioParam (linearRampToValueAtTime) as WebAudio
+import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, createAnalyser, destination, currentTime) as WebAudio
 import Audio.WebAudio.BiquadFilterNode (BiquadFilterType(..), setFilterType, filterFrequency, quality, gain) as WebAudio
 import Audio.WebAudio.DelayNode (delayTime) as WebAudio
 import Audio.WebAudio.GainNode (setGain) as WebAudio
-import Audio.WebAudio.AudioParam (linearRampToValueAtTime) as WebAudio
 import Audio.WebAudio.Oscillator (OscillatorType(..), setFrequency, setOscillatorType, startOscillator, stopOscillator) as WebAudio
-import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, DelayNode, AudioParam, Value, connect, disconnect, connectParam) as WebAudio
+import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, DelayNode, AnalyserNode, AudioParam, Value, connect, disconnect, connectParam) as WebAudio
 import Data.Array as Array
 import Data.ArrayBuffer.Types (ByteLength)
 import Data.Foldable (for_)
@@ -25,6 +25,7 @@ import Data.Profunctor.Strong (class Strong)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
+import Effect.Console (log)
 import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
 import Workflow.UIGraph.Types (UINode, _nodeText)
 import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..))
@@ -57,16 +58,16 @@ defaultFilterGain :: Gain
 defaultFilterGain = 1.0
 
 defaultFrequencyBinCount :: FrequencyBinCount
-defaultFrequencyBinCount = 2048
+defaultFrequencyBinCount = 1024
 
 defaultMinDecibels :: MinDecibels
-defaultMinDecibels = 0.0
+defaultMinDecibels = -100.0
 
 defaultMaxDecibels :: MaxDecibels
-defaultMaxDecibels = 0.0
+defaultMaxDecibels = -30.0
 
 defaultSmoothingTimeConstant :: SmoothingTimeConstant
-defaultSmoothingTimeConstant = 0.1
+defaultSmoothingTimeConstant = 0.8
 
 defaultLoopStart :: LoopStart
 defaultLoopStart = 0.0
@@ -124,7 +125,7 @@ data SynthNodeType
   | NodeTypeDelay
   | NodeTypeFilter
   | NodeTypeDestination
-  --| NodeTypeAnalyser
+  | NodeTypeAnalyser
   --| NodeTypeAudioBufferSource
   --| NodeTypeConvolver
   --| NodeTypeDynamicsCompressor
@@ -139,6 +140,7 @@ instance showSynthNodeType :: Show SynthNodeType where
     NodeTypeDelay -> "NodeTypeDelay"
     NodeTypeFilter -> "NodeTypeFilter"
     NodeTypeDestination -> "NodeTypeDestination"
+    NodeTypeAnalyser -> "NodeTypeAnalyser"
 
 data SynthNodeParams
   = OscillatorParams Freq
@@ -183,20 +185,22 @@ _synthNodeParams :: Lens' SynthNodeState SynthNodeParams
 _synthNodeParams = _SynthNodeState <<< prop (SProxy :: SProxy "synthNodeParams")
 
 _gain :: Prism' SynthNodeParams Gain
-_gain = prism' AmplifierParams (case _ of
-                                   AmplifierParams gain -> Just gain
-                                   _ -> Nothing
-                               )
+_gain = prism' AmplifierParams
+               (case _ of
+                   AmplifierParams gain -> Just gain
+                   _ -> Nothing
+               )
 
 _synthNodeGain :: forall p. Choice p => Strong p =>
                   Optic' p SynthNodeState Gain
 _synthNodeGain = _synthNodeParams <<< _gain
 
 _delayPeriod :: Prism' SynthNodeParams PeriodSeconds
-_delayPeriod = prism' DelayParams (case _ of
-                                      DelayParams period -> Just period
-                                      _ -> Nothing
-                                  )
+_delayPeriod = prism' DelayParams
+                      (case _ of
+                          DelayParams period -> Just period
+                          _ -> Nothing
+                      )
 
 _synthNodeDelayPeriod :: forall p. Choice p => Strong p =>
                          Optic' p SynthNodeState PeriodSeconds
@@ -207,17 +211,30 @@ _audioNode = _SynthNodeState <<< prop (SProxy :: SProxy "audioNode")
 
 _gainNode :: forall p. Choice p => Strong p =>
              Optic' p SynthNodeState WebAudio.GainNode
-_gainNode = _audioNode <<< prism' WebAudio.Gain (case _ of
-                                                   WebAudio.Gain gainNode -> Just gainNode
-                                                   _ -> Nothing
-                                                )
+_gainNode =
+  _audioNode <<< prism' WebAudio.Gain
+                        (case _ of
+                            WebAudio.Gain gainNode -> Just gainNode
+                            _ -> Nothing
+                        )
 
 _delayNode :: forall p. Choice p => Strong p =>
               Optic' p SynthNodeState WebAudio.DelayNode
-_delayNode = _audioNode <<< prism' WebAudio.Delay (case _ of
-                                                      WebAudio.Delay delayNode -> Just delayNode
-                                                      _ -> Nothing
-                                                  )
+_delayNode =
+  _audioNode <<< prism' WebAudio.Delay
+                        (case _ of
+                            WebAudio.Delay delayNode -> Just delayNode
+                            _ -> Nothing
+                        )
+
+_analyserNode :: forall p. Choice p => Strong p =>
+                 Optic' p SynthNodeState WebAudio.AnalyserNode
+_analyserNode =
+  _audioNode <<< prism' WebAudio.Analyser
+                        (case _ of
+                            WebAudio.Analyser analyserNode -> Just analyserNode
+                            _ -> Nothing
+                        )
 
 -- | Compile an operation on the graph to an operation on the synthesiser
 -- | that changes the synth context as an Effect and returns a function that
@@ -302,6 +319,7 @@ parseSynthNodeType = case _ of
   "delay" -> Just NodeTypeDelay
   "filter" -> Just NodeTypeFilter
   "destination" -> Just NodeTypeDestination
+  "analyser" -> Just NodeTypeAnalyser
   --"analyser" -> Just NodeTypeAnalyser
   --"audio-buffer" -> Just NodeTypeAudioBufferSource
   --"convolver" -> Just NodeTypeConvolver
@@ -358,7 +376,19 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
                           , synthNodeParams : DestinationParams
                           }
 
-  --NodeTypeAnalyser -> do
+  NodeTypeAnalyser -> do
+    log "creating analyser"
+    analyserNode <- WebAudio.createAnalyser audioContext
+    WebAudio.setSmoothingTimeConstant 0.0 analyserNode
+    pure $ SynthNodeState { audioNode : WebAudio.Analyser analyserNode
+                          , synthNodeType : NodeTypeFilter
+                          , synthNodeParams : AnalyserParams
+                                              defaultFrequencyBinCount
+                                              defaultMinDecibels
+                                              defaultMaxDecibels
+                                              defaultSmoothingTimeConstant
+                          }
+
   --NodeTypeAudioBufferSource ->
   --NodeTypeConvolver ->
   --NodeTypeDynamicsCompressor ->

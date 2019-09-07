@@ -1,6 +1,6 @@
 :root {
   --node-color: #000;
-  --node-border-color: #0002;
+  --node-border-color: #0001;
   --focused-color: #fc0;
   --highlighted-color: #08f2;
   --invalid-color: #f662;
@@ -113,7 +113,11 @@ foreignObject {
 }
 
 .pattern-amplifier-unity-background {
-    fill: #000c;
+    fill: #0005;
+}
+
+.analyser {
+    stroke: #0005;
 }
 
 .node.focused {

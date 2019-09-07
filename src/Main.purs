@@ -3,6 +3,7 @@ module Main where
 import Prelude
 
 import Audio.WebAudio.BaseAudioContext (newAudioContext)
+import Audio.WebAudio.Utils (createUint8Buffer)
 import Data.Int (toNumber)
 import DemoGraph (demo)
 import Effect (Effect)
@@ -13,6 +14,7 @@ import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
 import Web.HTML (window)
 import Web.HTML.Window (innerWidth, innerHeight)
+import Workflow.Synth (defaultFrequencyBinCount)
 
 main :: Effect Unit
 main =
@@ -27,8 +29,11 @@ main =
                     }
   demoGraph <- H.liftEffect demo
   audioContext <- H.liftEffect newAudioContext
+  analyserBuffer <- H.liftEffect $ createUint8Buffer defaultFrequencyBinCount
   runUI GP.paneComponent { windowShape : windowShape
                          , demoGraph : demoGraph
                          , audioContext : audioContext
+                         , analyserBuffer : analyserBuffer
+                         , analyserArray : []
                          }
                          body

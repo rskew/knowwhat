@@ -2,6 +2,7 @@ module AppState where
 
 import Prelude
 
+import Data.ArrayBuffer.Types (Uint8Array)
 import Data.Lens (Lens', Traversal', lens, traversed, (^.))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
@@ -10,6 +11,7 @@ import Data.Maybe (Maybe)
 import Data.Monoid.Action (class ActionM)
 import Data.Newtype (class Newtype)
 import Data.Symbol (SProxy(..))
+import Data.UInt (UInt)
 import Data.UUID (UUID)
 import Data.Undoable (Undoable, _current)
 import Effect (Effect)
@@ -91,6 +93,8 @@ type AppStateInner =
   , graphOrigin :: PageSpacePos
   , zoom :: Number
   , synthState :: SynthState
+  , analyserBuffer :: Uint8Array
+  , analyserArray :: Array UInt
   }
 newtype AppStateCurrent = AppStateCurrent AppStateInner
 derive instance newtypeAppStateCurrent :: Newtype AppStateCurrent _

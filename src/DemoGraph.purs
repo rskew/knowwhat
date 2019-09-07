@@ -34,8 +34,8 @@ demo = do
                          })
     # insertNode (UINode { text: "delay"
                          , isValid: true
-                         , position : { x: 550.0
-                                      , y: 370.0
+                         , position : { x: 450.0
+                                      , y: 170.0
                                       }
                          , id : delayId
                          , parents : Map.empty
@@ -55,7 +55,7 @@ demo = do
     # insertNode (UINode { text: "destination"
                          , isValid: true
                          , position : { x: 750.0
-                                      , y: 320.0
+                                      , y: 270.0
                                       }
                          , id : destinationId
                          , parents : Map.empty

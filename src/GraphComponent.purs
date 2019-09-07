@@ -5,21 +5,26 @@ import Prelude
 import AppState (AppState, AppStateCurrent(..), UninitializedAppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
+import Audio.WebAudio.AnalyserNode (getByteFrequencyData) as WebAudio
 import Audio.WebAudio.GainNode (gain) as WebAudio
 import Audio.WebAudio.DelayNode (delayTime) as WebAudio
-import Audio.WebAudio.Types (AudioContext) as WebAudio
+import Audio.WebAudio.Types (AudioContext, AnalyserNode) as WebAudio
+import Audio.WebAudio.Utils (createUint8Buffer)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
+import Data.ArrayBuffer.Types (Uint8Array)
+import Data.ArrayBuffer.Typed (toArray)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Foldable (for_, foldM)
+import Data.Foldable (for_, foldM, foldl)
 import Data.Identity (Identity(..))
 import Data.Int (toNumber)
-import Data.Lens (preview, traversed, (.~), (?~), (^.), (^?))
+import Data.Lens (preview, traversed, (.~), (?~), (^.), (^?), (%~))
 import Data.Lens.At (at)
+import Data.Lens.Iso.Newtype (_Newtype)
 import Data.List as List
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
@@ -27,7 +32,9 @@ import Data.Newtype (unwrap)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), snd)
+import Data.UInt (UInt)
+import Data.UInt as UInt
 import Data.Undoable (initUndoable, dooM, undoM, redoM, _current, _history, _undone)
 import Effect (Effect)
 import Effect.Aff (Aff)
@@ -62,7 +69,7 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.Synth (SynthState, SynthNodeState(..), SynthNodeParams(..), deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode, _synthNodeDelayPeriod, _delayNode, setTargetValue)
+import Workflow.Synth (SynthState, SynthNodeParams(..), deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode, _synthNodeDelayPeriod, _delayNode, _analyserNode, setTargetValue, defaultFrequencyBinCount)
 import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
 import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
@@ -133,9 +140,14 @@ defaultTextFieldShape = { width : 100.0, height : 50.0 }
 maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
+canvasRefLabel :: H.RefLabel
+canvasRefLabel = H.RefLabel "canvas"
+
 type Input = { boundingRect :: WHE.DOMRect
              , graph :: UIGraph
              , audioContext :: WebAudio.AudioContext
+             , analyserBuffer :: Uint8Array
+             , analyserArray :: Array UInt
              }
 
 initialState :: Input -> AppState
@@ -150,6 +162,8 @@ initialState inputs = initUndoable
     , synthState : { audioContext : inputs.audioContext
                    , synthNodes : Map.empty
                    }
+    , analyserBuffer : inputs.analyserBuffer
+    , analyserArray : []
     }
 
 data Action
@@ -183,6 +197,7 @@ data Action
   | GainDragMove Drag.DragEvent NodeId Number H.SubscriptionId
   | DelayDragStart NodeId Number ME.MouseEvent
   | DelayDragMove Drag.DragEvent NodeId Number H.SubscriptionId
+  | UpdateAnalyserBuffer WebAudio.AnalyserNode
 
 data Query a = UpdateBoundingRect a
 
@@ -310,6 +325,7 @@ graph =
               [ SA.id "pattern-amplifier-below-unity"
               , SA.height $ SA.Length $ SA.Px 10.0
               , SA.width $ SA.Length $ SA.Px 10.0
+              , SA.x $ - amplifierBoxSize / 3.0
               , SA.y $ - amplifierBoxSize / 3.0
               , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
               ]
@@ -330,6 +346,7 @@ graph =
               [ SA.id "pattern-amplifier-above-unity"
               , SA.height $ SA.Length $ SA.Px 10.0
               , SA.width $ SA.Length $ SA.Px 10.0
+              , SA.x $ - amplifierBoxSize / 3.0
               , SA.y $ - amplifierBoxSize / 3.0
               , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
               ]
@@ -565,11 +582,82 @@ graph =
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         ] <> textBoxHTML delayTextBoxOffset
+      -- Filter node with analyser spectrum display and draggable cutoff control
+      --
+      -- Drag the square brackets to move the cutoff frequency of the
+      -- hipass and lopass filters.
+      --
+      ---   ____________________
+      ---   |   /\  | [[ /\  ]]|
+      ---   |../  \/ \[[/  \/]]|
+      ---   --------------------
+      ---
+      filterNodeHTML :: WebAudio.AnalyserNode -> Array UInt -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
+      filterNodeHTML analyserNode analyserArray lopassCutoff hipassCutoff =
+        -- Spectrum display
+        [ SE.path
+          [ SA.class_ "analyser"
+          , SA.d $ snd (foldl
+                        (\(Tuple index points) uInt ->
+                          Tuple (index + 5) $ points <> [ SA.Abs $ SA.L (toNumber index) (- (toNumber (UInt.toInt uInt))) ])
+                        (Tuple 0 [ SA.Abs (SA.M 0.0 0.0)])
+                        analyserArray)
+          ]
+        , SE.rect
+          [ SA.height $ SA.Length $ SA.Px 20.0
+          , SA.width $ SA.Length $ SA.Px 20.0
+          , HE.onClick \_ -> Just $ UpdateAnalyserBuffer analyserNode
+          ]
+        ]
+        ---- Node Halo, for creating edges from
+        --[ SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight + 2.0 * delayRectHaloOffset
+        --          , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) + 2.0 * delayRectHaloOffset
+        --          , SA.x $ - delayRectHaloOffset
+        --          , SA.y $ - delayRectHaloOffset - delayRectHeight / 2.0
+        --          , SA.class_ $ haloClasses
+        --          , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+        --                                 $ EdgeDrawStart (node ^. _nodeId) e
+        --          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+        --          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+        --          ]
+        ---- Inner border shadow for delay period control
+        --, SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
+        --          , SA.height $ SA.Length $ SA.Px $ delayRectHeight - 4.0
+        --          , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) - 4.0
+        --          , SA.x $ 2.0
+        --          , SA.y $ 2.0 - delayRectHeight / 2.0
+        --          ]
+        ---- Draggable delay period control
+        --, SE.rect [ SA.class_ $ nodeClasses <> " delay"
+        --          , SA.height $ SA.Length $ SA.Px delayRectHeight
+        --          , SA.width $ SA.Length $ SA.Px $ delayPeriodToPageSpace period
+        --          , SA.y $ - delayRectHeight / 2.0
+        --          , HE.onMouseDown \e -> Just
+        --                                 $ StopPropagation (ME.toEvent e)
+        --                                 $ DelayDragStart (node ^. _nodeId) period e
+        --          ]
+        ---- Node border, for grabbing
+        --, SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight / 2.0
+        --          , SA.width $ SA.Length $ SA.Px $ Math.min delayRectHeight (delayPeriodToPageSpace period)
+        --          , SA.class_ $ nodeBorderClasses <> " delay"
+        --          , SA.y $ - delayRectHeight / 2.0
+        --          , HE.onMouseDown \e -> Just
+        --                                 $ StopPropagation (ME.toEvent e)
+        --                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+        --          , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+        --                                   $ AppDeleteNode node
+        --          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+        --          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+        --          ]
+        --] <> textBoxHTML delayTextBoxOffset
       nodeHTML = case Map.lookup (node ^. _nodeId) (state ^. _synthState).synthNodes of
         Nothing -> graphNodeHTML
-        Just (SynthNodeState synthNodeState) -> case synthNodeState.synthNodeParams of
+        Just synthNodeState -> case (unwrap synthNodeState).synthNodeParams of
           AmplifierParams gain -> amplifierNodeHTML gain
           DelayParams delayPeriod -> delayNodeHTML delayPeriod
+          AnalyserParams _ _ _ _ -> case synthNodeState ^? _analyserNode of
+            Nothing -> graphNodeHTML
+            Just analyserNode -> filterNodeHTML analyserNode (unwrap (state ^. _current)).analyserArray 0.0 0.0
           _ -> graphNodeHTML
     in
       SE.g
@@ -1097,6 +1185,13 @@ graph =
     DelayDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
+    UpdateAnalyserBuffer analyserNode -> do
+      state <- H.get
+      H.liftEffect $ WebAudio.getByteFrequencyData analyserNode (unwrap (state ^. _current)).analyserBuffer
+      analyserArray <- H.liftEffect $ toArray (unwrap (state ^. _current)).analyserBuffer
+      _ <- H.modify $ _current <<< _Newtype %~ _{ analyserArray = analyserArray }
+      pure unit
+
 
   handleQuery :: forall a. Query a -> H.HalogenM AppState Action Slots Message Aff (Maybe a)
   handleQuery = case _ of
@@ -1137,6 +1232,7 @@ initializeSynthState uninitializedAppState = do
                    (flip tryCreateSynthNode)
                    bareSynthState
                    ((uninitializedAppState ^. _current).graph ^. _nodes)
+  analyserBuffer <- createUint8Buffer defaultFrequencyBinCount
   pure $ uninitializedAppState
          # _current .~ AppStateCurrent
                        { graph : (uninitializedAppState ^. _current).graph
@@ -1146,6 +1242,8 @@ initializeSynthState uninitializedAppState = do
                        , graphOrigin : (uninitializedAppState ^. _current).graphOrigin
                        , zoom : (uninitializedAppState ^. _current).zoom
                        , synthState : newSynthState
+                       , analyserBuffer : analyserBuffer
+                       , analyserArray : []
                        }
 
 toUninitializedAppState :: AppState -> Effect UninitializedAppState

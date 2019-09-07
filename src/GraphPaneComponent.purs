@@ -4,10 +4,12 @@ import Prelude
 
 import Audio.WebAudio.Types (AudioContext) as WebAudio
 import AppState (Shape)
+import Data.ArrayBuffer.Types (Uint8Array)
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Data.Symbol (SProxy(..))
+import Data.UInt (UInt)
 import Effect.Aff (Aff)
 import Effect.Console (log)
 import GraphComponent as GraphComponent
@@ -31,6 +33,8 @@ type State = { configuration :: PaneConfiguration
              , windowShape :: Shape
              , demoGraph :: UIGraph
              , audioContext :: WebAudio.AudioContext
+             , analyserBuffer :: Uint8Array
+             , analyserArray :: Array UInt
              }
 
 data Action
@@ -45,6 +49,8 @@ data Query a = ResizeWindow WE.Event a
 type Input = { windowShape :: Shape
              , demoGraph :: UIGraph
              , audioContext :: WebAudio.AudioContext
+             , analyserBuffer :: Uint8Array
+             , analyserArray :: Array UInt
              }
 
 type Slots = ( panes :: GraphComponent.Slot PanePos )
@@ -70,6 +76,8 @@ paneComponent =
     , windowShape : inputs.windowShape
     , demoGraph : inputs.demoGraph
     , audioContext : inputs.audioContext
+    , analyserBuffer : inputs.analyserBuffer
+    , analyserArray : inputs.analyserArray
     }
 
   renderPane :: PanePos -> State -> H.ComponentHTML Action Slots Aff
@@ -87,6 +95,8 @@ paneComponent =
                      }
     , graph : state.demoGraph
     , audioContext : state.audioContext
+    , analyserBuffer : state.analyserBuffer
+    , analyserArray : []
     }
     (Just <<< PaneMessage pos)
 
