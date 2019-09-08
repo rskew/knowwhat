@@ -116,6 +116,11 @@ foreignObject {
     fill: #0005;
 }
 
+.analyser-border {
+    fill: #0000;
+    border: 1px solid var(--text-field-border-color);
+}
+
 .spectrum-polylines {
     fill: none;
     stroke: #000;

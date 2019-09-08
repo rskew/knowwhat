@@ -607,54 +607,41 @@ graph =
           _analyser
           (node ^. _nodeId)
           AnalyserComponent.analyser
-            { shape : filterShape
-            , zoom : zoom
-            , analyserNode : analyserNode
-            , spectrumBuffer : spectrumBuffer
-            , drawLoopStopSignal : drawLoopStopSignal
-            , zoomRef : Nothing
-            }
-            (const Nothing)
-        ---- Node Halo, for creating edges from
-        --, SE.rect [ SA.height $ SA.Length $ SA.Px $ filterShape.height + 2.0 * delayRectHaloOffset
-        --          , SA.width $ SA.Length $ SA.Px $ filterShape.width + 2.0 * delayRectHaloOffset
-        --          , SA.x $ - delayRectHaloOffset
-        --          , SA.y $ - delayRectHaloOffset
-        --          , SA.class_ $ haloClasses
-        --          , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-        --                                 $ EdgeDrawStart (node ^. _nodeId) e
-        --          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
-        --          , HE.onMouseLeave \_ -> Just $ Hover Nothing
-        --          ]
-        ---- Inner border shadow for delay period control
-        --, SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
-        --          , SA.height $ SA.Length $ SA.Px $ delayRectHeight - 4.0
-        --          , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) - 4.0
-        --          , SA.x $ 2.0
-        --          , SA.y $ 2.0 - delayRectHeight / 2.0
-        --          ]
-        ---- Draggable delay period control
-        --, SE.rect [ SA.class_ $ nodeClasses <> " delay"
-        --          , SA.height $ SA.Length $ SA.Px delayRectHeight
-        --          , SA.width $ SA.Length $ SA.Px $ delayPeriodToPageSpace period
-        --          , SA.y $ - delayRectHeight / 2.0
-        --          , HE.onMouseDown \e -> Just
-        --                                 $ StopPropagation (ME.toEvent e)
-        --                                 $ DelayDragStart (node ^. _nodeId) period e
-        --          ]
-        ---- Node border, for grabbing
-        --, SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight / 2.0
-        --          , SA.width $ SA.Length $ SA.Px $ Math.min delayRectHeight (delayPeriodToPageSpace period)
-        --          , SA.class_ $ nodeBorderClasses <> " delay"
-        --          , SA.y $ - delayRectHeight / 2.0
-        --          , HE.onMouseDown \e -> Just
-        --                                 $ StopPropagation (ME.toEvent e)
-        --                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
-        --          , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-        --                                   $ AppDeleteNode node
-        --          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
-        --          , HE.onMouseLeave \_ -> Just $ Hover Nothing
-        --          ]
+          { shape : filterShape
+          , zoom : zoom
+          , analyserNode : analyserNode
+          , spectrumBuffer : spectrumBuffer
+          , drawLoopStopSignal : drawLoopStopSignal
+          , zoomRef : Nothing
+          }
+          (const Nothing)
+        -- Node Halo, for creating edges from
+        , SE.rect [ SA.height $ SA.Length $ SA.Px $ filterShape.height + 2.0 * delayRectHaloOffset
+                  , SA.width $ SA.Length $ SA.Px $ filterShape.width + 2.0 * delayRectHaloOffset
+                  , SA.x $ - delayRectHaloOffset
+                  , SA.y $ - delayRectHaloOffset
+                  , SA.class_ $ haloClasses
+                  , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+                                         $ EdgeDrawStart (node ^. _nodeId) e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                  , HE.onMouseLeave \_ -> Just $ Hover Nothing
+                  ]
+        -- Thin border
+        , SE.rect
+          [ SA.class_ "analyser_border"
+          , SA.fill $ SA.PaintColor $ SA.RGBA 0 0 0 0.0
+            -- stroke: #dddc;
+          , SA.stroke $ SA.PaintColor $ SA.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
+          , SA.height $ SA.Length $ SA.Px filterShape.height
+          , SA.width $ SA.Length $ SA.Px filterShape.width
+          , HE.onMouseDown \e -> Just
+                                 $ StopPropagation (ME.toEvent e)
+                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+          , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                                   $ AppDeleteNode node
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+          , HE.onMouseLeave \_ -> Just $ Hover Nothing
+          ]
         ] <> textBoxHTML filterTextBoxOffset
       nodeHTML = case Map.lookup (node ^. _nodeId) (state ^. _synthState).synthNodes of
         Nothing -> graphNodeHTML

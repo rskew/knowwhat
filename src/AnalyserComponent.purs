@@ -81,14 +81,23 @@ analyser =
   render state =
     SE.g
     []
-    [ SE.polyline
+    [ SE.rect
+      [ SA.class_ "analyser_border"
+      , SA.fill $ SA.PaintColor $ SA.RGBA 0 0 0 0.0
+      -- stroke: #dddc;
+      , SA.stroke $ SA.PaintColor $ SA.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
+      , SA.height $ SA.Length $ SA.Px state.shape.height
+      , SA.width $ SA.Length $ SA.Px state.shape.width
+      ]
+    , SE.polyline
       [ SA.class_ spectrumClass
       ]
+    -- User a div inside a foreignObject as a hack to access the polyline
+    -- element via HP.ref
     , SE.foreignObject
       []
       [ HH.div
-        [ HP.classes [H.ClassName "analyser"]
-        , HP.ref analyserRefLabel
+        [ HP.ref analyserRefLabel
         ]
         []
       ]

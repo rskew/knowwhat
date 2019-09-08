@@ -2,7 +2,7 @@ module Workflow.Synth where
 
 import Prelude
 
-import Audio.WebAudio.AnalyserNode (setSmoothingTimeConstant) as WebAudio
+import Audio.WebAudio.AnalyserNode (setSmoothingTimeConstant, setMaxDecibels) as WebAudio
 import Audio.WebAudio.AudioBufferSourceNode (stopBufferSource) as WebAudio
 import Audio.WebAudio.AudioParam (linearRampToValueAtTime) as WebAudio
 import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, createAnalyser, destination, currentTime) as WebAudio
@@ -67,7 +67,7 @@ defaultMinDecibels :: MinDecibels
 defaultMinDecibels = -100.0
 
 defaultMaxDecibels :: MaxDecibels
-defaultMaxDecibels = -30.0
+defaultMaxDecibels = 10.0
 
 defaultSmoothingTimeConstant :: SmoothingTimeConstant
 defaultSmoothingTimeConstant = 0.2
@@ -319,7 +319,7 @@ parseSynthNodeType = case _ of
   "gain" -> Just NodeTypeAmplifier
   "delay" -> Just NodeTypeDelay
   "filter" -> Just NodeTypeFilter
-  "destination" -> Just NodeTypeDestination
+  "output" -> Just NodeTypeDestination
   "analyser" -> Just NodeTypeAnalyser
   --"analyser" -> Just NodeTypeAnalyser
   --"audio-buffer" -> Just NodeTypeAudioBufferSource
@@ -381,6 +381,7 @@ freshSynthNode synthNodeType audioContext = case synthNodeType of
     log "creating analyser"
     analyserNode <- WebAudio.createAnalyser audioContext
     WebAudio.setSmoothingTimeConstant defaultSmoothingTimeConstant analyserNode
+    WebAudio.setMaxDecibels defaultMaxDecibels analyserNode
     spectrumBuffer <- empty defaultFrequencyBinCount
     drawLoopStopSignal <- Ref.new false
     pure $ SynthNodeState { audioNode : WebAudio.Analyser analyserNode
