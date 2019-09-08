@@ -5,6 +5,7 @@ import Prelude
 import AppState (Shape)
 import Audio.WebAudio.AnalyserNode (getByteFrequencyData) as WebAudio
 import Audio.WebAudio.Types (AnalyserNode) as WebAudio
+import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
 import Data.ArrayBuffer.Typed (toArray)
 import Data.ArrayBuffer.Types (Uint8Array)
@@ -20,19 +21,15 @@ import Effect.Console (log)
 import Effect.Ref (Ref)
 import Halogen as H
 import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Utils (animationFrameLoop)
-import Web.DOM.Document as Document
 import Web.DOM.Element as Element
 import Web.DOM.Node as DN
 import Web.DOM.NodeList as NL
-import Web.HTML as WH
-import Web.HTML.HTMLDocument as HTMLDocument
+import Web.DOM.DOMTokenList as DTL
 import Web.HTML.HTMLElement as HTMLElement
-import Web.HTML.Window as WHW
 import Workflow.Synth (defaultFrequencyBinCount)
 
 
@@ -41,6 +38,9 @@ analyserRefLabel = H.RefLabel "analyser"
 
 initialZoom :: Number
 initialZoom = 1.0
+
+spectrumClass :: String
+spectrumClass = "spectrum-polylines"
 
 type State = { analyserNode :: WebAudio.AnalyserNode
              , spectrumBuffer :: Uint8Array
@@ -80,57 +80,57 @@ analyser =
   render :: State -> H.ComponentHTML Action Slots Aff
   render state =
     SE.g
-    [ SA.class_ "analyser"
-    , HP.ref analyserRefLabel
-    ]
-    [ SE.rect
-      [ HE.onClick \_ -> Just Init
-      , SA.height $ SA.Length $ SA.Px 100.0
-      , SA.width $ SA.Length $ SA.Px 100.0
+    []
+    [ SE.polyline
+      [ SA.class_ spectrumClass
+      ]
+    , SE.foreignObject
+      []
+      [ HH.div
+        [ HP.classes [H.ClassName "analyser"]
+        , HP.ref analyserRefLabel
+        ]
+        []
       ]
     ]
 
   handleAction :: Action -> H.HalogenM State Action Slots Message Aff Unit
   handleAction = case _ of
     Init -> do
-      H.liftEffect $  log "initialising spectrum vis"
       state <- H.get
       let
         widthMultiplier = state.shape.width / (toNumber defaultFrequencyBinCount)
         heightMultiplier = state.shape.height / 256.0
-        drawSpectrumSVG :: Element.Element -> Effect Unit
-        drawSpectrumSVG analyserElement = do
-          log "entering drawSpectrumSVG"
+        drawSpectrumSVG :: DN.Node -> Effect Unit
+        drawSpectrumSVG analyserDOMNode = do
           WebAudio.getByteFrequencyData state.analyserNode state.spectrumBuffer
           spectrumArray <- toArray state.spectrumBuffer
           let
             spectrumPositions = spectrumArray # Array.mapWithIndex \index binAmplitude ->
               Tuple ((toNumber index) * widthMultiplier) ((UInt.toNumber binAmplitude) * heightMultiplier)
-            spectrumPath = foldl (<>) "M0.0,0.0 "
-              (spectrumPositions <#> \(Tuple x y) -> "L" <> show x <> "," <> show y <> " ")
-          -- Create the new spectrum SVG element and append it to the analyser g
-          let analyserNode = Element.toNode analyserElement
-          -- Remove existing spectrum
-          children <- DN.childNodes analyserNode >>= NL.toArray
-          for_ children \child -> DN.removeChild child analyserNode
-          -- Add new spectrum
-          window <- WH.window
-          documentHTML <- WHW.document window
-          let document = HTMLDocument.toDocument documentHTML
-          newPathElement <- Document.createElement "path" document
-          Element.setAttribute "d" spectrumPath newPathElement
-          Element.setAttribute "class" "spectrum-path" newPathElement
-          let newPathNode = Element.toNode newPathElement
-          _ <- DN.appendChild newPathNode analyserNode
-          log "drew spectrum SVG"
-          pure unit
-      maybeAnalyserElement <- getAnalyserElement
-      case maybeAnalyserElement of
+            spectrumPath = foldl (<>) ""
+              (spectrumPositions <#> \(Tuple x y) -> " " <> show x <> "," <> show y)
+          -- Update spectrum display
+          children <- DN.childNodes analyserDOMNode >>= NL.toArray
+          for_ children \childNode -> do
+            let maybeChildElement = Element.fromNode childNode
+            case Element.fromNode childNode of
+              Nothing -> pure unit
+              Just childElement -> do
+                classList <- Element.classList childElement
+                isSpectrumPolyline <- DTL.contains classList spectrumClass
+                if isSpectrumPolyline
+                then do
+                  Element.setAttribute "points" spectrumPath childElement
+                else
+                  pure unit
+      maybeAnalyserDOMNode <- getAnalyserElement
+      case maybeAnalyserDOMNode of
         Nothing -> pure unit
-        Just analyserElement -> do
-          H.liftEffect $ log "starting loop"
+        Just analyserDOMNode -> do
+          H.liftEffect $ log "starting analyser update loop"
           stopLoop <- H.liftEffect $ animationFrameLoop state.drawLoopStopSignal
-                                   $ drawSpectrumSVG analyserElement
+                                   $ drawSpectrumSVG analyserDOMNode
           pure unit
 
   handleQuery :: forall a. Query a -> H.HalogenM State Action Slots Message Aff (Maybe a)
@@ -138,9 +138,13 @@ analyser =
     Resize newShape a -> Just a <$ do
       H.modify_ _{ shape = newShape }
 
-getAnalyserElement :: H.HalogenM State Action Slots Message Aff (Maybe Element.Element)
+-- Get the div inside the foreignObject as HP.ref doesn't seem to work for
+-- SVG elements
+getAnalyserElement :: H.HalogenM State Action Slots Message Aff (Maybe DN.Node)
 getAnalyserElement = H.getHTMLElementRef analyserRefLabel >>= case _ of
   Nothing -> do
     H.liftEffect $ log "couldn't get analyser element"
     pure Nothing
-  Just htmlElement -> pure $ Just $ HTMLElement.toElement htmlElement
+  Just htmlElement -> H.liftEffect $ runMaybeT do
+    foreignObject <- MaybeT $ DN.parentNode $ Element.toNode $ HTMLElement.toElement htmlElement
+    MaybeT $ DN.parentNode foreignObject

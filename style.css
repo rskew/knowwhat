@@ -116,13 +116,10 @@ foreignObject {
     fill: #0005;
 }
 
-.analyser {
-    stroke: #0005;
-}
-
-.analyser-canvas {
-    width: 30.0;
-    height: 50.0;
+.spectrum-polylines {
+    fill: none;
+    stroke: #000;
+    stroke-width: 1.0;
 }
 
 .node.focused {
