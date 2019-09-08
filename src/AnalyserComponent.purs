@@ -19,6 +19,7 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
 import Effect.Ref (Ref)
+import Math as Math
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
@@ -81,15 +82,7 @@ analyser =
   render state =
     SE.g
     []
-    [ SE.rect
-      [ SA.class_ "analyser_border"
-      , SA.fill $ SA.PaintColor $ SA.RGBA 0 0 0 0.0
-      -- stroke: #dddc;
-      , SA.stroke $ SA.PaintColor $ SA.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
-      , SA.height $ SA.Length $ SA.Px state.shape.height
-      , SA.width $ SA.Length $ SA.Px state.shape.width
-      ]
-    , SE.polyline
+    [ SE.polyline
       [ SA.class_ spectrumClass
       ]
     -- User a div inside a foreignObject as a hack to access the polyline
@@ -108,7 +101,7 @@ analyser =
     Init -> do
       state <- H.get
       let
-        widthMultiplier = state.shape.width / (toNumber defaultFrequencyBinCount)
+        widthMultiplier = state.shape.width / (Math.log ((toNumber defaultFrequencyBinCount) + 1.0))
         heightMultiplier = state.shape.height / 256.0
         drawSpectrumSVG :: DN.Node -> Effect Unit
         drawSpectrumSVG analyserDOMNode = do
@@ -116,7 +109,7 @@ analyser =
           spectrumArray <- toArray state.spectrumBuffer
           let
             spectrumPositions = spectrumArray # Array.mapWithIndex \index binAmplitude ->
-              Tuple ((toNumber index) * widthMultiplier) ((UInt.toNumber binAmplitude) * heightMultiplier)
+              Tuple ((Math.log ((toNumber index) + 1.0)) * widthMultiplier) ((UInt.toNumber binAmplitude) * heightMultiplier)
             spectrumPath = foldl (<>) ""
               (spectrumPositions <#> \(Tuple x y) -> " " <> show x <> "," <> show y)
           -- Update spectrum display
