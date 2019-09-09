@@ -51,6 +51,7 @@ import Point2D (Point2D)
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
+import Svg.Types as SVGT
 import Web.Event.Event as WE
 import Web.Event.EventTarget as ET
 import Web.File.File as File
@@ -244,84 +245,84 @@ graph =
   svgDefs = SE.defs []
             [ SE.marker
               [ SA.id "drawing-arrow"
-              , SA.markerWidth 10.0
-              , SA.markerHeight 10.0
-              , SA.refX 3.0
-              , SA.refY 5.0
-              , SA.orient SA.AutoOrient
-              , SA.markerUnits SA.UserSpaceOnUse
+              , SA.markerWidth $ show 10.0
+              , SA.markerHeight $ show 10.0
+              , SA.refX $ show 3.0
+              , SA.refY $ show 5.0
+              , SA.orient SVGT.AutoOrient
+              , SA.markerUnits SVGT.UserSpaceOnUse
               ]
-              [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
-                               , SA.Abs (SA.L 10.0 5.0)
-                               , SA.Abs (SA.L 0.0 10.0)
-                               , SA.Abs SA.Z
+              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                               , SVGT.Abs (SVGT.L 10.0 5.0)
+                               , SVGT.Abs (SVGT.L 0.0 10.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
             , SE.marker
               [ SA.id "arrow"
-              , SA.markerWidth 10.0
-              , SA.markerHeight 10.0
-              , SA.refX 15.0
-              , SA.refY 5.0
-              , SA.orient SA.AutoOrient
-              , SA.markerUnits SA.UserSpaceOnUse
+              , SA.markerWidth $ show 10.0
+              , SA.markerHeight $ show 10.0
+              , SA.refX $ show 15.0
+              , SA.refY $ show 5.0
+              , SA.orient SVGT.AutoOrient
+              , SA.markerUnits SVGT.UserSpaceOnUse
               ]
-              [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
-                               , SA.Abs (SA.L 0.0 10.0)
-                               , SA.Abs (SA.L 8.0 5.0)
-                               , SA.Abs SA.Z
+              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                               , SVGT.Abs (SVGT.L 0.0 10.0)
+                               , SVGT.Abs (SVGT.L 8.0 5.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
             , SE.marker
               [ SA.id "arrow-to-synth-node"
-              , SA.markerWidth 10.0
-              , SA.markerHeight 10.0
-              , SA.refX 57.0
-              , SA.refY 5.0
-              , SA.orient SA.AutoOrient
-              , SA.markerUnits SA.UserSpaceOnUse
+              , SA.markerWidth $ show 10.0
+              , SA.markerHeight $ show 10.0
+              , SA.refX $ show 57.0
+              , SA.refY $ show 5.0
+              , SA.orient SVGT.AutoOrient
+              , SA.markerUnits SVGT.UserSpaceOnUse
               ]
-              [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
-                               , SA.Abs (SA.L 0.0 10.0)
-                               , SA.Abs (SA.L 8.0 5.0)
-                               , SA.Abs SA.Z
+              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                               , SVGT.Abs (SVGT.L 0.0 10.0)
+                               , SVGT.Abs (SVGT.L 8.0 5.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
             , SE.marker
               [ SA.id "arrow-to-group"
-              , SA.markerWidth 10.0
-              , SA.markerHeight 10.0
-              , SA.refX 19.0
-              , SA.refY 5.0
-              , SA.orient SA.AutoOrient
-              , SA.markerUnits SA.UserSpaceOnUse
+              , SA.markerWidth $ show 10.0
+              , SA.markerHeight $ show 10.0
+              , SA.refX $ show 19.0
+              , SA.refY $ show 5.0
+              , SA.orient SVGT.AutoOrient
+              , SA.markerUnits SVGT.UserSpaceOnUse
               ]
-              [ SE.path [ SA.d [ SA.Abs (SA.M 0.0 0.0)
-                               , SA.Abs (SA.L 0.0 10.0)
-                               , SA.Abs (SA.L 8.0 5.0)
-                               , SA.Abs SA.Z
+              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                               , SVGT.Abs (SVGT.L 0.0 10.0)
+                               , SVGT.Abs (SVGT.L 8.0 5.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
             , SE.pattern
               [ SA.id "pattern-delay-fill"
-              , SA.height $ SA.Length $ SA.Px 20.0
-              , SA.width $ SA.Length $ SA.Px 20.0
-              , SA.x $ - delayRectHeight / 2.0
-              , SA.y $ - delayRectHeight / 2.0
-              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              , SA.height $ show 20.0
+              , SA.width $ show 20.0
+              , SA.x $ show $ - delayRectHeight / 2.0
+              , SA.y $ show $ - delayRectHeight / 2.0
+              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
               ]
               let
                 patternRect x y cssClass =
                   SE.rect
                   [ SA.class_ cssClass
-                  , SA.height $ SA.Length $ SA.Px 10.0
-                  , SA.width $ SA.Length $ SA.Px 10.0
-                  , SA.x x
-                  , SA.y y
+                  , SA.height $ show 10.0
+                  , SA.width $ show 10.0
+                  , SA.x $ show x
+                  , SA.y $ show y
                   ]
               in
                 [ patternRect 0.0 0.0 "pattern-delay-fill-rect1"
@@ -331,43 +332,43 @@ graph =
                 ]
             , SE.pattern
               [ SA.id "pattern-amplifier-below-unity"
-              , SA.height $ SA.Length $ SA.Px 10.0
-              , SA.width $ SA.Length $ SA.Px 10.0
-              , SA.x $ - amplifierBoxSize / 3.0
-              , SA.y $ - amplifierBoxSize / 3.0
-              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              , SA.height $ show 10.0
+              , SA.width $ show 10.0
+              , SA.x $ show $ - amplifierBoxSize / 3.0
+              , SA.y $ show $ - amplifierBoxSize / 3.0
+              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
               ]
               [ SE.rect
-                [ SA.height $ SA.Length $ SA.Px 10.0
-                , SA.width $ SA.Length $ SA.Px 10.0
+                [ SA.height $ show 10.0
+                , SA.width $ show 10.0
                 , SA.class_ "pattern-amplifier-unity-background"
                 ]
               , SE.path [ SA.class_ "amplifier-below-unity-triangle"
-                        , SA.d [ SA.Abs (SA.M 0.0 0.0)
-                               , SA.Abs (SA.L 5.0 10.0)
-                               , SA.Abs (SA.L 10.0 0.0)
-                               , SA.Abs SA.Z
+                        , SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                               , SVGT.Abs (SVGT.L 5.0 10.0)
+                               , SVGT.Abs (SVGT.L 10.0 0.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
             , SE.pattern
               [ SA.id "pattern-amplifier-above-unity"
-              , SA.height $ SA.Length $ SA.Px 10.0
-              , SA.width $ SA.Length $ SA.Px 10.0
-              , SA.x $ - amplifierBoxSize / 3.0
-              , SA.y $ - amplifierBoxSize / 3.0
-              , SA.patternUnits SA.PatternUnitsUserSpaceOnUse
+              , SA.height $ show 10.0
+              , SA.width $ show 10.0
+              , SA.x $ show $ - amplifierBoxSize / 3.0
+              , SA.y $ show $ - amplifierBoxSize / 3.0
+              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
               ]
               [ SE.rect
-                [ SA.height $ SA.Length $ SA.Px 10.0
-                , SA.width $ SA.Length $ SA.Px 10.0
+                [ SA.height $ show 10.0
+                , SA.width $ show 10.0
                 , SA.class_ "pattern-amplifier-unity-background"
                 ]
               , SE.path [ SA.class_ "amplifier-above-unity-triangle"
-                        , SA.d [ SA.Abs (SA.M 0.0 10.0)
-                               , SA.Abs (SA.L 5.0 0.0)
-                               , SA.Abs (SA.L 10.0 10.0)
-                               , SA.Abs SA.Z
+                        , SA.d [ SVGT.Abs (SVGT.M 0.0 10.0)
+                               , SVGT.Abs (SVGT.L 5.0 0.0)
+                               , SVGT.Abs (SVGT.L 10.0 10.0)
+                               , SVGT.Abs SVGT.Z
                                ]
                         ]
               ]
@@ -422,7 +423,7 @@ graph =
         ]
       textBoxHTML textBoxOffset =
         [ SE.g
-          [ SA.transform [ SA.Translate textBoxOffset.x textBoxOffset.y ]
+          [ SA.transform [ SVGT.Translate textBoxOffset.x textBoxOffset.y ]
           , HE.onMouseDown \e -> Just
                                  $ StopPropagation (ME.toEvent e)
                                  $ DoNothing
@@ -443,7 +444,7 @@ graph =
         -- Node Halo, for creating edges from
         [ SE.circle
           [ SA.class_ haloClasses
-          , SA.r haloRadius
+          , SA.r $ show haloRadius
           , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
                                  $ EdgeDrawStart (node ^. _nodeId) e
           , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
@@ -452,14 +453,14 @@ graph =
         -- Node center
         , SE.circle
           [ SA.class_ nodeClasses
-          , SA.r $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
-                   then groupNodeRadius
-                   else nodeRadius
+          , SA.r $ show $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
+                          then groupNodeRadius
+                          else nodeRadius
           ]
         -- Node border, for grabbing
         , SE.circle
           [ SA.class_ nodeBorderClasses
-          , SA.r nodeBorderRadius
+          , SA.r $ show nodeBorderRadius
           , HE.onMouseDown \e -> Just
                                  $ StopPropagation (ME.toEvent e)
                                  $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
@@ -486,11 +487,11 @@ graph =
         [ SE.path [ let
                       b = amplifierHaloOffset + amplifierBoxSize
                     in
-                      SA.d [ SA.Abs (SA.M (-b) (-b))
-                           , SA.Abs (SA.L b (-b))
-                           , SA.Abs (SA.L b b)
-                           , SA.Abs (SA.L (-b) b)
-                           , SA.Abs SA.Z
+                      SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
+                           , SVGT.Abs (SVGT.L b (-b))
+                           , SVGT.Abs (SVGT.L b b)
+                           , SVGT.Abs (SVGT.L (-b) b)
+                           , SVGT.Abs SVGT.Z
                            ]
                   , SA.class_ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
@@ -506,13 +507,13 @@ graph =
                       b = amplifierBoxSize
                       hornSize = 3.0 * amplifierBoxSize * (amplifierGainToControl gain)
                     in
-                      SA.d [ SA.Abs (SA.M (-b) (-b))
-                           , SA.Abs (SA.L b (-b))
-                           , SA.Abs (SA.L (3.0 * b) (- hornSize))
-                           , SA.Abs (SA.L (3.0 * b) hornSize)
-                           , SA.Abs (SA.L b b)
-                           , SA.Abs (SA.L (-b) b)
-                           , SA.Abs SA.Z
+                      SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
+                           , SVGT.Abs (SVGT.L b (-b))
+                           , SVGT.Abs (SVGT.L (3.0 * b) (- hornSize))
+                           , SVGT.Abs (SVGT.L (3.0 * b) hornSize)
+                           , SVGT.Abs (SVGT.L b b)
+                           , SVGT.Abs (SVGT.L (-b) b)
+                           , SVGT.Abs SVGT.Z
                            ]
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
@@ -522,11 +523,11 @@ graph =
         , SE.path [ let
                        b = amplifierBoxSize
                     in
-                       SA.d [ SA.Abs (SA.M (-b) (-b))
-                            , SA.Abs (SA.L b (-b))
-                            , SA.Abs (SA.L b b)
-                            , SA.Abs (SA.L (-b) b)
-                            , SA.Abs SA.Z
+                       SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
+                            , SVGT.Abs (SVGT.L b (-b))
+                            , SVGT.Abs (SVGT.L b b)
+                            , SVGT.Abs (SVGT.L (-b) b)
+                            , SVGT.Abs SVGT.Z
                             ]
                   , SA.class_ nodeBorderClasses
                   , HE.onMouseDown \e -> Just
@@ -550,10 +551,10 @@ graph =
       ---
       delayNodeHTML period =
         -- Node Halo, for creating edges from
-        [ SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight + 2.0 * delayRectHaloOffset
-                  , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) + 2.0 * delayRectHaloOffset
-                  , SA.x $ - delayRectHaloOffset
-                  , SA.y $ - delayRectHaloOffset - delayRectHeight / 2.0
+        [ SE.rect [ SA.height $ show $ delayRectHeight + 2.0 * delayRectHaloOffset
+                  , SA.width $ show $ (delayPeriodToPageSpace period) + 2.0 * delayRectHaloOffset
+                  , SA.x $ show $ - delayRectHaloOffset
+                  , SA.y $ show $ - delayRectHaloOffset - delayRectHeight / 2.0
                   , SA.class_ $ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
                                          $ EdgeDrawStart (node ^. _nodeId) e
@@ -562,25 +563,25 @@ graph =
                   ]
         -- Inner border shadow for delay period control
         , SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
-                  , SA.height $ SA.Length $ SA.Px $ delayRectHeight - 4.0
-                  , SA.width $ SA.Length $ SA.Px $ (delayPeriodToPageSpace period) - 4.0
-                  , SA.x $ 2.0
-                  , SA.y $ 2.0 - delayRectHeight / 2.0
+                  , SA.height $ show $ delayRectHeight - 4.0
+                  , SA.width $ show $ (delayPeriodToPageSpace period) - 4.0
+                  , SA.x $ show 2.0
+                  , SA.y $ show $ 2.0 - delayRectHeight / 2.0
                   ]
         -- Draggable delay period control
         , SE.rect [ SA.class_ $ nodeClasses <> " delay"
-                  , SA.height $ SA.Length $ SA.Px delayRectHeight
-                  , SA.width $ SA.Length $ SA.Px $ delayPeriodToPageSpace period
-                  , SA.y $ - delayRectHeight / 2.0
+                  , SA.height $ show delayRectHeight
+                  , SA.width $ show $ delayPeriodToPageSpace period
+                  , SA.y $ show $ - delayRectHeight / 2.0
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
                                          $ DelayDragStart (node ^. _nodeId) period e
                   ]
         -- Node border, for grabbing
-        , SE.rect [ SA.height $ SA.Length $ SA.Px $ delayRectHeight / 2.0
-                  , SA.width $ SA.Length $ SA.Px $ Math.min delayRectHeight (delayPeriodToPageSpace period)
+        , SE.rect [ SA.height $ show $ delayRectHeight / 2.0
+                  , SA.width $ show $ Math.min delayRectHeight (delayPeriodToPageSpace period)
                   , SA.class_ $ nodeBorderClasses <> " delay"
-                  , SA.y $ - delayRectHeight / 2.0
+                  , SA.y $ show $ - delayRectHeight / 2.0
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
                                          $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
@@ -616,10 +617,10 @@ graph =
           }
           (const Nothing)
         -- Node Halo, for creating edges from
-        , SE.rect [ SA.height $ SA.Length $ SA.Px $ filterShape.height + 2.0 * delayRectHaloOffset
-                  , SA.width $ SA.Length $ SA.Px $ filterShape.width + 2.0 * delayRectHaloOffset
-                  , SA.x $ - delayRectHaloOffset
-                  , SA.y $ - delayRectHaloOffset
+        , SE.rect [ SA.height $ show $ filterShape.height + 2.0 * delayRectHaloOffset
+                  , SA.width $ show $ filterShape.width + 2.0 * delayRectHaloOffset
+                  , SA.x $ show $ - delayRectHaloOffset
+                  , SA.y $ show $ - delayRectHaloOffset
                   , SA.class_ $ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
                                          $ EdgeDrawStart (node ^. _nodeId) e
@@ -629,11 +630,11 @@ graph =
         -- Thin border
         , SE.rect
           [ SA.class_ "analyser_border"
-          , SA.fill $ SA.PaintColor $ SA.RGBA 0 0 0 0.0
+          , SA.fill $ SVGT.PaintColor $ SVGT.RGBA 0 0 0 0.0
             -- stroke: #dddc;
-          , SA.stroke $ SA.PaintColor $ SA.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
-          , SA.height $ SA.Length $ SA.Px filterShape.height
-          , SA.width $ SA.Length $ SA.Px filterShape.width
+          , SA.stroke $ SVGT.PaintColor $ SVGT.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
+          , SA.height $ show filterShape.height
+          , SA.width $ show filterShape.width
           , HE.onMouseDown \e -> Just
                                  $ StopPropagation (ME.toEvent e)
                                  $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
@@ -654,7 +655,7 @@ graph =
           _ -> graphNodeHTML
     in
       SE.g
-      [ SA.transform [ SA.Translate (node ^. _pos).x (node ^. _pos).y ] ]
+      [ SA.transform [ SVGT.Translate (node ^. _pos).x (node ^. _pos).y ] ]
       nodeHTML
 
   renderEdge :: UIEdge -> AppState -> Maybe (H.ComponentHTML Action Slots Aff)
@@ -693,16 +694,16 @@ graph =
       -- Edge
       [ SE.line
         [ SA.class_ edgeClasses
-        , SA.x1 sourcePos.x
-        , SA.y1 sourcePos.y
-        , SA.x2 (targetNode ^. _pos).x
-        , SA.y2 (targetNode ^. _pos).y
+        , SA.x1 $ show sourcePos.x
+        , SA.y1 $ show sourcePos.y
+        , SA.x2 $ show (targetNode ^. _pos).x
+        , SA.y2 $ show (targetNode ^. _pos).y
         , SA.markerEnd markerRef'
         ]
       ] <> if not focused && ((edge ^. _edgeText) == "") then [] else
       -- Edge Textbox
       [ SE.g
-        [ SA.transform [ SA.Translate
+        [ SA.transform [ SVGT.Translate
                          (edgeMidPos.x + edgeTextBoxOffset.x)
                          (edgeMidPos.y + edgeTextBoxOffset.y)
                        ]
@@ -746,11 +747,11 @@ graph =
     pure $
       SE.line
       [ SA.class_ edgeBorderClasses
-      , SA.x1 sourcePos.x
-      , SA.y1 sourcePos.y
-      , SA.x2 (targetNode ^. _pos).x
-      , SA.y2 (targetNode ^. _pos).y
-      , SA.strokeLinecap SA.Butt
+      , SA.x1 $ show sourcePos.x
+      , SA.y1 $ show sourcePos.y
+      , SA.x2 $ show (targetNode ^. _pos).x
+      , SA.y2 $ show (targetNode ^. _pos).y
+      , SA.strokeLinecap SVGT.Butt
       , HE.onClick \_ -> Just $ FocusOn $ FocusEdge (edge ^. _edgeId) []
       , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId $ edge ^. _edgeId
       , HE.onMouseLeave \_ -> Just $ Hover Nothing
@@ -778,10 +779,10 @@ graph =
     pure $
       SE.line
       [ SA.class_ drawingEdgeClasses
-      , SA.x1 sourcePos'.x
-      , SA.y1 sourcePos'.y
-      , SA.x2 drawingEdgeGraphPos.x
-      , SA.y2 drawingEdgeGraphPos.y
+      , SA.x1 $ show sourcePos'.x
+      , SA.y1 $ show sourcePos'.y
+      , SA.x2 $ show drawingEdgeGraphPos.x
+      , SA.y2 $ show drawingEdgeGraphPos.y
       , SA.markerEnd "url(#drawing-arrow)"
       ]
 

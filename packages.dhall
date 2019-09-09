@@ -155,10 +155,10 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-contenteditable.git"
       , version =
-          "23f9467a4307ea1f8615f08afc152103ade74ba3"
+          "b2bcf837ee457696c61ea40ca3775dbbd5c6a449"
       }
-  , halogen-svg = ../purescript-halogen-svg/spago.dhall as Location
-      {- dependencies =
+  , halogen-svg =
+      { dependencies =
           [ "console"
           , "effect"
           , "halogen"
@@ -170,8 +170,8 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-svg.git"
       , version =
-          "a9ad4422ee0fad84537558b46626b824f1883332"
-      -}
+          "7cbcd1e176a84220c0e66ca5e38a158bc3636dca"
+      }
   , webaudio =
       { dependencies =
           [ "aff"
