@@ -109,7 +109,8 @@ analyser =
           spectrumArray <- toArray state.spectrumBuffer
           let
             spectrumPositions = spectrumArray # Array.mapWithIndex \index binAmplitude ->
-              Tuple ((Math.log ((toNumber index) + 1.0)) * widthMultiplier) ((UInt.toNumber binAmplitude) * heightMultiplier)
+              Tuple ((Math.log ((toNumber index) + 1.0)) * widthMultiplier)
+                    (state.shape.height - (UInt.toNumber binAmplitude) * heightMultiplier)
             spectrumPath = foldl (<>) ""
               (spectrumPositions <#> \(Tuple x y) -> " " <> show x <> "," <> show y)
           -- Update spectrum display

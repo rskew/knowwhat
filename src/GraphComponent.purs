@@ -193,7 +193,7 @@ data Action
   | DeleteFocus
   | Hover (Maybe HoveredElementId)
   | Zoom WhE.WheelEvent
-  | CenterGraphOrigin
+  | CenterGraphOriginAndZoom
   | FetchLocalFile WE.Event
   | LoadLocalFile FileReader.FileReader H.SubscriptionId WE.Event
   | SaveLocalFile
@@ -374,8 +374,8 @@ graph =
               ]
             ]
 
-  renderGraphNode :: UINode -> AppState -> H.ComponentHTML Action Slots Aff
-  renderGraphNode node state =
+  renderGraphNode :: AppState -> UINode -> H.ComponentHTML Action Slots Aff
+  renderGraphNode state node =
     let
       hoveredOverBorder = (state ^. _hoveredElementId) == (Just $ NodeBorderId $ node ^. _nodeId)
       hoveredOverHalo = (state ^. _hoveredElementId) == (Just $ NodeHaloId $ node ^. _nodeId)
@@ -631,7 +631,7 @@ graph =
         , SE.rect
           [ SA.class_ "analyser_border"
           , SA.fill $ SVGT.PaintColor $ SVGT.RGBA 0 0 0 0.0
-            -- stroke: #dddc;
+            -- 'stroke: #dddc;';
           , SA.stroke $ SVGT.PaintColor $ SVGT.RGBA (13 * 16) (13 * 16) (13 * 16) (12.0 / 16.0)
           , SA.height $ show filterShape.height
           , SA.width $ show filterShape.width
@@ -658,8 +658,8 @@ graph =
       [ SA.transform [ SVGT.Translate (node ^. _pos).x (node ^. _pos).y ] ]
       nodeHTML
 
-  renderEdge :: UIEdge -> AppState -> Maybe (H.ComponentHTML Action Slots Aff)
-  renderEdge edge state = do
+  renderEdge :: AppState -> UIEdge -> Maybe (Tuple (H.ComponentHTML Action Slots Aff) (Maybe (H.ComponentHTML Action Slots Aff)))
+  renderEdge state edge = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
     let
@@ -689,43 +689,46 @@ graph =
         { x : (sourcePos.x + (targetNode ^. _pos).x) / 2.0
         , y : (sourcePos.y + (targetNode ^. _pos).y) / 2.0
         }
-    pure $
-      SE.g [] $
+    if edge^._source == edge^._target
+    then Nothing
+    else Just $
+      Tuple
       -- Edge
-      [ SE.line
-        [ SA.class_ edgeClasses
-        , SA.x1 $ show sourcePos.x
-        , SA.y1 $ show sourcePos.y
-        , SA.x2 $ show (targetNode ^. _pos).x
-        , SA.y2 $ show (targetNode ^. _pos).y
-        , SA.markerEnd markerRef'
-        ]
-      ] <> if not focused && ((edge ^. _edgeText) == "") then [] else
-      -- Edge Textbox
-      [ SE.g
-        [ SA.transform [ SVGT.Translate
-                         (edgeMidPos.x + edgeTextBoxOffset.x)
-                         (edgeMidPos.y + edgeTextBoxOffset.y)
-                       ]
-        , HE.onMouseDown \e -> Just
-                               $ StopPropagation (ME.toEvent e)
-                               $ DoNothing
-        ]
-        [ HH.slot
-          _edgeTextField
-          (edge ^. _edgeId)
-          SVGContentEditable.svgContenteditable
-          { shape : defaultTextFieldShape
-          , initialText : (edge ^. _edgeText)
-          , maxShape : maxTextFieldShape
-          , fitContentDynamic : true
-          }
-          (Just <<< EdgeTextInput (edge ^. _edgeId))
-        ]
-      ]
+      (SE.line
+       [ SA.class_ edgeClasses
+       , SA.x1 $ show sourcePos.x
+       , SA.y1 $ show sourcePos.y
+       , SA.x2 $ show (targetNode ^. _pos).x
+       , SA.y2 $ show (targetNode ^. _pos).y
+       , SA.markerEnd markerRef'
+       ]
+      )
+      (if not focused && ((edge ^. _edgeText) == "") then Nothing else Just $
+       -- Edge Textbox
+       SE.g
+       [ SA.transform [ SVGT.Translate
+                        (edgeMidPos.x + edgeTextBoxOffset.x)
+                        (edgeMidPos.y + edgeTextBoxOffset.y)
+                      ]
+       , HE.onMouseDown \e -> Just
+                              $ StopPropagation (ME.toEvent e)
+                              $ DoNothing
+       ]
+       [ HH.slot
+         _edgeTextField
+         (edge ^. _edgeId)
+         SVGContentEditable.svgContenteditable
+         { shape : defaultTextFieldShape
+         , initialText : (edge ^. _edgeText)
+         , maxShape : maxTextFieldShape
+         , fitContentDynamic : true
+         }
+         (Just <<< EdgeTextInput (edge ^. _edgeId))
+       ]
+      )
 
-  renderEdgeBorder :: UIEdge -> AppState -> Maybe (H.ComponentHTML Action Slots Aff)
-  renderEdgeBorder edge state = do
+  renderEdgeBorder :: AppState -> UIEdge -> Maybe (H.ComponentHTML Action Slots Aff)
+  renderEdgeBorder state edge = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
     let
@@ -759,8 +762,8 @@ graph =
                                $ AppDeleteEdge $ edge
       ]
 
-  renderDrawingEdge :: DrawingEdge -> AppState -> Maybe (H.ComponentHTML Action Slots Aff)
-  renderDrawingEdge drawingEdgeState state = do
+  renderDrawingEdge :: AppState -> DrawingEdge -> Maybe (H.ComponentHTML Action Slots Aff)
+  renderDrawingEdge state drawingEdgeState = do
     sourcePos <- preview (_graphNodePos drawingEdgeState.source) state
     let
       GraphSpacePos sourceGraphPos = sourcePos
@@ -791,24 +794,26 @@ graph =
     let
       keyedNodes = map
                    (\node ->
-                     Tuple (show (node ^. _nodeId)) $ renderGraphNode node state
+                     Tuple (show (node ^. _nodeId)) $ renderGraphNode state node
                    )
                    $ Array.fromFoldable $ Map.values $ state ^. _graph <<< _nodes
-      keyedEdges = Array.mapMaybe
-                   (\edge -> do
-                       edgeHTML <- renderEdge edge state
-                       pure $ Tuple (edgeIdStr edge) edgeHTML
-                   )
-                   $ Array.fromFoldable $ allEdges $ state ^. _graph
+      Tuple keyedEdges maybeKeyedEdgeTextFields =
+        Array.unzip $ Array.catMaybes
+        $ (Array.fromFoldable $ allEdges (state^._graph)) <#> \edge -> do
+            Tuple edgeHTML maybeEdgeTextFieldHTML <- renderEdge state edge
+            pure $ Tuple (Tuple (edgeIdStr edge) edgeHTML)
+                         $ maybeEdgeTextFieldHTML <#> \edgeTextFieldHTML ->
+                             (Tuple (edgeTextFieldIdStr edge) edgeTextFieldHTML)
+      keyedEdgeTextFields = Array.catMaybes maybeKeyedEdgeTextFields
       keyedEdgeBorders = Array.mapMaybe
                      (\edge -> do
-                         edgeHTML <- renderEdgeBorder edge state
+                         edgeHTML <- renderEdgeBorder state edge
                          pure $ Tuple ((edgeIdStr edge) <> "_border") edgeHTML
                      )
                      $ Array.fromFoldable $ allEdges $ state ^. _graph
       keyedDrawingEdges = Array.mapMaybe
                      (\drawingEdgeState -> do
-                         drawingEdgeHTML <- renderDrawingEdge drawingEdgeState state
+                         drawingEdgeHTML <- renderDrawingEdge state drawingEdgeState
                          pure $ Tuple (drawingEdgeKey drawingEdgeState.source) drawingEdgeHTML
                      )
                      $ Array.fromFoldable $ Map.values (state ^. _drawingEdges)
@@ -835,10 +840,11 @@ graph =
         , SK.g
           []
           (
-           keyedEdges
-           <> keyedEdgeBorders
+           keyedEdgeBorders
+           <> keyedEdges
            <> keyedDrawingEdges
            <> keyedNodes
+           <> keyedEdgeTextFields
           )
         ]
       , HH.input
@@ -1013,12 +1019,21 @@ graph =
 
     -- | Zoom in/out holding the mouse position invariant in graph space
     -- |
-    -- | p = mousePagePos
-    -- | prevMouseGraphPos = (p - oldGraphOrigin) * oldZoom
-    -- | newMouseGraphPos = (p - newGraphOrigin) * newZoom
-    -- | let newMouseGraphPos = prevMouseGraphPos
-    -- | => newGraphOrigin = p - ((p - oldGraphOrigin) * (oldZoom / newZoom))
-    -- | So if newZoom --> inf, newGraphOrigin --> mousePos, as expected.
+    -- | The mapping from page space to graph space is given by:
+    -- |     graphSpacePos = (pageSpacePos - graphOrigin) * zoom
+    -- | where a larger value for zoom means that more of graph space is visible.
+    -- |
+    -- | To find the new graph origin that holds the mouse position
+    -- | in graph space constant, let:
+    -- |     p = mousePagePos
+    -- |     prevMousePosGraphSpace = (p - oldGraphOrigin) * oldZoom     (1)
+    -- |     newMousePosGraphSpace = (p - newGraphOrigin) * newZoom      (2)
+    -- | and let:
+    -- |     newMousePosGraphSpace = prevMousePosGraphSpace              (3)
+    -- | by substituting (1) and (2) into (3) and rearranging for newGraphOrigin:
+    -- |     newGraphOrigin = p - ((p - oldGraphOrigin) * (oldZoom / newZoom))
+    -- |
+    -- | If newZoom --> inf, newGraphOrigin --> mousePos, as expected.
     Zoom wheelEvent -> do
       state <- H.get
       let
@@ -1036,8 +1051,9 @@ graph =
       H.modify_ $ (_zoom .~ newZoom)
                 >>> (_graphOrigin .~ newGraphOrigin)
 
-    CenterGraphOrigin -> do
-      H.modify_ $ _graphOrigin .~ PageSpacePos { x : 0.0, y : 0.0 }
+    CenterGraphOriginAndZoom -> do
+      H.modify_ $ (_graphOrigin .~ PageSpacePos { x : 0.0, y : 0.0 })
+                  >>> (_zoom .~ 1.0)
 
     FetchLocalFile changeEvent -> unit <$ runMaybeT do
       target <- MaybeT $ pure $ WE.target changeEvent
@@ -1087,6 +1103,7 @@ graph =
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
           H.liftEffect $ WebAudio.close (state ^. _synthState).audioContext
+          H.liftEffect $ log "Closed audio context"
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
@@ -1113,7 +1130,7 @@ graph =
         "o" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
-          handleAction CenterGraphOrigin
+          handleAction CenterGraphOriginAndZoom
         "Delete" ->
           handleAction $ DeleteFocus
         "Escape" ->
@@ -1248,3 +1265,6 @@ modifyM op = do
   state <- H.get
   updatedState <- H.liftEffect $ op state
   H.put updatedState
+
+edgeTextFieldIdStr :: UIEdge -> String
+edgeTextFieldIdStr edge = edgeIdStr edge <> "textField"

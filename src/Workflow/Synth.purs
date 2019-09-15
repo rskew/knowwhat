@@ -321,12 +321,13 @@ parseSynthNodeType = case _ of
   "filter" -> Just NodeTypeFilter
   "output" -> Just NodeTypeDestination
   "analyser" -> Just NodeTypeAnalyser
-  --"analyser" -> Just NodeTypeAnalyser
-  --"audio-buffer" -> Just NodeTypeAudioBufferSource
-  --"convolver" -> Just NodeTypeConvolver
   --"compressor" -> Just NodeTypeDynamicsCompressor
   --"media-element" -> Just NodeTypeMediaElementAudioSource
+  --"audio-buffer" -> Just NodeTypeAudioBufferSource
+  --"convolver" -> Just NodeTypeConvolver
   --"panner" -> Just NodeTypeStereoPanner
+  --"listener"
+  --"waveshaper"
   _ -> Nothing
 
 freshSynthNode :: SynthNodeType -> WebAudio.AudioContext -> Effect SynthNodeState

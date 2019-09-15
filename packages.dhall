@@ -155,7 +155,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-contenteditable.git"
       , version =
-          "b2bcf837ee457696c61ea40ca3775dbbd5c6a449"
+          "6626c1f689e682157add76c484cbb6be00fec5ab"
       }
   , halogen-svg =
       { dependencies =
