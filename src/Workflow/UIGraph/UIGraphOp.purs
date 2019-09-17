@@ -2,13 +2,17 @@ module Workflow.UIGraph.UIGraphOp where
 
 import Prelude
 
-import Data.Collapsable (class Collapsable)
+import Run (Run, FProxy)
+import Run as Run
+import Data.Bifunctor (lmap)
 import Data.Generic.Rep (class Generic)
-import Data.Group (class Group)
 import Data.Lens (traversed, (^.), (.~))
 import Data.Lens.At (at)
 import Data.Maybe (Maybe(..))
+import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
+import Foreign (Foreign)
+import Foreign.Unit (ForeignUnit(..))
 import Workflow.Core (_edgeId, _nodeId, _nodes, deleteEdge, deleteNode, insertEdge, insertNode, modifyEdge)
 import Point2D (Point2D)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, _pos, _nodeText, _edgeText)
@@ -30,159 +34,136 @@ data UIGraphOpF next
   | UpdateEdgeText UIEdge String String next
 derive instance functorUIGraphOpF :: Functor UIGraphOpF
 
-newtype UIGraphOp a = UIGraphOp (Free UIGraphOpF a)
+type UIGRAPHOP = FProxy UIGraphOpF
 
-derive newtype instance functorUIGraphOp :: Functor UIGraphOp
-derive newtype instance applyUIGraphOp :: Apply UIGraphOp
-derive newtype instance applicativeUIGraphOp :: Applicative UIGraphOp
-derive newtype instance bindUIGraphOp :: Bind UIGraphOp
-derive newtype instance monadUIGraphOp :: Monad UIGraphOp
+_uiGraphOp :: SProxy "uiGraphOp"
+_uiGraphOp = SProxy
 
-derive newtype instance semigroupUIGraphOp :: Semigroup (UIGraphOp a)
-derive newtype instance monoidUIGraphOp :: Monoid a => Monoid (UIGraphOp a)
+invertUIGraphOp :: UIGraphOpF ~> UIGraphOpF
+invertUIGraphOp = case _ of
+  InsertNode node next             -> DeleteNode node next
+  DeleteNode node next             -> InsertNode node next
+  InsertEdge edge next             -> DeleteEdge edge next
+  DeleteEdge edge next             -> InsertEdge edge next
+  MoveNode node from to next       -> MoveNode node to from next
+  UpdateNodeText node from to next -> UpdateNodeText node to from next
+  UpdateEdgeText edge from to next -> UpdateEdgeText edge to from next
 
--- | Group instance required by Undoable
-instance groupUIGraphOp :: (Monoid a) => Group (UIGraphOp a) where
-  ginverse (UIGraphOp op) = UIGraphOp $ (hoistFree invert) op where
-    invert :: UIGraphOpF ~> UIGraphOpF
-    invert op' = case op' of
-      InsertNode node next             -> DeleteNode node next
-      DeleteNode node next             -> InsertNode node next
-      InsertEdge edge next             -> DeleteEdge edge next
-      DeleteEdge edge next             -> InsertEdge edge next
-      MoveNode node from to next       -> MoveNode node to from next
-      UpdateNodeText node from to next -> UpdateNodeText node to from next
-      UpdateEdgeText edge from to next -> UpdateEdgeText edge to from next
-
--- | Collapsable instance required by Undoable
-instance collapsableUIGraphOp :: Collapsable (UIGraphOp Unit) where
-  collapse (UIGraphOp nextOp) (UIGraphOp prevOp) =
-    case Tuple nextOp prevOp of
-      Tuple (Free (MoveNode nextNode  middlePos lastPos    nextNext))
-            (Free (MoveNode firstNode firstPos  middlePos' prevNext)) ->
-        if nextNode ^. _nodeId == firstNode ^. _nodeId
-           &&        middlePos == middlePos'
-        then Just $ UIGraphOp $ liftF $ MoveNode firstNode firstPos lastPos unit
-        else Nothing
-      Tuple (Free (UpdateNodeText nextNode  middleText lastText    nextNext))
-            (Free (UpdateNodeText firstNode firstText  middleText' prevNext)) ->
-        if nextNode ^. _nodeId == firstNode ^. _nodeId
-           &&       middleText == middleText'
-        then Just $ UIGraphOp $ liftF $ UpdateNodeText firstNode firstText lastText unit
-        else Nothing
-      Tuple (Free (UpdateEdgeText nextEdge  middleText lastText    nextNext))
-            (Free (UpdateEdgeText firstEdge firstText  middleText' prevNext)) ->
-        if nextEdge ^. _edgeId == firstEdge ^. _edgeId
-           &&       middleText == middleText'
-        then Just $ UIGraphOp $ liftF $ UpdateEdgeText firstEdge firstText lastText unit
-        else Nothing
-      _ -> Nothing
+-- | Assume that operations being collapsed are single ops, not compound
+collapseUIGraphOp :: forall a. UIGraphOpF a -> UIGraphOpF a -> Maybe (UIGraphOpF Unit)
+collapseUIGraphOp nextOp prevOp =
+  case Tuple nextOp prevOp of
+    Tuple (MoveNode nextNode  middlePos lastPos    nextNext)
+          (MoveNode firstNode firstPos  middlePos' prevNext) ->
+      if nextNode ^. _nodeId == firstNode ^. _nodeId
+         &&        middlePos == middlePos'
+      then Just $ MoveNode firstNode firstPos lastPos unit
+      else Nothing
+    Tuple (UpdateNodeText nextNode  middleText lastText    nextNext)
+          (UpdateNodeText firstNode firstText  middleText' prevNext) ->
+      if nextNode ^. _nodeId == firstNode ^. _nodeId
+         &&       middleText == middleText'
+      then Just $ UpdateNodeText firstNode firstText lastText unit
+      else Nothing
+    Tuple (UpdateEdgeText nextEdge  middleText lastText    nextNext)
+          (UpdateEdgeText firstEdge firstText  middleText' prevNext) ->
+      if nextEdge ^. _edgeId == firstEdge ^. _edgeId
+         &&       middleText == middleText'
+      then Just $ UpdateEdgeText firstEdge firstText lastText unit
+      else Nothing
+    _ -> Nothing
 
 
 ------
 -- Main interpreter
 
-interpretUIGraphOp :: forall a. UIGraphOp a -> (UIGraph -> UIGraph)
-interpretUIGraphOp (UIGraphOp op) = interpretUIGraphOpM op where
-  interpretUIGraphOpM = case _ of
-    Pure _ -> identity
+interpretUIGraphOp :: forall a. UIGraphOpF a -> Tuple (UIGraph -> UIGraph) a
+interpretUIGraphOp = case _ of
+  InsertNode node next ->
+    Tuple (insertNode node) next
 
-    Free (InsertNode node next) ->
-      (insertNode node)
-      >>> (interpretUIGraphOpM next)
+  DeleteNode node next -> Tuple (deleteNode node) next
 
-    Free (DeleteNode node next) ->
-      (deleteNode node)
-      >>> (interpretUIGraphOpM next)
+  InsertEdge edge next -> Tuple (insertEdge edge) next
 
-    Free (InsertEdge edge next) ->
-      (insertEdge edge)
-      >>> (interpretUIGraphOpM next)
+  DeleteEdge edge next -> Tuple (deleteEdge edge) next
 
-    Free (DeleteEdge edge next) ->
-      (deleteEdge edge)
-      >>> (interpretUIGraphOpM next)
+  MoveNode node from to next -> Tuple
+    (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _pos .~ to)
+    next
 
-    Free (MoveNode node from to next) ->
-      (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _pos .~ to)
-      >>> (interpretUIGraphOpM next)
+  UpdateNodeText node from to next -> Tuple
+    (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _nodeText .~ to)
+    next
 
-    Free (UpdateNodeText node from to next) ->
-      (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _nodeText .~ to)
-      >>> (interpretUIGraphOpM next)
-
-    Free (UpdateEdgeText edge from to next) ->
-      (modifyEdge (edge ^. _edgeId) (_edgeText .~ to))
-      >>> (interpretUIGraphOpM next)
+  UpdateEdgeText edge from to next -> Tuple
+    (modifyEdge (edge ^. _edgeId) (_edgeText .~ to))
+    next
 
 
 ------
 -- Printing interpreter
 
-instance showUIGraphOp :: Show (UIGraphOp a) where
-  show (UIGraphOp op) = showM op where
-    showM = case _  of
-      Pure _ -> "Pure"
-      Free (InsertNode node next) -> "InsertNode " <> show (node ^. _nodeId) <> " >>= " <> showM next
-      Free (DeleteNode node next) -> "DeleteNode " <> show (node ^. _nodeId) <> " >>= " <> showM next
-      Free (InsertEdge edge next) -> "InsertEdge " <> show (edge ^. _edgeId) <> " >>= " <> showM next
-      Free (DeleteEdge edge next) -> "DeleteEdge " <> show (edge ^. _edgeId) <> " >>= " <> showM next
-      Free (MoveNode node from to next) -> "MoveNode " <> show (node ^. _nodeId) <> " from " <> show from <> " to " <> show to <> " >>= " <> showM next
-      Free (UpdateNodeText node from to next) -> "UpdateNodeText " <> show (node ^. _nodeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= " <> showM next
-      Free (UpdateEdgeText edge from to next) -> "UpdateEdgeText " <> show (edge ^. _edgeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= " <> showM next
+showUIGraphOp :: forall a. UIGraphOpF a -> Tuple String a
+showUIGraphOp = case _  of
+    InsertNode node next -> Tuple ("InsertNode " <> show (node ^. _nodeId) <> " >>= ") next
+    DeleteNode node next -> Tuple ("DeleteNode " <> show (node ^. _nodeId) <> " >>= ") next
+    InsertEdge edge next -> Tuple ("InsertEdge " <> show (edge ^. _edgeId) <> " >>= ") next
+    DeleteEdge edge next -> Tuple ("DeleteEdge " <> show (edge ^. _edgeId) <> " >>= ") next
+    MoveNode node from to next -> Tuple ("MoveNode " <> show (node ^. _nodeId) <> " from " <> show from <> " to " <> show to <> " >>= ") next
+    UpdateNodeText node from to next -> Tuple ("UpdateNodeText " <> show (node ^. _nodeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
+    UpdateEdgeText edge from to next -> Tuple ("UpdateEdgeText " <> show (edge ^. _edgeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
 
 
 --------
----- Serialisation/deserialisation instances
+---- Serialisation/deserialisation
 
 derive instance genericUIGraphOpF :: (Generic a z) => Generic (UIGraphOpF a) _
-instance encodeUIGraphOpF :: (Generic a z, Encode a) => Encode (UIGraphOpF a) where
+instance encodeUIGraphOpF' :: (Generic a z, Encode a) => Encode (UIGraphOpF a) where
   encode x = x # genericEncode defaultOptions
-instance decodeUIGraphOpF :: (Generic a z, Decode a) => Decode (UIGraphOpF a) where
+instance decodeUIGraphOpF' :: (Generic a z, Decode a) => Decode (UIGraphOpF a) where
   decode x = x # genericDecode defaultOptions
 
-derive instance genericFree :: Generic (Free UIGraphOpF a) _
-instance encodeFree :: (Encode a) => Encode (Free UIGraphOpF a) where
-  encode x = x # genericEncode defaultOptions
-instance decodeFree :: (Decode a) => Decode (Free UIGraphOpF a) where
-  decode x = x # genericDecode defaultOptions
-
-derive instance genericUIGraphOp :: Generic (UIGraphOp a) _
-instance encodeUIGraphOp :: Encode a => Encode (UIGraphOp a) where
-  encode x = x # genericEncode defaultOptions
-instance decodeUIGraphOp :: (Generic a z, Decode a) => Decode (UIGraphOp a) where
-  decode x = x # genericDecode defaultOptions
+encodeUIGraphOpF :: forall a. UIGraphOpF a -> Tuple Foreign a
+encodeUIGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
+  InsertNode node next -> Tuple (InsertNode node ForeignUnit) next
+  DeleteNode node next -> Tuple (DeleteNode node ForeignUnit) next
+  InsertEdge edge next -> Tuple (InsertEdge edge ForeignUnit) next
+  DeleteEdge edge next -> Tuple (DeleteEdge edge ForeignUnit) next
+  MoveNode node from to next -> Tuple (MoveNode node from to ForeignUnit) next
+  UpdateNodeText node from to next -> Tuple (UpdateNodeText node from to ForeignUnit) next
+  UpdateEdgeText edge from to next -> Tuple (UpdateEdgeText edge from to ForeignUnit) next
 
 
 --------
 ---- Interface
 
-insertNodeOp :: UINode -> UIGraphOp Unit
-insertNodeOp node = UIGraphOp $ liftF $
+insertNodeOp :: forall r. UINode -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+insertNodeOp node = Run.lift _uiGraphOp $
                     InsertNode node unit
 
-deleteNodeOp :: UINode -> UIGraphOp Unit
-deleteNodeOp node = UIGraphOp $ liftF $
+deleteNodeOp :: forall r. UINode -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+deleteNodeOp node = Run.lift _uiGraphOp $
                     DeleteNode node unit
 
-insertEdgeOp :: UIEdge -> UIGraphOp Unit
-insertEdgeOp edge = UIGraphOp $ liftF $
+insertEdgeOp :: forall r. UIEdge -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+insertEdgeOp edge = Run.lift _uiGraphOp $
                     InsertEdge edge unit
 
-deleteEdgeOp :: UIEdge -> UIGraphOp Unit
-deleteEdgeOp edge = UIGraphOp $ liftF $
+deleteEdgeOp :: forall r. UIEdge -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+deleteEdgeOp edge = Run.lift _uiGraphOp $
                     DeleteEdge edge unit
 
-moveNodeOp :: UINode -> Point2D -> UIGraphOp Unit
-moveNodeOp node newPos = UIGraphOp $ liftF $
+moveNodeOp :: forall r. UINode -> Point2D -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+moveNodeOp node newPos = Run.lift _uiGraphOp $
                          MoveNode node (node ^. _pos) newPos unit
 
-updateNodeTextOp :: UINode -> String -> UIGraphOp Unit
-updateNodeTextOp node newText = UIGraphOp $ liftF $
+updateNodeTextOp :: forall r. UINode -> String -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+updateNodeTextOp node newText = Run.lift _uiGraphOp $
                                 UpdateNodeText node (node ^. _nodeText) newText unit
 
-updateEdgeTextOp :: UIEdge -> String -> UIGraphOp Unit
-updateEdgeTextOp edge newText = UIGraphOp $ liftF $
+updateEdgeTextOp :: forall r. UIEdge -> String -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
+updateEdgeTextOp edge newText = Run.lift _uiGraphOp $
                                 UpdateEdgeText edge (edge ^. _edgeText) newText unit
 
 
@@ -191,40 +172,40 @@ updateEdgeTextOp edge newText = UIGraphOp $ liftF $
 --
 -- Must be defined here to define Encode and Decode instances for UIGraphOp
 
-data Free f a
-  = Pure a
-  | Free (f (Free f a))
-
-instance functorFree :: Functor f => Functor (Free f) where
-  map g (Pure a) = Pure $ g a
-  map g (Free op) = Free $ map (map g) op
-
-instance applicativeFree :: Functor f => Applicative (Free f) where
-  pure = Pure
-
-instance applyFree :: Functor f => Apply (Free f) where
-  apply (Pure g) (Pure a) = Pure $ g a
-  apply (Pure g) (Free bs) = map g (Free bs)
-  apply (Free gs) bs = Free $ (\g -> apply g bs) <$> gs
-
-instance bindFree :: Functor f => Bind (Free f) where
-  bind :: forall f a b. Functor f => Free f a -> (a -> Free f b) -> Free f b
-  bind (Pure a) g = g a
-  bind (Free op) g = Free $ map (flip bind g) op
-
-instance monadFree :: Functor f => Monad (Free f)
-
-instance semigroupFree :: Functor f => Semigroup (Free f a) where
-  append op1 op2 = op1 >>= \_ -> op2
-
-instance monoidFree :: (Functor f, Monoid a) => Monoid (Free f a) where
-  mempty = Pure mempty
-
-liftF :: forall f. Functor f => f ~> Free f
-liftF f = Free $ map Pure f
-
-hoistFree :: forall f g. Functor f => Functor g =>
-             (f ~> g) -> (Free f ~> Free g)
-hoistFree nat = case _ of
-  Pure a -> Pure a
-  Free f -> Free $ nat f <#> hoistFree nat
+--data Free f a
+--  = Pure a
+--  | Free (f (Free f a))
+--
+--instance functorFree :: Functor f => Functor (Free f) where
+--  map g (Pure a) = Pure $ g a
+--  map g (Free op) = Free $ map (map g) op
+--
+--instance applicativeFree :: Functor f => Applicative (Free f) where
+--  pure = Pure
+--
+--instance applyFree :: Functor f => Apply (Free f) where
+--  apply (Pure g) (Pure a) = Pure $ g a
+--  apply (Pure g) (Free bs) = map g (Free bs)
+--  apply (Free gs) bs = Free $ (\g -> apply g bs) <$> gs
+--
+--instance bindFree :: Functor f => Bind (Free f) where
+--  bind :: forall f a b. Functor f => Free f a -> (a -> Free f b) -> Free f b
+--  bind (Pure a) g = g a
+--  bind (Free op) g = Free $ map (flip bind g) op
+--
+--instance monadFree :: Functor f => Monad (Free f)
+--
+--instance semigroupFree :: Functor f => Semigroup (Free f a) where
+--  append op1 op2 = op1 >>= \_ -> op2
+--
+--instance monoidFree :: (Functor f, Monoid a) => Monoid (Free f a) where
+--  mempty = Pure mempty
+--
+--liftF :: forall f. Functor f => f ~> Free f
+--liftF f = Free $ map Pure f
+--
+--hoistFree :: forall f g. Functor f => Functor g =>
+--             (f ~> g) -> (Free f ~> Free g)
+--hoistFree nat = case _ of
+--  Pure a -> Pure a
+--  Free f -> Free $ nat f <#> hoistFree nat

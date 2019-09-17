@@ -2,7 +2,7 @@ module AppState.Foreign where
 
 import Prelude
 
-import AppState (UninitializedAppState, AppState, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape, _graph, _drawingEdges, _graphOrigin, _hoveredElementId, _boundingRect, _zoom)
+import AppState (UninitializedAppState, AppState, AppOperation, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape, _graph, _drawingEdges, _graphOrigin, _hoveredElementId, _boundingRect, _zoom)
 import Control.Monad.Except.Trans (ExceptT, runExceptT)
 import Data.Array ((!!))
 import Data.Bifunctor (lmap)
@@ -23,11 +23,11 @@ import Foreign (Foreign, ForeignError, renderForeignError)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericDecodeJSON, genericEncodeJSON, genericEncode, genericDecode, defaultOptions)
 import Foreign.Object (Object)
+import Foreign.Unit (ForeignUnit, toForeignUnit, fromForeignUnit)
 import Point2D (Point2D)
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (EdgeId)
 import Workflow.UIGraph.Types (UIGraph, ForeignNodeId, ForeignEdgeId(..), toForeignMap, fromForeignMap, parseUUIDEither)
-import Workflow.UIGraph.UIGraphOp (UIGraphOp)
 
 
 -- | A whole bunch of boilerplate to use generic JSON serialisation/deserialisation
@@ -69,13 +69,6 @@ instance encodeForeignPos :: Encode ForeignPos where
 instance decodeForeignPos :: Decode ForeignPos where
   decode x = genericDecode defaultOptions x
 
-data ForeignUnit = ForeignUnit
-derive instance genericForeignUnit :: Generic ForeignUnit _
-instance encodeForeignUnit :: Encode ForeignUnit where
-  encode x = genericEncode defaultOptions x
-instance decodeForeignUnit :: Decode ForeignUnit where
-  decode x = genericDecode defaultOptions x
-
 type ForeignAppStateInner =
   { graph :: UIGraph
   , drawingEdges :: Object ForeignDrawingEdge
@@ -85,7 +78,7 @@ type ForeignAppStateInner =
   , zoom :: Number
   }
 
-type UndoableForeignAppState = Undoable ForeignAppStateInner (UIGraphOp ForeignUnit)
+type UndoableForeignAppState = Undoable ForeignAppStateInner (AppOperation ForeignUnit)
 
 newtype ForeignAppState =
   ForeignAppState UndoableForeignAppState
@@ -152,9 +145,6 @@ edgeIdToString :: EdgeId -> String
 edgeIdToString edgeId = UUID.toString edgeId.source
                         <> " "
                         <> UUID.toString edgeId.target
-
-toForeignUnit :: Unit -> ForeignUnit
-toForeignUnit _ = ForeignUnit
 
 toForeignAppState :: AppState -> ForeignAppState
 toForeignAppState state =
@@ -228,9 +218,6 @@ parseEdgeIdEither edgeIdStr =
     targetId <- edgeIdStrs !! 1 >>= parseUUID
     pure { source : sourceId, target : targetId }
 
-fromForeignUnit :: ForeignUnit -> Unit
-fromForeignUnit _ = unit
-
 fromForeignAppState :: ForeignAppState -> Either String UninitializedAppState
 fromForeignAppState (ForeignAppState foreignState) = do
   let undoableHistory = mapActions (map fromForeignUnit) foreignState
@@ -244,7 +231,6 @@ fromForeignAppState (ForeignAppState foreignState) = do
                    , hoveredElementId = hoveredElementId
                    , graphOrigin = graphOrigin
                    }
-
 
 fromForeignAppStateMeta :: ForeignAppStateMeta -> Either String AppStateMeta
 fromForeignAppStateMeta (ForeignAppStateMeta foreignMeta) = do

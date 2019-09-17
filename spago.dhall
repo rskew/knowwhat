@@ -17,6 +17,7 @@ You can edit this file as you like.
     , "profunctor-lenses"
     , "psci-support"
     , "quickcheck"
+    , "run"
     , "strings"
     , "undoable"
     , "uuid"

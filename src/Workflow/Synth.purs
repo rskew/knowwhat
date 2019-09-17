@@ -1,3 +1,4 @@
+
 module Workflow.Synth where
 
 import Prelude
@@ -29,9 +30,10 @@ import Effect (Effect)
 import Effect.Ref as Ref
 import Effect.Ref (Ref)
 import Effect.Console (log)
+import Run (FProxy)
 import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
 import Workflow.UIGraph.Types (UINode, _nodeText)
-import Workflow.UIGraph.UIGraphOp (UIGraphOp(..), UIGraphOpF(..), Free(..))
+import Workflow.UIGraph.UIGraphOp (UIGraphOpF(..))
 
 updateValueRampTime :: WebAudio.Seconds
 updateValueRampTime = 0.1
@@ -237,81 +239,94 @@ _analyserNode =
                             _ -> Nothing
                         )
 
+data SynthOpF a
+  = Blah
+
+type SYNTHOP = FProxy SynthOpF
+
+_synthOp :: SProxy "synthOp"
+_synthOp = SProxy
+
 -- | Compile an operation on the graph to an operation on the synthesiser
 -- | that changes the synth context as an Effect and returns a function that
 -- | changes the AppState.synthState
-interpretSynth :: forall a. UIGraphOp a -> (SynthState -> Effect SynthState)
-interpretSynth (UIGraphOp op) = interpretSynthM op where
-  interpretSynthM = case _ of
-    Pure _ -> \asdf -> do
-      pure asdf
+interpretToSynthUpdate :: forall a. UIGraphOpF a -> Tuple (SynthState -> Effect SynthState) a
+interpretToSynthUpdate = case _ of
+  -- If the node text is a valid synth node type, create the corresponding
+  -- synth node
+  InsertNode node next ->
+    Tuple (\synthState -> do
+             log "interpretSynthM InsertNode"
+             log $ node ^. _nodeText
+             newState <- tryCreateSynthNode node synthState
+             pure newState)
+          next
 
-    -- If the node text is a valid synth node type, create the corresponding
-    -- synth node
-    Free (InsertNode node next) -> \synthState -> do
-      log "interpretSynthM InsertNode"
-      log $ node ^. _nodeText
-      newState <- tryCreateSynthNode node synthState
-      interpretSynthM next newState
+  -- If the node text is a valid synth node type, delete the corresponding
+  -- synth node
+  DeleteNode node next ->
+    Tuple (\synthState -> do
+             newState <- deleteSynthNode node synthState
+             log $ "interpretSynthM DeleteNode " <> node ^. _nodeText
+             pure newState)
+          next
 
-    -- If the node text is a valid synth node type, delete the corresponding
-    -- synth node
-    Free (DeleteNode node next) -> \synthState -> do
-      log $ "interpretSynthM DeleteNode " <> node ^. _nodeText
-      newState <- deleteSynthNode node synthState
-      interpretSynthM next newState
+  -- If the node text is a valid synth node type, create the corresponding
+  -- connection between synth nodes
+  InsertEdge edge next ->
+    Tuple (\synthState -> do
+             log "interpretSynth InsertEdge"
+             case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
+                        (Map.lookup (edge ^. _target) synthState.synthNodes) of
+               Tuple (Just sourceNodeState) (Just targetNodeState) -> do
+                 log "connecting two audio nodes"
+                 connectAudioNode sourceNodeState targetNodeState
+               _ -> do
+                 log "interpretSynth InsertEdge case failed"
+                 pure unit
+             pure synthState)
+          next
 
-    -- If the node text is a valid synth node type, create the corresponding
-    -- connection between synth nodes
-    Free (InsertEdge edge next) -> \synthState -> do
-      log "interpretSynth InsertEdge"
-      case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
-                 (Map.lookup (edge ^. _target) synthState.synthNodes) of
-        Tuple (Just sourceNodeState) (Just targetNodeState) -> do
-          log "connecting two audio nodes"
-          connectAudioNode sourceNodeState targetNodeState
-        _ -> do
-          log "interpretSynth InsertEdge case failed"
-          pure unit
-      interpretSynthM next synthState
+  -- If the node text is a valid synth node type, delete the corresponding
+  -- connection between synth nodes
+  DeleteEdge edge next ->
+    Tuple (\synthState -> do
+             case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
+                        (Map.lookup (edge ^. _target) synthState.synthNodes) of
+               Tuple (Just sourceNodeState) (Just targetNodeState) -> do
+                 log $ "disconnecting " <> show (unwrap sourceNodeState).synthNodeType <> " from " <> show (unwrap targetNodeState).synthNodeType
+                 disconnectAudioNode sourceNodeState targetNodeState
+               _ -> pure unit
+             pure synthState)
+          next
 
-    -- If the node text is a valid synth node type, delete the corresponding
-    -- connection between synth nodes
-    Free (DeleteEdge edge next) -> \synthState -> do
-      case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
-                 (Map.lookup (edge ^. _target) synthState.synthNodes) of
-        Tuple (Just sourceNodeState) (Just targetNodeState) -> do
-          log $ "disconnecting " <> show (unwrap sourceNodeState).synthNodeType <> " from " <> show (unwrap targetNodeState).synthNodeType
-          disconnectAudioNode sourceNodeState targetNodeState
-        _ -> pure unit
-      interpretSynthM next synthState
+  -- Moving a node doesn't affect the synth
+  MoveNode node from to next ->
+    Tuple pure next
 
-    -- Moving a node doesn't affect the synth
-    Free (MoveNode node from to next) ->
-      interpretSynthM next
-
-    -- If the synth node text goes from invalid to valid, create the
-    -- corresponding synth node.
-    -- If the synth node text goes from valid to invalid, delete the
-    -- corresponding synth node.
-    Free (UpdateNodeText node from to next) -> \synthState -> do
-      log $ "interpretSynthM UpdateNodeText from " <> from <> " to " <> to
-      newState <- case Tuple (parseSynthNodeType from) (parseSynthNodeType to) of
-        -- This update makes the node text a valid synth node
-        Tuple Nothing (Just nodeType) -> do
-          log "UpdateNodeText tryCreateSynthNode"
-          createSynthNode node nodeType synthState
-        -- This update takes the node text from a valid synth node type to a
-        -- value that does not represent a synth node type
-        Tuple (Just _) Nothing -> do
-          log "UpdateNodeText tryDeleteSynthNode"
-          deleteSynthNode node synthState
-        _ -> pure synthState
-      interpretSynthM next newState
-
-    -- Edge text doesn't affect the synth
-    Free (UpdateEdgeText edge from to next) ->
-      interpretSynthM next
+  -- If the synth node text goes from invalid to valid, create the
+  -- corresponding synth node.
+  -- If the synth node text goes from valid to invalid, delete the
+  -- corresponding synth node.
+  UpdateNodeText node from to next ->
+    Tuple (\synthState -> do
+             log $ "interpretSynthM UpdateNodeText from " <> from <> " to " <> to
+             newState <- case Tuple (parseSynthNodeType from) (parseSynthNodeType to) of
+               -- This update makes the node text a valid synth node
+               Tuple Nothing (Just nodeType) -> do
+                 log "UpdateNodeText tryCreateSynthNode"
+                 createSynthNode node nodeType synthState
+               -- This update takes the node text from a valid synth node type to a
+               -- value that does not represent a synth node type
+               Tuple (Just _) Nothing -> do
+                 log "UpdateNodeText tryDeleteSynthNode"
+                 deleteSynthNode node synthState
+               _ -> pure synthState
+             pure newState)
+          next
+  -- Edge text doesn't affect the synth
+  UpdateEdgeText edge from to next ->
+    Tuple pure next
 
 parseSynthNodeType :: String -> Maybe SynthNodeType
 parseSynthNodeType = case _ of

@@ -3,7 +3,7 @@ module GraphComponent where
 import Prelude
 
 import AnalyserComponent as AnalyserComponent
-import AppState (AppState, AppStateCurrent(..), UninitializedAppState, DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
 import Audio.WebAudio.GainNode (gain) as WebAudio
@@ -886,14 +886,14 @@ graph =
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
         Just node -> do
-          modifyM $ dooM $ updateNodeTextOp node text
+          modifyM $ dooM $ AppOperation $ updateNodeTextOp node text
 
     EdgeTextInput edgeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
       case lookupEdge (state ^. _graph) edgeId of
         Nothing -> pure unit
         Just edge -> do
-          modifyM $ dooM $ updateEdgeTextOp edge text
+          modifyM $ dooM $ AppOperation $ updateEdgeTextOp edge text
 
     BackgroundDragStart initialGraphOrigin mouseEvent -> do
       H.modify_ $ _graph <<< _focus .~ NoFocus
@@ -929,7 +929,7 @@ graph =
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
         Just node -> do
-          modifyM $ dooM $ moveNodeOp node newNodePos
+          modifyM $ dooM $ AppOperation $ moveNodeOp node newNodePos
 
     NodeDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -982,22 +982,22 @@ graph =
                                # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
-      modifyM $ dooM $ insertNodeOp newNode'
+      modifyM $ dooM $ AppOperation $ insertNodeOp newNode'
       handleAction $ FocusOn (FocusNode $ newNode' ^. _nodeId)
 
     AppDeleteNode node -> do
-      modifyM $ dooM $ deleteNodeOp node
+      modifyM $ dooM $ AppOperation $ deleteNodeOp node
       state <- H.get
       case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
         Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
         Nothing -> pure unit
 
     AppCreateEdge edge -> do
-      modifyM $ dooM $ insertEdgeOp edge
+      modifyM $ dooM $ AppOperation $ insertEdgeOp edge
       handleAction $ FocusOn (FocusEdge (edge ^. _edgeId) [])
 
     AppDeleteEdge edge -> do
-      modifyM $ dooM $ deleteEdgeOp edge
+      modifyM $ dooM $ AppOperation $ deleteEdgeOp edge
       handleAction $ FocusOn (FocusNode (edge ^. _edgeId).source)
 
     FocusOn newFocus -> do
