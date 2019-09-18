@@ -2,7 +2,7 @@ module Workflow.UIGraph.UIGraphOp where
 
 import Prelude
 
-import Run (Run, FProxy)
+import Run (Run, FProxy, Step(..))
 import Run as Run
 import Data.Bifunctor (lmap)
 import Data.Generic.Rep (class Generic)
@@ -77,8 +77,8 @@ collapseUIGraphOp nextOp prevOp =
 ------
 -- Main interpreter
 
-interpretUIGraphOp :: forall a. UIGraphOpF a -> Tuple (UIGraph -> UIGraph) a
-interpretUIGraphOp = case _ of
+handleUIGraphOp :: forall a. UIGraphOpF a -> Tuple (UIGraph -> UIGraph) a
+handleUIGraphOp = case _ of
   InsertNode node next ->
     Tuple (insertNode node) next
 
@@ -100,19 +100,26 @@ interpretUIGraphOp = case _ of
     (modifyEdge (edge ^. _edgeId) (_edgeText .~ to))
     next
 
+interpretUIGraphOp :: forall r a. Run (uiGraphOp :: UIGRAPHOP | r) a -> Run r (UIGraph -> UIGraph)
+interpretUIGraphOp =
+  Run.runAccumPure
+  (\accumulator -> Run.on _uiGraphOp (Loop <<< handleUIGraphOp) Done)
+  (\accumulator a -> accumulator)
+  identity
+
 
 ------
 -- Printing interpreter
 
 showUIGraphOp :: forall a. UIGraphOpF a -> Tuple String a
 showUIGraphOp = case _  of
-    InsertNode node next -> Tuple ("InsertNode " <> show (node ^. _nodeId) <> " >>= ") next
-    DeleteNode node next -> Tuple ("DeleteNode " <> show (node ^. _nodeId) <> " >>= ") next
-    InsertEdge edge next -> Tuple ("InsertEdge " <> show (edge ^. _edgeId) <> " >>= ") next
-    DeleteEdge edge next -> Tuple ("DeleteEdge " <> show (edge ^. _edgeId) <> " >>= ") next
-    MoveNode node from to next -> Tuple ("MoveNode " <> show (node ^. _nodeId) <> " from " <> show from <> " to " <> show to <> " >>= ") next
-    UpdateNodeText node from to next -> Tuple ("UpdateNodeText " <> show (node ^. _nodeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
-    UpdateEdgeText edge from to next -> Tuple ("UpdateEdgeText " <> show (edge ^. _edgeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
+  InsertNode node next -> Tuple ("InsertNode " <> show (node ^. _nodeId) <> " >>= ") next
+  DeleteNode node next -> Tuple ("DeleteNode " <> show (node ^. _nodeId) <> " >>= ") next
+  InsertEdge edge next -> Tuple ("InsertEdge " <> show (edge ^. _edgeId) <> " >>= ") next
+  DeleteEdge edge next -> Tuple ("DeleteEdge " <> show (edge ^. _edgeId) <> " >>= ") next
+  MoveNode node from to next -> Tuple ("MoveNode " <> show (node ^. _nodeId) <> " from " <> show from <> " to " <> show to <> " >>= ") next
+  UpdateNodeText node from to next -> Tuple ("UpdateNodeText " <> show (node ^. _nodeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
+  UpdateEdgeText edge from to next -> Tuple ("UpdateEdgeText " <> show (edge ^. _edgeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
 
 
 --------

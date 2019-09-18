@@ -8,7 +8,7 @@ import Data.ArrayBuffer.Types (Uint8Array)
 import Data.Collapsable (class Collapsable)
 import Data.Array as Array
 import Data.Group (class Group)
-import Data.Lens (Lens', Traversal', lens, traversed, (^.), (.~), (%~))
+import Data.Lens (Lens', Traversal', lens, traversed, (^.), (.~), (%~), over)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
@@ -183,6 +183,18 @@ type GRAPHOP = FProxy GraphOpF
 _asdf :: SProxy "asdf"
 _asdf = SProxy
 
+interpretGraphOp :: forall r a. a -> Run (asdf :: GRAPHOP | r) a -> Run r a
+interpretGraphOp initial =
+  Run.runAccumPure
+  (\accumulator -> Run.on
+                   _asdf
+                   (case _ of
+                       Asdf next -> Loop $ Tuple accumulator next
+                       Fdsa next -> Loop $ Tuple accumulator next)
+                   Done)
+  (\accumulator a -> accumulator)
+  initial
+
 type AppOperationRow = (uiGraphOp :: UIGRAPHOP, asdf :: GRAPHOP)
 
 newtype AppOperation a = AppOperation (Run AppOperationRow a)
@@ -191,26 +203,31 @@ derive newtype instance functorAppOperation :: Functor AppOperation
 
 interpretAppOperation :: forall a. AppOperation a -> (AppStateCurrent -> Effect AppStateCurrent)
 interpretAppOperation (AppOperation op) =
-  Run.extract (op # Run.runAccumPure
-    (\accumulator -> Run.match
-      { uiGraphOp : \uiGraphOp ->
-          let
-            Tuple synthStateUpdater _ = interpretToSynthUpdate uiGraphOp
-            Tuple uiGraphUpdater next = interpretUIGraphOp uiGraphOp
-          in
-            Loop $ Tuple (\appState -> do
-                           newAppState <- accumulator appState
-                           newSynthState <- synthStateUpdater (newAppState ^. _synthState')
-                           pure $ newAppState
-                                  # _synthState' .~ newSynthState
-                                  # _graph' %~ uiGraphUpdater)
-                         next
-      , asdf : case _ of
-         Asdf next -> Loop $ Tuple accumulator next
-         Fdsa next -> Loop $ Tuple accumulator next
-      })
-    (\accumulator a -> accumulator)
-    pure)
+  let
+    uiGraphUpdaterRun = interpretUIGraphOp op <#> over _graph'
+    uiGraphUpdater = Run.extract $ (interpretGraphOp identity) uiGraphUpdaterRun
+  in
+    pure <<< uiGraphUpdater
+  --Run.extract (op # Run.runAccumPure
+  --  (\accumulator -> Run.match
+  --    { uiGraphOp : \uiGraphOp ->
+  --        let
+  --          Tuple synthStateUpdater _ = interpretToSynthUpdate uiGraphOp
+  --          Tuple uiGraphUpdater next = interpretUIGraphOp uiGraphOp
+  --        in
+  --          Loop $ Tuple (\appState -> do
+  --                         newAppState <- accumulator appState
+  --                         newSynthState <- synthStateUpdater (newAppState ^. _synthState')
+  --                         pure $ newAppState
+  --                                # _synthState' .~ newSynthState
+  --                                # _graph' %~ uiGraphUpdater)
+  --                       next
+  --    , asdf : case _ of
+  --       Asdf next -> Loop $ Tuple accumulator next
+  --       Fdsa next -> Loop $ Tuple accumulator next
+  --    })
+  --  (\accumulator a -> accumulator)
+  --  pure)
 
 instance showAppOperation :: Show (AppOperation Unit) where
   show (AppOperation op) =
