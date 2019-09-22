@@ -2,7 +2,7 @@ module AppState.Foreign where
 
 import Prelude
 
-import AppState (UninitializedAppState, AppState, AppOperation, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape, _graph, _drawingEdges, _graphOrigin, _hoveredElementId, _boundingRect, _zoom)
+import AppState (UninitializedAppState, AppState, AppOperation, DrawingEdge, HoveredElementId(..), GraphSpacePos(..), PageSpacePos(..), Shape, _graph, _drawingEdges, _graphOrigin, _hoveredElementId, _boundingRect, _zoom, _synth)
 import Control.Monad.Except.Trans (ExceptT, runExceptT)
 import Data.Array ((!!))
 import Data.Bifunctor (lmap)
@@ -27,6 +27,7 @@ import Foreign.Unit (ForeignUnit, toForeignUnit, fromForeignUnit)
 import Point2D (Point2D)
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (EdgeId)
+import Workflow.Synth (SynthParams)
 import Workflow.UIGraph.Types (UIGraph, ForeignNodeId, ForeignEdgeId(..), toForeignMap, fromForeignMap, parseUUIDEither)
 
 
@@ -76,6 +77,7 @@ type ForeignAppStateInner =
   , boundingRect :: WHE.DOMRect
   , graphOrigin :: ForeignPos
   , zoom :: Number
+  , synthParams :: SynthParams
   }
 
 type UndoableForeignAppState = Undoable ForeignAppStateInner (AppOperation ForeignUnit)
@@ -163,6 +165,7 @@ toForeignAppState state =
                   , graphOrigin : foreignGraphOrigin
                   , boundingRect : state ^. _boundingRect
                   , zoom : state ^. _zoom
+                  , synthParams : (state ^. _synth).synthParams
                   }
 
 toForeignAppStateMeta :: AppStateMeta -> ForeignAppStateMeta

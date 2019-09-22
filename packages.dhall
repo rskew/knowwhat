@@ -195,7 +195,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-webaudio.git"
       , version =
-          "0bea1467032688d7925bdc8f7856d8e21747441c"
+          "5bb85a05c413c6b5fed95a3d1a7ec142834996b8"
       }
   }
 

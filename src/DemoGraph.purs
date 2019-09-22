@@ -63,7 +63,7 @@ demo = do
                          , children : Map.empty
                          , subgraph : emptyUIGraph
                          })
-    # insertNode (UINode { text: "analyser"
+    # insertNode (UINode { text: "filter"
                          , isValid: true
                          , position : { x: 550.0
                                       , y: 370.0

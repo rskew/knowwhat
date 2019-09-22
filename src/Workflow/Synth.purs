@@ -1,39 +1,39 @@
-
 module Workflow.Synth where
 
 import Prelude
 
-import Audio.WebAudio.AnalyserNode (setSmoothingTimeConstant, setMaxDecibels) as WebAudio
-import Audio.WebAudio.AudioBufferSourceNode (stopBufferSource) as WebAudio
+import Audio.WebAudio.AnalyserNode (setSmoothingTimeConstant, setMaxDecibels, setMinDecibels) as WebAudio
 import Audio.WebAudio.AudioParam (linearRampToValueAtTime) as WebAudio
 import Audio.WebAudio.BaseAudioContext (createOscillator, createGain, createDelay, createBiquadFilter, createAnalyser, destination, currentTime) as WebAudio
-import Audio.WebAudio.BiquadFilterNode (BiquadFilterType(..), setFilterType, filterFrequency, quality, gain) as WebAudio
-import Audio.WebAudio.DelayNode (delayTime) as WebAudio
-import Audio.WebAudio.GainNode (setGain) as WebAudio
-import Audio.WebAudio.Oscillator (OscillatorType(..), setFrequency, setOscillatorType, startOscillator, stopOscillator) as WebAudio
-import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, class Connectable, GainNode, DelayNode, AnalyserNode, AudioParam, Value, connect, disconnect, connectParam) as WebAudio
-import Data.Array as Array
-import Data.ArrayBuffer.Types (Uint8Array, ByteLength)
+import Audio.WebAudio.BiquadFilterNode (BiquadFilterType(..), setFilterType, filterFrequency, quality, gain) as WebAudioBiquad
+import Audio.WebAudio.DelayNode (delayTime) as WebAudioDelay
+import Audio.WebAudio.GainNode (gain, setGain) as WebAudioGain
+import Audio.WebAudio.Oscillator (OscillatorType(..), frequency, setFrequency, setOscillatorType, startOscillator) as WebAudioOsc
+import Audio.WebAudio.Types (AudioContext, AudioNode(..), Seconds, AudioParam, Value, GainNode, DelayNode, AnalyserNode, BiquadFilterNode, OscillatorNode, DestinationNode, connect) as WebAudio
 import Data.ArrayBuffer.Typed (empty)
-import Data.Foldable (for_)
-import Data.Lens (Lens', Prism', Optic', lens, prism', (^.))
+import Data.ArrayBuffer.Types (Uint8Array, ByteLength)
+import Data.Either (Either)
+import Data.Generic.Rep (class Generic)
+import Data.Lens (Lens', lens, traversed, Prism', Optic', prism', (^?), (.~))
+import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Profunctor.Choice (class Choice)
 import Data.Profunctor.Strong (class Strong)
 import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple(..))
+import Data.UUID as UUID
 import Effect (Effect)
-import Effect.Ref as Ref
-import Effect.Ref (Ref)
 import Effect.Console (log)
-import Run (FProxy)
-import Workflow.Core (NodeId, _nodeId, _parents, _children, _source, _target)
-import Workflow.UIGraph.Types (UINode, _nodeText)
-import Workflow.UIGraph.UIGraphOp (UIGraphOpF(..))
+import Effect.Ref (Ref)
+import Effect.Ref as Ref
+import Foreign.Class (class Encode, class Decode)
+import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
+import Foreign.Object (Object)
+import Workflow.Core (NodeId)
+import Workflow.UIGraph.Types (toForeignMap, fromForeignMap, parseUUIDEither, toExceptT)
 
 updateValueRampTime :: WebAudio.Seconds
 updateValueRampTime = 0.1
@@ -41,8 +41,8 @@ updateValueRampTime = 0.1
 defaultOscillatorFreq :: Freq
 defaultOscillatorFreq = 220.0
 
-defaultOscillatorType :: WebAudio.OscillatorType
-defaultOscillatorType = WebAudio.Sine
+defaultOscillatorType :: WebAudioOsc.OscillatorType
+defaultOscillatorType = WebAudioOsc.Sine
 
 defaultAmplifierGain :: Gain
 defaultAmplifierGain = 0.5
@@ -50,8 +50,8 @@ defaultAmplifierGain = 0.5
 defaultDelayPeriod :: PeriodSeconds
 defaultDelayPeriod = 0.3
 
-defaultFilterType :: WebAudio.BiquadFilterType
-defaultFilterType = WebAudio.Lowpass
+defaultFilterType :: WebAudioBiquad.BiquadFilterType
+defaultFilterType = WebAudioBiquad.Lowpass
 
 defaultFilterCutoff :: Cutoff
 defaultFilterCutoff = 4000.0
@@ -107,22 +107,94 @@ defaultCompressorRelease = 0.25
 defaultCompressorPan :: Pan
 defaultCompressorPan = 0.0
 
-type SynthState = { synthNodes :: Map NodeId SynthNodeState
-                  , audioContext :: WebAudio.AudioContext
+type Synth = { synthState :: SynthState
+             , synthParams :: SynthParams
+             }
+
+type SynthState = { audioContext :: WebAudio.AudioContext
+                  , synthNodeStates :: Map NodeId SynthNodeState
                   }
 
-type SynthNodeState_ = { audioNode :: WebAudio.AudioNode
-                       , synthNodeType :: SynthNodeType
-                       , synthNodeParams :: SynthNodeParams
-                       }
+type FilterState_ = { analyserNode :: WebAudio.AnalyserNode
+                    , lowpassFilterNode :: WebAudio.BiquadFilterNode
+                    , highpassFilterNode :: WebAudio.BiquadFilterNode
+                    , analyserBuffer :: Uint8Array
+                    , drawLoopStopSignal :: Ref Boolean
+                    }
 
-newtype SynthNodeState = SynthNodeState SynthNodeState_
-derive instance newtypeSynthNodeState :: Newtype SynthNodeState _
+data SynthNodeState
+  = OscillatorState WebAudio.OscillatorNode
+  | AmplifierState WebAudio.GainNode
+  | DelayState WebAudio.DelayNode
+  | FilterState FilterState_
+  | DestinationState WebAudio.DestinationNode
 
-instance connectableSynthNodeState :: WebAudio.Connectable SynthNodeState where
-  connect rawAudioNode      (SynthNodeState synthNodeState) = WebAudio.connect rawAudioNode synthNodeState.audioNode
-  disconnect rawAudioNode   (SynthNodeState synthNodeState) = WebAudio.disconnect rawAudioNode synthNodeState.audioNode
-  connectParam rawAudioNode (SynthNodeState synthNodeState) = WebAudio.connectParam rawAudioNode synthNodeState.audioNode
+instance showSynthNodeState :: Show SynthNodeState where
+  show = case _ of
+    OscillatorState _ -> "Oscillator"
+    AmplifierState _ -> "Amplifier"
+    DelayState _ -> "Delay"
+    FilterState _ -> "Filter"
+    DestinationState _ -> "Destination"
+
+inputPort :: SynthNodeState -> WebAudio.AudioNode
+inputPort = case _ of
+  OscillatorState oscNode          -> WebAudio.Oscillator oscNode
+  AmplifierState gainNode          -> WebAudio.Gain gainNode
+  DelayState delayNode             -> WebAudio.Delay delayNode
+  FilterState filterState          -> WebAudio.Analyser filterState.analyserNode
+  DestinationState destinationNode -> WebAudio.Destination destinationNode
+
+outputPort :: SynthNodeState -> WebAudio.AudioNode
+outputPort = case _ of
+  OscillatorState oscNode          -> WebAudio.Oscillator oscNode
+  AmplifierState gainNode          -> WebAudio.Gain gainNode
+  DelayState delayNode             -> WebAudio.Delay delayNode
+  FilterState filterState          -> WebAudio.BiquadFilter filterState.highpassFilterNode
+  DestinationState destinationNode -> WebAudio.Destination destinationNode
+
+newtype SynthParams = SynthParams (Map NodeId SynthNodeParams)
+
+derive instance newtypeSynthParams :: Newtype SynthParams _
+
+instance showSynthParams :: Show SynthParams where
+  show (SynthParams synthParams) = "SynthParams: " <> show synthParams
+
+type FilterParams_ = { analyserParams :: AnalyserParams
+                     , lowpassParams :: BiquadFilterParams
+                     , highpassParams :: BiquadFilterParams
+                     }
+
+data SynthNodeParams
+  = OscillatorParams Freq
+  | AmplifierParams Gain
+  | DelayParams PeriodSeconds
+  | FilterParams FilterParams_
+  | DestinationParams
+  -- Not implemented:
+  --| DynamicsCompressorParams Threshold Knee Ratio Reduction Attack Release
+  --| AudioBufferSourceParams LoopStart LoopEnd LoopOn
+  --| ConvolverParams Normalize
+  --| MediaElementAudioSourceParams
+  --| StereoPannerParams Pan
+
+instance showSynthNodeParams :: Show SynthNodeParams where
+  show = case _ of
+    OscillatorParams freq -> "OscillatorParams " <> show freq
+    AmplifierParams gain -> "AmplifierParams " <> show gain
+    DelayParams periodSeconds -> "DelayParams " <> show periodSeconds
+    FilterParams filterParams -> "FilterParams " <> show filterParams
+    DestinationParams -> "DestinationParams"
+
+data BiquadFilterParams = BiquadFilterParams WebAudioBiquad.BiquadFilterType Cutoff QFactor Gain
+instance showBiquadFilterParams :: Show BiquadFilterParams where
+  show (BiquadFilterParams filterType cutoff q gain) =
+    "BiquadFilterParams " <> show filterType <> " " <> show cutoff <> " " <> show q <> " " <> show gain
+
+data AnalyserParams = AnalyserParams FrequencyBinCount MinDecibels MaxDecibels SmoothingTimeConstant
+instance showAnalyserParams :: Show AnalyserParams where
+  show (AnalyserParams freqBinCount minDecibels maxDecibels smoothingTimeConstant) =
+    "AnalyserParams " <> show freqBinCount <> " " <> show minDecibels <> " " <> show maxDecibels <> " " <> show smoothingTimeConstant
 
 data SynthNodeType
   = NodeTypeOscillator
@@ -130,35 +202,16 @@ data SynthNodeType
   | NodeTypeDelay
   | NodeTypeFilter
   | NodeTypeDestination
-  | NodeTypeAnalyser
-  --| NodeTypeAudioBufferSource
-  --| NodeTypeConvolver
-  --| NodeTypeDynamicsCompressor
-  --| NodeTypeMediaElementAudioSource
-  --| NodeTypeStereoPanner
+
 derive instance eqSynthNodeType :: Eq SynthNodeType
 derive instance ordSynthNodeType :: Ord SynthNodeType
 instance showSynthNodeType :: Show SynthNodeType where
   show = case _ of
-    NodeTypeOscillator -> "NodeTypeOscillator"
-    NodeTypeAmplifier -> "NodeTypeAmplifier"
-    NodeTypeDelay -> "NodeTypeDelay"
-    NodeTypeFilter -> "NodeTypeFilter"
-    NodeTypeDestination -> "NodeTypeDestination"
-    NodeTypeAnalyser -> "NodeTypeAnalyser"
-
-data SynthNodeParams
-  = OscillatorParams Freq
-  | AmplifierParams Gain
-  | DelayParams PeriodSeconds
-  | FilterParams WebAudio.BiquadFilterType Cutoff QFactor Gain
-  | DestinationParams
-  | AnalyserParams FrequencyBinCount MinDecibels MaxDecibels SmoothingTimeConstant Uint8Array (Ref Boolean)
-  | AudioBufferSourceParams LoopStart LoopEnd LoopOn
-  | ConvolverParams Normalize
-  | DynamicsCompressorParams Threshold Knee Ratio Reduction Attack Release
-  | MediaElementAudioSourceParams
-  | StereoPannerParams Pan
+    NodeTypeOscillator -> "Oscillator"
+    NodeTypeAmplifier -> "Amplifier"
+    NodeTypeDelay -> "Delay"
+    NodeTypeFilter -> "Filter"
+    NodeTypeDestination -> "Destination"
 
 type Freq = Number
 type Gain = Number
@@ -181,320 +234,308 @@ type Attack = Number
 type Release = Number
 type Pan = Number
 
-_SynthNodeState :: Lens' SynthNodeState SynthNodeState_
-_SynthNodeState = lens unwrap (\_ -> SynthNodeState)
+-- | Just the parameters which are directly updated via UI interactions
+data SynthParameter
+  = OscillatorFreq
+  | AmplifierGain
+  | DelayPeriod
+  | FilterLowpassCutoff
+  | FilterHighpassCutoff
 
-_synthNodeParams :: Lens' SynthNodeState SynthNodeParams
-_synthNodeParams = _SynthNodeState <<< prop (SProxy :: SProxy "synthNodeParams")
+derive instance eqSynthParameter :: Eq SynthParameter
 
-_gain :: Prism' SynthNodeParams Gain
-_gain = prism' AmplifierParams
-               (case _ of
-                   AmplifierParams gain -> Just gain
-                   _ -> Nothing
-               )
+instance showSynthParameter :: Show SynthParameter where
+  show = case _ of
+    OscillatorFreq -> "OscillatorFreq"
+    AmplifierGain -> "AmplifierGain"
+    DelayPeriod -> "DelayPeriod"
+    FilterLowpassCutoff -> "FilterLowpassCutoff"
+    FilterHighpassCutoff -> "FilterHighpassCutoff"
 
-_synthNodeGain :: forall p. Choice p => Strong p =>
-                  Optic' p SynthNodeState Gain
-_synthNodeGain = _synthNodeParams <<< _gain
+updateParam :: Synth -> NodeId -> SynthParameter -> WebAudio.Value -> Effect Synth
+updateParam synth nodeId synthParameter newValue =
+  case Map.lookup nodeId synth.synthState.synthNodeStates of
+    Nothing -> pure synth
+    Just synthNodeState ->
+      case synthParameter of
+        OscillatorFreq -> case synthNodeState ^? _oscNode of
+          Nothing -> pure synth
+          Just oscNode -> do
+            freqParam <- WebAudioOsc.frequency oscNode
+            setTargetValue newValue synth.synthState.audioContext freqParam
+            pure $ synth # _synthNodeParams nodeId <<< traversed <<< _oscFreq .~ newValue
+
+        AmplifierGain -> case synthNodeState ^? _gainNode of
+          Nothing -> pure synth
+          Just gainNode -> do
+            gainParam <- WebAudioGain.gain gainNode
+            setTargetValue newValue synth.synthState.audioContext gainParam
+            pure $ synth # _synthNodeParams nodeId <<< traversed <<< _amplifierGain .~ newValue
+
+        DelayPeriod -> case synthNodeState ^? _delayNode of
+          Nothing -> pure synth
+          Just delayNode -> do
+            delayParam <- WebAudioDelay.delayTime delayNode
+            setTargetValue newValue synth.synthState.audioContext delayParam
+            pure $ synth # _synthNodeParams nodeId <<< traversed <<< _delayPeriod .~ newValue
+
+        FilterLowpassCutoff -> case synthNodeState ^? _lowpassNode of
+          Nothing -> pure synth
+          Just lowpassNode -> do
+            lowpassCutoffParam <- WebAudioBiquad.filterFrequency lowpassNode
+            setTargetValue newValue synth.synthState.audioContext lowpassCutoffParam
+            pure $ synth # _synthNodeParams nodeId <<< traversed <<< _lowpassCutoff .~ newValue
+
+        FilterHighpassCutoff -> case synthNodeState ^? _highpassNode of
+          Nothing -> pure synth
+          Just highpassNode -> do
+            highpassCutoffParam <- WebAudioBiquad.filterFrequency highpassNode
+            setTargetValue newValue synth.synthState.audioContext highpassCutoffParam
+            pure $ synth # _synthNodeParams nodeId <<< traversed <<< _highpassCutoff .~ newValue
+
+_SynthParams :: Lens' SynthParams (Map NodeId SynthNodeParams)
+_SynthParams = lens (\(SynthParams synthParams) -> synthParams) (\_ -> SynthParams)
+
+_synthNodeParams :: NodeId -> Lens' Synth (Maybe SynthNodeParams)
+_synthNodeParams nodeId = prop (SProxy :: SProxy "synthParams") <<< _SynthParams <<< at nodeId
+
+_oscNode :: Prism' SynthNodeState WebAudio.OscillatorNode
+_oscNode = prism'
+           OscillatorState
+           (case _ of
+               OscillatorState oscNode -> Just oscNode
+               _ -> Nothing
+           )
+
+_oscFreq :: Prism' SynthNodeParams Freq
+_oscFreq = prism'
+           OscillatorParams
+           (case _ of
+               OscillatorParams freq -> Just freq
+               _ -> Nothing)
+
+_gainNode :: Prism' SynthNodeState WebAudio.GainNode
+_gainNode = prism'
+            AmplifierState
+            (case _ of
+                AmplifierState gainNode -> Just gainNode
+                _ -> Nothing)
+
+_amplifierGain :: Prism' SynthNodeParams Gain
+_amplifierGain = prism'
+                 AmplifierParams
+                 (case _ of
+                     AmplifierParams gain -> Just gain
+                     _ -> Nothing)
+
+_delayNode :: Prism' SynthNodeState WebAudio.DelayNode
+_delayNode = prism'
+             DelayState
+             (case _ of
+                 DelayState delayNode -> Just delayNode
+                 _ -> Nothing
+             )
 
 _delayPeriod :: Prism' SynthNodeParams PeriodSeconds
 _delayPeriod = prism' DelayParams
-                      (case _ of
-                          DelayParams period -> Just period
-                          _ -> Nothing
-                      )
+               (case _ of
+                   DelayParams period -> Just period
+                   _ -> Nothing)
 
-_synthNodeDelayPeriod :: forall p. Choice p => Strong p =>
-                         Optic' p SynthNodeState PeriodSeconds
-_synthNodeDelayPeriod = _synthNodeParams <<< _delayPeriod
+_FilterState :: Prism' SynthNodeState FilterState_
+_FilterState = prism' FilterState (case _ of
+                                      FilterState filterState_ -> Just filterState_
+                                      _ -> Nothing)
 
-_audioNode :: Lens' SynthNodeState WebAudio.AudioNode
-_audioNode = _SynthNodeState <<< prop (SProxy :: SProxy "audioNode")
+_lowpassNode :: forall p. Choice p => Strong p =>
+                Optic' p SynthNodeState WebAudio.BiquadFilterNode
+_lowpassNode = _FilterState <<< prop (SProxy :: SProxy "lowpassFilterNode")
 
-_gainNode :: forall p. Choice p => Strong p =>
-             Optic' p SynthNodeState WebAudio.GainNode
-_gainNode =
-  _audioNode <<< prism' WebAudio.Gain
-                        (case _ of
-                            WebAudio.Gain gainNode -> Just gainNode
-                            _ -> Nothing
-                        )
+_filterParams :: Prism' SynthNodeParams FilterParams_
+_filterParams = prism'
+                FilterParams
+                (case _ of
+                    FilterParams filterParams -> Just filterParams
+                    _ -> Nothing)
 
-_delayNode :: forall p. Choice p => Strong p =>
-              Optic' p SynthNodeState WebAudio.DelayNode
-_delayNode =
-  _audioNode <<< prism' WebAudio.Delay
-                        (case _ of
-                            WebAudio.Delay delayNode -> Just delayNode
-                            _ -> Nothing
-                        )
+_biquadFilterCutoff :: Lens' BiquadFilterParams Cutoff
+_biquadFilterCutoff = lens
+                      (\(BiquadFilterParams filterType cutoff q gain) -> gain)
+                      (\(BiquadFilterParams filterType _ q gain) newCutoff ->
+                        BiquadFilterParams filterType newCutoff q gain)
 
-_analyserNode :: forall p. Choice p => Strong p =>
-                 Optic' p SynthNodeState WebAudio.AnalyserNode
-_analyserNode =
-  _audioNode <<< prism' WebAudio.Analyser
-                        (case _ of
-                            WebAudio.Analyser analyserNode -> Just analyserNode
-                            _ -> Nothing
-                        )
+_lowpassCutoff :: forall p. Choice p => Strong p =>
+                  Optic' p SynthNodeParams Gain
+_lowpassCutoff = _filterParams <<< prop (SProxy :: SProxy "lowpassParams") <<< _biquadFilterCutoff
 
-data SynthOpF a
-  = Blah
+_highpassNode :: forall p. Choice p => Strong p =>
+                Optic' p SynthNodeState WebAudio.BiquadFilterNode
+_highpassNode = _FilterState <<< prop (SProxy :: SProxy "highpassFilterNode")
 
-type SYNTHOP = FProxy SynthOpF
-
-_synthOp :: SProxy "synthOp"
-_synthOp = SProxy
-
--- | Compile an operation on the graph to an operation on the synthesiser
--- | that changes the synth context as an Effect and returns a function that
--- | changes the AppState.synthState
-interpretToSynthUpdate :: forall a. UIGraphOpF a -> Tuple (SynthState -> Effect SynthState) a
-interpretToSynthUpdate = case _ of
-  -- If the node text is a valid synth node type, create the corresponding
-  -- synth node
-  InsertNode node next ->
-    Tuple (\synthState -> do
-             log "interpretSynthM InsertNode"
-             log $ node ^. _nodeText
-             newState <- tryCreateSynthNode node synthState
-             pure newState)
-          next
-
-  -- If the node text is a valid synth node type, delete the corresponding
-  -- synth node
-  DeleteNode node next ->
-    Tuple (\synthState -> do
-             newState <- deleteSynthNode node synthState
-             log $ "interpretSynthM DeleteNode " <> node ^. _nodeText
-             pure newState)
-          next
-
-  -- If the node text is a valid synth node type, create the corresponding
-  -- connection between synth nodes
-  InsertEdge edge next ->
-    Tuple (\synthState -> do
-             log "interpretSynth InsertEdge"
-             case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
-                        (Map.lookup (edge ^. _target) synthState.synthNodes) of
-               Tuple (Just sourceNodeState) (Just targetNodeState) -> do
-                 log "connecting two audio nodes"
-                 connectAudioNode sourceNodeState targetNodeState
-               _ -> do
-                 log "interpretSynth InsertEdge case failed"
-                 pure unit
-             pure synthState)
-          next
-
-  -- If the node text is a valid synth node type, delete the corresponding
-  -- connection between synth nodes
-  DeleteEdge edge next ->
-    Tuple (\synthState -> do
-             case Tuple (Map.lookup (edge ^. _source) synthState.synthNodes)
-                        (Map.lookup (edge ^. _target) synthState.synthNodes) of
-               Tuple (Just sourceNodeState) (Just targetNodeState) -> do
-                 log $ "disconnecting " <> show (unwrap sourceNodeState).synthNodeType <> " from " <> show (unwrap targetNodeState).synthNodeType
-                 disconnectAudioNode sourceNodeState targetNodeState
-               _ -> pure unit
-             pure synthState)
-          next
-
-  -- Moving a node doesn't affect the synth
-  MoveNode node from to next ->
-    Tuple pure next
-
-  -- If the synth node text goes from invalid to valid, create the
-  -- corresponding synth node.
-  -- If the synth node text goes from valid to invalid, delete the
-  -- corresponding synth node.
-  UpdateNodeText node from to next ->
-    Tuple (\synthState -> do
-             log $ "interpretSynthM UpdateNodeText from " <> from <> " to " <> to
-             newState <- case Tuple (parseSynthNodeType from) (parseSynthNodeType to) of
-               -- This update makes the node text a valid synth node
-               Tuple Nothing (Just nodeType) -> do
-                 log "UpdateNodeText tryCreateSynthNode"
-                 createSynthNode node nodeType synthState
-               -- This update takes the node text from a valid synth node type to a
-               -- value that does not represent a synth node type
-               Tuple (Just _) Nothing -> do
-                 log "UpdateNodeText tryDeleteSynthNode"
-                 deleteSynthNode node synthState
-               _ -> pure synthState
-             pure newState)
-          next
-  -- Edge text doesn't affect the synth
-  UpdateEdgeText edge from to next ->
-    Tuple pure next
+_highpassCutoff :: forall p. Choice p => Strong p =>
+                  Optic' p SynthNodeParams Gain
+_highpassCutoff = _filterParams <<< prop (SProxy :: SProxy "highpassParams") <<< _biquadFilterCutoff
 
 parseSynthNodeType :: String -> Maybe SynthNodeType
 parseSynthNodeType = case _ of
   "oscillator" -> Just NodeTypeOscillator
-  "gain" -> Just NodeTypeAmplifier
-  "delay" -> Just NodeTypeDelay
-  "filter" -> Just NodeTypeFilter
-  "output" -> Just NodeTypeDestination
-  "analyser" -> Just NodeTypeAnalyser
+  "gain"       -> Just NodeTypeAmplifier
+  "delay"      -> Just NodeTypeDelay
+  "filter"     -> Just NodeTypeFilter
+  "output"     -> Just NodeTypeDestination
+  -- Not implemented:
   --"compressor" -> Just NodeTypeDynamicsCompressor
   --"media-element" -> Just NodeTypeMediaElementAudioSource
   --"audio-buffer" -> Just NodeTypeAudioBufferSource
   --"convolver" -> Just NodeTypeConvolver
   --"panner" -> Just NodeTypeStereoPanner
+  --"analyser" -> Just NodeTypeAnalyser
   --"listener"
   --"waveshaper"
   _ -> Nothing
 
-freshSynthNode :: SynthNodeType -> WebAudio.AudioContext -> Effect SynthNodeState
-freshSynthNode synthNodeType audioContext = case synthNodeType of
-  NodeTypeOscillator -> do
-    log "creating oscillator"
-    oscillatorNode <- WebAudio.createOscillator audioContext
-    WebAudio.setFrequency defaultOscillatorFreq oscillatorNode
-    WebAudio.setOscillatorType defaultOscillatorType oscillatorNode
-    WebAudio.startOscillator 0.0 oscillatorNode
-    pure $ SynthNodeState { audioNode :       WebAudio.Oscillator oscillatorNode
-                          , synthNodeType :   NodeTypeOscillator
-                          , synthNodeParams : OscillatorParams defaultOscillatorFreq
-                          }
+freshSynthNodeParams :: SynthNodeType -> SynthNodeParams
+freshSynthNodeParams =
+  let
+    biquadFilterParams = BiquadFilterParams defaultFilterType defaultFilterCutoff defaultFilterQFactor defaultFilterGain
+    analyserParams = AnalyserParams defaultFrequencyBinCount defaultMinDecibels defaultMaxDecibels defaultSmoothingTimeConstant
+  in case _ of
+    NodeTypeOscillator -> OscillatorParams defaultOscillatorFreq
+    NodeTypeAmplifier -> AmplifierParams defaultAmplifierGain
+    NodeTypeDelay -> DelayParams defaultDelayPeriod
+    NodeTypeFilter -> FilterParams { lowpassParams : biquadFilterParams
+                                   , highpassParams : biquadFilterParams
+                                   , analyserParams : analyserParams
+                                   }
+    NodeTypeDestination -> DestinationParams
 
-  NodeTypeAmplifier -> do
-    amplifierNode <- WebAudio.createGain audioContext
-    WebAudio.setGain defaultAmplifierGain amplifierNode
-    pure $ SynthNodeState { audioNode :       WebAudio.Gain amplifierNode
-                          , synthNodeType :   NodeTypeAmplifier
-                          , synthNodeParams : AmplifierParams defaultAmplifierGain
-                          }
+newSynthNodeState :: SynthNodeParams -> WebAudio.AudioContext -> Effect SynthNodeState
+newSynthNodeState synthNodeType audioContext =
+  let
+    newAnalyserState analyserParams =
+      let
+        AnalyserParams frequencyBinCount minDecibels maxDecibels smoothingTimeConstant = analyserParams
+      in do
+        log "creating analyser"
+        analyserNode <- WebAudio.createAnalyser audioContext
+        WebAudio.setSmoothingTimeConstant smoothingTimeConstant analyserNode
+        WebAudio.setMinDecibels minDecibels analyserNode
+        WebAudio.setMaxDecibels maxDecibels analyserNode
+        spectrumBuffer <- empty frequencyBinCount
+        drawLoopStopSignal <- Ref.new false
+        pure { analyserNode : analyserNode
+             , spectrumBuffer : spectrumBuffer
+             , drawLoopStopSignal : drawLoopStopSignal
+             }
 
-  NodeTypeDelay -> do
-    delayNode <- WebAudio.createDelay audioContext
-    setTargetValue defaultDelayPeriod audioContext =<< WebAudio.delayTime delayNode
-    pure $ SynthNodeState { audioNode :       WebAudio.Delay delayNode
-                          , synthNodeType :   NodeTypeDelay
-                          , synthNodeParams : DelayParams defaultDelayPeriod
-                          }
+    newFilterAudioNodeState filterParams =
+      let
+        BiquadFilterParams filterType filterCutoff filterQFactor filterGain = filterParams
+      in do
+        filterAudioNode <- WebAudio.createBiquadFilter audioContext
+        WebAudioBiquad.setFilterType filterType filterAudioNode
+        setTargetValue filterCutoff  audioContext =<< WebAudioBiquad.filterFrequency filterAudioNode
+        setTargetValue filterQFactor audioContext =<< WebAudioBiquad.quality filterAudioNode
+        setTargetValue filterGain    audioContext =<< WebAudioBiquad.gain filterAudioNode
+        pure filterAudioNode
 
-  NodeTypeFilter -> do
-    filterNode <- WebAudio.createBiquadFilter audioContext
-    WebAudio.setFilterType defaultFilterType filterNode
-    setTargetValue defaultFilterCutoff  audioContext =<< WebAudio.filterFrequency filterNode
-    setTargetValue defaultFilterQFactor audioContext =<< WebAudio.quality filterNode
-    setTargetValue defaultFilterGain    audioContext =<< WebAudio.gain filterNode
-    pure $ SynthNodeState { audioNode :       WebAudio.BiquadFilter filterNode
-                          , synthNodeType :   NodeTypeFilter
-                          , synthNodeParams : FilterParams defaultFilterType defaultFilterCutoff defaultFilterQFactor defaultFilterGain
-                          }
+  in case synthNodeType of
+    OscillatorParams freq -> do
+      log "creating oscillator"
+      oscillatorNode <- WebAudio.createOscillator audioContext
+      WebAudioOsc.setFrequency defaultOscillatorFreq oscillatorNode
+      WebAudioOsc.setOscillatorType defaultOscillatorType oscillatorNode
+      WebAudioOsc.startOscillator 0.0 oscillatorNode
+      pure $ OscillatorState oscillatorNode
 
-  NodeTypeDestination -> do
-    log "creating destination"
-    destinationNode <- WebAudio.destination audioContext
-    pure $ SynthNodeState { audioNode :       WebAudio.Destination destinationNode
-                          , synthNodeType :   NodeTypeDestination
-                          , synthNodeParams : DestinationParams
-                          }
+    AmplifierParams gain -> do
+      amplifierNode <- WebAudio.createGain audioContext
+      WebAudioGain.setGain defaultAmplifierGain amplifierNode
+      pure $ AmplifierState amplifierNode
 
-  NodeTypeAnalyser -> do
-    log "creating analyser"
-    analyserNode <- WebAudio.createAnalyser audioContext
-    WebAudio.setSmoothingTimeConstant defaultSmoothingTimeConstant analyserNode
-    WebAudio.setMaxDecibels defaultMaxDecibels analyserNode
-    spectrumBuffer <- empty defaultFrequencyBinCount
-    drawLoopStopSignal <- Ref.new false
-    pure $ SynthNodeState { audioNode : WebAudio.Analyser analyserNode
-                          , synthNodeType : NodeTypeFilter
-                          , synthNodeParams : AnalyserParams
-                                              defaultFrequencyBinCount
-                                              defaultMinDecibels
-                                              defaultMaxDecibels
-                                              defaultSmoothingTimeConstant
-                                              spectrumBuffer
-                                              drawLoopStopSignal
-                          }
+    DelayParams periodSeconds -> do
+      delayNode <- WebAudio.createDelay audioContext
+      setTargetValue defaultDelayPeriod audioContext =<< WebAudioDelay.delayTime delayNode
+      pure $ DelayState delayNode
 
+    FilterParams filterParams -> do
+      lowpassFilter  <- newFilterAudioNodeState filterParams.lowpassParams
+      highpassFilter <- newFilterAudioNodeState filterParams.highpassParams
+      analyserState <- newAnalyserState filterParams.analyserParams
+      WebAudio.connect analyserState.analyserNode lowpassFilter
+      WebAudio.connect lowpassFilter highpassFilter
+      pure $ FilterState { lowpassFilterNode : lowpassFilter
+                         , highpassFilterNode : highpassFilter
+                         , analyserNode : analyserState.analyserNode
+                         , analyserBuffer : analyserState.spectrumBuffer
+                         , drawLoopStopSignal : analyserState.drawLoopStopSignal
+                         }
+
+    DestinationParams -> do
+      log "creating destination"
+      destinationNode <- WebAudio.destination audioContext
+      pure $ DestinationState destinationNode
+
+  -- Not implemented:
+  --NodeTypeDynamicsCompressor ->
   --NodeTypeAudioBufferSource ->
   --NodeTypeConvolver ->
-  --NodeTypeDynamicsCompressor ->
   --NodeTypeMediaElementAudioSource ->
   --NodeTypeStereoPanner ->
-
-connectAudioNode :: SynthNodeState -> SynthNodeState -> Effect Unit
-connectAudioNode (SynthNodeState source) target = case source.audioNode of
-  WebAudio.Oscillator rawOscillatorNode ->         WebAudio.connect rawOscillatorNode target
-  WebAudio.Gain rawGainNode ->                     WebAudio.connect rawGainNode target
-  WebAudio.Delay rawDelayNode ->                   WebAudio.connect rawDelayNode target
-  WebAudio.BiquadFilter rawFilterNode ->           WebAudio.connect rawFilterNode target
-  WebAudio.Analyser rawAnalyserNode ->             WebAudio.connect rawAnalyserNode target
-  WebAudio.AudioBufferSource rawAudioBufferNode -> WebAudio.connect rawAudioBufferNode target
-  WebAudio.Convolver rawConvolverNode ->           WebAudio.connect rawConvolverNode target
-  WebAudio.DynamicsCompressor rawCompressorNode -> WebAudio.connect rawCompressorNode target
-  WebAudio.StereoPanner rawPannerNode ->           WebAudio.connect rawPannerNode target
-  WebAudio.Destination rawDestinationNode ->       WebAudio.connect rawDestinationNode target
-
-disconnectAudioNode :: SynthNodeState -> SynthNodeState -> Effect Unit
-disconnectAudioNode (SynthNodeState source) target = case source.audioNode of
-  WebAudio.Oscillator rawOscillatorNode ->         WebAudio.disconnect rawOscillatorNode target
-  WebAudio.Gain rawGainNode ->                     WebAudio.disconnect rawGainNode target
-  WebAudio.Delay rawDelayNode ->                   WebAudio.disconnect rawDelayNode target
-  WebAudio.BiquadFilter rawFilterNode ->           WebAudio.disconnect rawFilterNode target
-  WebAudio.Analyser rawAnalyserNode ->             WebAudio.disconnect rawAnalyserNode target
-  WebAudio.AudioBufferSource rawAudioBufferNode -> WebAudio.disconnect rawAudioBufferNode target
-  WebAudio.Convolver rawConvolverNode ->           WebAudio.disconnect rawConvolverNode target
-  WebAudio.DynamicsCompressor rawCompressorNode -> WebAudio.disconnect rawCompressorNode target
-  WebAudio.StereoPanner rawPannerNode ->           WebAudio.disconnect rawPannerNode target
-  WebAudio.Destination rawDestinationNode ->       WebAudio.disconnect rawDestinationNode target
-
--- It should be ok to ignore graph.isDual since this will
--- be executed outside of any graph operations. isDual
--- should only be used internally in graph operations.
-mapParentChildSynthNodes :: (SynthNodeState -> SynthNodeState -> Effect Unit)
-                            -> SynthNodeState -> UINode -> SynthState -> Effect Unit
-mapParentChildSynthNodes connectOrDisconnect synthNodeState node synthState = do
-  let parentSynthNodes = Map.keys (node ^. _parents)
-                         # Array.fromFoldable
-                         # Array.mapMaybe (\parentId -> Map.lookup parentId synthState.synthNodes)
-  for_ parentSynthNodes \parentSynthNode ->
-                          connectOrDisconnect parentSynthNode synthNodeState
-  let childSynthNodes = Map.keys (node ^. _children)
-                        # Array.fromFoldable
-                        # Array.mapMaybe (\childId -> Map.lookup childId synthState.synthNodes)
-  for_ childSynthNodes \childSynthNode ->
-                         connectOrDisconnect synthNodeState childSynthNode
-
-connectParentChildSynthNodes :: SynthNodeState -> UINode -> SynthState -> Effect Unit
-connectParentChildSynthNodes = mapParentChildSynthNodes connectAudioNode
-
-disconnectParentChildSynthNodes :: SynthNodeState -> UINode -> SynthState -> Effect Unit
-disconnectParentChildSynthNodes = mapParentChildSynthNodes disconnectAudioNode
-
-tryCreateSynthNode :: UINode -> SynthState -> Effect SynthState
-tryCreateSynthNode node synthState = do
-  case parseSynthNodeType (node ^. _nodeText) of
-    Nothing -> pure synthState
-    Just nodeType -> do
-      createSynthNode node nodeType synthState
-
-createSynthNode :: UINode -> SynthNodeType -> SynthState -> Effect SynthState
-createSynthNode node nodeType synthState = do
-  synthNodeState <- freshSynthNode nodeType synthState.audioContext
-  connectParentChildSynthNodes synthNodeState node synthState
-  let updatedNodes = Map.insert (node ^. _nodeId) synthNodeState synthState.synthNodes
-  pure $ synthState { synthNodes = updatedNodes }
-
-deleteSynthNode :: UINode -> SynthState -> Effect SynthState
-deleteSynthNode node synthState = do
-  case Map.lookup (node ^. _nodeId) synthState.synthNodes of
-    Nothing -> pure synthState
-    Just (SynthNodeState synthNodeState) -> do
-      disconnectParentChildSynthNodes (SynthNodeState synthNodeState) node synthState
-      case synthNodeState.audioNode of
-        WebAudio.Oscillator oscillatorNode -> WebAudio.stopOscillator 0.0 oscillatorNode
-        WebAudio.AudioBufferSource audioBufferSource -> WebAudio.stopBufferSource 0.0 audioBufferSource
-        _ -> pure unit
-      let updatedNodes = Map.delete (node ^. _nodeId) synthState.synthNodes
-      pure $ synthState { synthNodes = updatedNodes }
 
 setTargetValue :: WebAudio.Value -> WebAudio.AudioContext -> WebAudio.AudioParam -> Effect Unit
 setTargetValue value audioContext param = do
   now <- WebAudio.currentTime audioContext
   _ <- WebAudio.linearRampToValueAtTime value (now + updateValueRampTime) param
   pure unit
+
+
+------
+-- Serialisation/deserialisation
+
+derive instance genericSynthParams :: Generic SynthParams _
+
+newtype ForeignSynthParams = ForeignSynthParams (Object SynthNodeParams)
+derive instance newtypeForeignSynthParams :: Newtype ForeignSynthParams _
+derive instance genericForeignSynthParams :: Generic ForeignSynthParams _
+instance encodeForeignSynthParams :: Encode ForeignSynthParams where
+  encode x = x # genericEncode defaultOptions
+instance decodeForeignSynthParams :: Decode ForeignSynthParams where
+  decode x = x # genericDecode defaultOptions
+
+toForeignSynthParams :: SynthParams -> ForeignSynthParams
+toForeignSynthParams =
+  unwrap >>> toForeignMap identity UUID.toString >>> wrap
+
+fromForeignSynthParams :: ForeignSynthParams -> Either String SynthParams
+fromForeignSynthParams =
+  unwrap >>> fromForeignMap pure parseUUIDEither >>> map wrap
+
+instance encodeSynthParams :: Encode SynthParams where
+  encode x = x # toForeignSynthParams >>> genericEncode defaultOptions
+instance decodeSynthParams :: Decode SynthParams where
+  decode x = x # genericDecode defaultOptions >>= fromForeignSynthParams >>> toExceptT
+
+derive instance genericSynthNodeParams :: Generic SynthNodeParams _
+instance encodeSynthNodeParams :: Encode SynthNodeParams where
+  encode x = x # genericEncode defaultOptions
+instance decodeSynthNodeParams :: Decode SynthNodeParams where
+  decode x = x # genericDecode defaultOptions
+
+derive instance genericBiquadFilterParams :: Generic BiquadFilterParams _
+instance encodeBiquadFilterParams :: Encode BiquadFilterParams where
+  encode x = x # genericEncode defaultOptions
+instance decodeBiquadFilterParams :: Decode BiquadFilterParams where
+  decode x = x # genericDecode defaultOptions
+
+derive instance genericAnalyserParams :: Generic AnalyserParams _
+instance encodeAnalyserParams :: Encode AnalyserParams where
+  encode x = x # genericEncode defaultOptions
+instance decodeAnalyserParams :: Decode AnalyserParams where
+  decode x = x # genericDecode defaultOptions
+
+derive instance genericSynthParameter :: Generic SynthParameter _
+instance encodeSynthParameter' :: Encode SynthParameter where
+  encode x = x # genericEncode defaultOptions
+instance decodeSynthParameter' :: Decode SynthParameter where
+  decode x = x # genericDecode defaultOptions

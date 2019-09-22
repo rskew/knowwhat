@@ -33,7 +33,5 @@ main =
   runUI GP.paneComponent { windowShape : windowShape
                          , demoGraph : demoGraph
                          , audioContext : audioContext
-                         , analyserBuffer : analyserBuffer
-                         , analyserArray : []
                          }
                          body

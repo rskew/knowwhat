@@ -3,25 +3,22 @@ module GraphComponent where
 import Prelude
 
 import AnalyserComponent as AnalyserComponent
-import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synthState, _synthNodeState, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synth, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
-import Audio.WebAudio.GainNode (gain) as WebAudio
-import Audio.WebAudio.DelayNode (delayTime) as WebAudio
-import Audio.WebAudio.Types (AudioContext, AnalyserNode) as WebAudio
+import Audio.WebAudio.Types (AudioContext) as WebAudio
 import Audio.WebAudio.Utils (createUint8Buffer)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
-import Data.ArrayBuffer.Types (Uint8Array)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Foldable (for_, foldM)
+import Data.Foldable (for_, foldl)
 import Data.Identity (Identity(..))
 import Data.Int (toNumber)
-import Data.Lens (preview, traversed, (.~), (?~), (^.), (^?))
+import Data.Lens (preview, (.~), (?~), (^.))
 import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
@@ -31,13 +28,12 @@ import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
-import Data.UInt (UInt)
+import Data.Tuple as Tuple
 import Data.Undoable (initUndoable, dooM, undoM, redoM, _current, _history, _undone)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
 import Effect.Now (now)
-import Effect.Ref (Ref)
 import Foreign (renderForeignError)
 import Foreign as Foreign
 import Halogen as H
@@ -48,6 +44,7 @@ import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource as ES
 import Math as Math
 import Point2D (Point2D)
+import Run as Run
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
@@ -68,10 +65,11 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.Synth (SynthState, SynthNodeParams(..), deleteSynthNode, tryCreateSynthNode, _synthNodeGain, _gainNode, _synthNodeDelayPeriod, _delayNode, _analyserNode, setTargetValue, defaultFrequencyBinCount)
-import Workflow.UIGraph (freshUIEdge, freshUINode, graphTitle)
+import Workflow.Synth (FilterState_, Synth, SynthNodeParams(..), SynthNodeState(..), SynthParameter(..), SynthParams(..), defaultFrequencyBinCount, freshSynthNodeParams, parseSynthNodeType)
+import Workflow.Synth.SynthOp (createSynthNode, deleteSynthNode, updateSynthParam, interpretSynthOp)
+import Workflow.UIGraph (freshUINode, graphTitle)
 import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
-import Workflow.UIGraph.UIGraphOp (deleteEdgeOp, deleteNodeOp, insertEdgeOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
+import Workflow.UIGraph.UIGraphOp (disconnectNodesOp, deleteNodeOp, connectNodesOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
@@ -152,8 +150,6 @@ filterTextBoxOffset = { x : 0.0
 type Input = { boundingRect :: WHE.DOMRect
              , graph :: UIGraph
              , audioContext :: WebAudio.AudioContext
-             , analyserBuffer :: Uint8Array
-             , analyserArray :: Array UInt
              }
 
 initialState :: Input -> AppState
@@ -165,11 +161,11 @@ initialState inputs = initUndoable
     , boundingRect : inputs.boundingRect
     , graphOrigin : PageSpacePos { x : 0.0, y : 0.0 }
     , zoom : 1.0
-    , synthState : { audioContext : inputs.audioContext
-                   , synthNodes : Map.empty
-                   }
-    , analyserBuffer : inputs.analyserBuffer
-    , analyserArray : []
+    , synth : { synthState : { audioContext : inputs.audioContext
+                             , synthNodeStates : Map.empty
+                             }
+              , synthParams : SynthParams Map.empty
+              }
     }
 
 data Action
@@ -187,8 +183,8 @@ data Action
   | EdgeTextInput EdgeId SVGContentEditable.Message
   | AppCreateNode ME.MouseEvent
   | AppDeleteNode UINode
-  | AppCreateEdge UIEdge
-  | AppDeleteEdge UIEdge
+  | AppCreateEdge UINode UINode
+  | AppDeleteEdge UINode UINode
   | FocusOn Focus
   | DeleteFocus
   | Hover (Maybe HoveredElementId)
@@ -601,8 +597,8 @@ graph =
       ---   |../  \/ \[[/  \/]]|
       ---   --------------------
       ---
-      filterNodeHTML :: NodeId -> WebAudio.AnalyserNode -> Uint8Array -> Ref Boolean -> Number -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
-      filterNodeHTML nodeId analyserNode spectrumBuffer drawLoopStopSignal zoom lopassCutoff hipassCutoff =
+      filterNodeHTML :: NodeId -> FilterState_ -> Number -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
+      filterNodeHTML nodeId filterState zoom lopassCutoff hipassCutoff =
         -- Spectrum display
         [ HH.slot
           _analyser
@@ -610,9 +606,9 @@ graph =
           AnalyserComponent.analyser
           { shape : filterShape
           , zoom : zoom
-          , analyserNode : analyserNode
-          , spectrumBuffer : spectrumBuffer
-          , drawLoopStopSignal : drawLoopStopSignal
+          , analyserNode : filterState.analyserNode
+          , spectrumBuffer : filterState.analyserBuffer
+          , drawLoopStopSignal : filterState.drawLoopStopSignal
           , zoomRef : Nothing
           }
           (const Nothing)
@@ -644,14 +640,19 @@ graph =
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
         ] <> textBoxHTML filterTextBoxOffset
-      nodeHTML = case Map.lookup (node ^. _nodeId) (state ^. _synthState).synthNodes of
+      nodeHTML = case Map.lookup (node ^. _nodeId) (unwrap (state ^. _synth).synthParams) of
         Nothing -> graphNodeHTML
-        Just synthNodeState -> case (unwrap synthNodeState).synthNodeParams of
+        Just synthNodeParams -> case synthNodeParams of
+          OscillatorParams freq -> graphNodeHTML
           AmplifierParams gain -> amplifierNodeHTML gain
           DelayParams delayPeriod -> delayNodeHTML delayPeriod
-          AnalyserParams _ _ _ _ spectrumBuffer drawLoopSignal -> case synthNodeState ^? _analyserNode of
-            Nothing -> graphNodeHTML
-            Just analyserNode -> filterNodeHTML (node ^. _nodeId) analyserNode spectrumBuffer drawLoopSignal (state ^. _zoom) 0.0 0.0
+          FilterParams filterParams ->
+            case Map.lookup (node ^. _nodeId) (state ^. _synth).synthState.synthNodeStates of
+              Nothing -> graphNodeHTML
+              Just synthNodeState -> case synthNodeState of
+                FilterState filterState ->
+                  filterNodeHTML (node ^. _nodeId) filterState (state ^. _zoom) 0.0 0.0
+                _ -> graphNodeHTML
           _ -> graphNodeHTML
     in
       SE.g
@@ -674,11 +675,10 @@ graph =
       markerRef = if (Map.isEmpty (targetNode ^. _subgraph <<< _nodes))
                   then "url(#arrow)"
                   else "url(#arrow-to-group)"
-      markerRef' = if isJust $ Map.lookup (edge ^. _target) (state ^. _synthState).synthNodes
+      markerRef' = if isJust $ Map.lookup (edge ^. _target) (unwrap (state ^. _synth).synthParams)
                    then "url(#arrow-to-synth-node)"
                    else markerRef
-      sourcePos = case Map.lookup (edge ^. _source) (state ^. _synthState).synthNodes
-                       >>= (unwrap >>> _.synthNodeParams >>> Just) of
+      sourcePos = case Map.lookup (edge ^. _source) (unwrap (state ^. _synth).synthParams) of
                     Just (DelayParams delayPeriod) ->
                       { x : (sourceNode ^. _pos).x
                             + (delayPeriodToPageSpace delayPeriod)
@@ -739,8 +739,7 @@ graph =
           then Just "hover"
           else Nothing
         ]
-      sourcePos = case Map.lookup (edge ^. _source) (state ^. _synthState).synthNodes
-                       >>= (unwrap >>> _.synthNodeParams >>> Just) of
+      sourcePos = case Map.lookup (edge ^. _source) (unwrap (state ^. _synth).synthParams) of
                     Just (DelayParams delayPeriod) ->
                       { x : (sourceNode ^. _pos).x
                             + (delayPeriodToPageSpace delayPeriod)
@@ -759,7 +758,7 @@ graph =
       , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId $ edge ^. _edgeId
       , HE.onMouseLeave \_ -> Just $ Hover Nothing
       , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-                               $ AppDeleteEdge $ edge
+                               $ AppDeleteEdge sourceNode targetNode
       ]
 
   renderDrawingEdge :: AppState -> DrawingEdge -> Maybe (H.ComponentHTML Action Slots Aff)
@@ -771,8 +770,7 @@ graph =
       drawingEdgeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edge" ]
-      sourcePos' = case Map.lookup drawingEdgeState.source (state ^. _synthState).synthNodes
-                        >>= (unwrap >>> _.synthNodeParams >>> Just) of
+      sourcePos' = case Map.lookup drawingEdgeState.source (unwrap (state ^. _synth).synthParams) of
                      Just (DelayParams delayPeriod) ->
                        { x : sourceGraphPos.x
                          + (delayPeriodToPageSpace delayPeriod)
@@ -965,11 +963,11 @@ graph =
         drawingEdgeSourceId = drawingEdgeId
       case maybeNewEdgeTarget of
         Just newEdgeTarget ->
-          let
-            newEdge = freshUIEdge { source : drawingEdgeSourceId, target : newEdgeTarget ^. _nodeId }
-          in
-          handleAction $ AppCreateEdge newEdge
-        Nothing -> pure unit
+          case Tuple (lookupNode (state ^. _graph) drawingEdgeSourceId)
+                     (lookupNode (state ^. _graph) (newEdgeTarget ^. _nodeId)) of
+            Tuple (Just source) (Just target) -> handleAction $ AppCreateEdge source target
+            _ -> pure unit
+        _ -> pure unit
       -- Remove the drawing edge
       H.modify_ $ _drawingEdges <<< at drawingEdgeId .~ Nothing
       H.unsubscribe subscriptionId
@@ -992,13 +990,18 @@ graph =
         Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
         Nothing -> pure unit
 
-    AppCreateEdge edge -> do
-      modifyM $ dooM $ AppOperation $ insertEdgeOp edge
-      handleAction $ FocusOn (FocusEdge (edge ^. _edgeId) [])
+    AppCreateEdge source target ->
+      let
+        edgeId = { source : source ^. _nodeId
+                 , target : target ^. _nodeId
+                 }
+      in do
+        modifyM $ dooM $ AppOperation $ connectNodesOp source target
+        handleAction $ FocusOn (FocusEdge edgeId [])
 
-    AppDeleteEdge edge -> do
-      modifyM $ dooM $ AppOperation $ deleteEdgeOp edge
-      handleAction $ FocusOn (FocusNode (edge ^. _edgeId).source)
+    AppDeleteEdge source target -> do
+      modifyM $ dooM $ AppOperation $ disconnectNodesOp source target
+      handleAction $ FocusOn (FocusNode (source ^. _nodeId))
 
     FocusOn newFocus -> do
       H.modify_ $ _graph <<< _focus .~ newFocus
@@ -1010,9 +1013,11 @@ graph =
         FocusNode nodeId -> case lookupNode (state ^. _graph) nodeId of
           Nothing -> pure unit
           Just node -> handleAction $ AppDeleteNode node
-        FocusEdge edgeId _ -> case lookupEdge (state ^. _graph) edgeId of
-          Nothing -> pure unit
-          Just edge -> handleAction $ AppDeleteEdge edge
+        FocusEdge edgeId _ ->
+          case Tuple (lookupNode (state ^. _graph) edgeId.source)
+                     (lookupNode (state ^. _graph) edgeId.target) of
+            Tuple (Just source) (Just target) -> handleAction $ AppDeleteEdge source target
+            _ -> pure unit
 
     Hover maybeElementId -> do
       H.modify_ $ _hoveredElementId .~ maybeElementId
@@ -1078,7 +1083,7 @@ graph =
         Left errors -> H.liftEffect $ log errors
         Right appStateWithMeta -> do
           state <- H.get
-          H.liftEffect $ WebAudio.close (state ^. _synthState).audioContext
+          H.liftEffect $ WebAudio.close (state ^. _synth).synthState.audioContext
           newAppState <- H.liftEffect $ initializeSynthState appStateWithMeta.uninitializedAppState
           H.put newAppState
           -- Keep text fields in sync
@@ -1102,8 +1107,17 @@ graph =
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ WebAudio.close (state ^. _synthState).audioContext
+          H.liftEffect $ WebAudio.close (state ^. _synth).synthState.audioContext
           H.liftEffect $ log "Closed audio context"
+        "1" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          for_ (state ^. _graph <<< _nodes) \node ->
+            case parseSynthNodeType (node ^. _nodeText) of
+              Nothing -> pure unit
+              Just synthNodeType ->
+                modifyM $ dooM $ AppOperation $ createSynthNode node $ freshSynthNodeParams synthNodeType
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
@@ -1158,15 +1172,11 @@ graph =
         initialGainPageSpace = amplifierBoxSize * (amplifierGainToControl initialGain)
         newGainPageSpace = Math.max 0.0 (initialGainPageSpace + gainOffsetPageSpace)
         newGain = Math.max 0.0 $ controlToAmplifierGain (newGainPageSpace / amplifierBoxSize)
-      case Map.lookup nodeId (state ^. _synthState).synthNodes of
-        Nothing -> pure unit
-        Just synthNodeState -> do
-          H.modify_ $ _synthNodeState nodeId <<< traversed <<< _synthNodeGain .~ newGain
-          case synthNodeState ^? _gainNode of
-            Nothing -> pure unit
-            Just gainNode -> do
-              _ <- H.liftEffect $ setTargetValue newGain (state ^. _synthState).audioContext =<< WebAudio.gain gainNode
-              pure unit
+      case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
+                 (lookupNode (state ^. _graph) nodeId) of
+        Tuple (Just (AmplifierParams oldGain)) (Just node) -> do
+          modifyM $ dooM $ AppOperation $ updateSynthParam node AmplifierGain oldGain newGain
+        _ -> pure unit
 
     GainDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -1183,15 +1193,11 @@ graph =
         periodOffsetPageSpace = dragData.offsetX * (state ^. _zoom)
         initialPeriodPageSpace = delayPeriodToPageSpace initialPeriod
         newPeriod = Math.max 0.0 $ pageSpaceToDelayPeriod (periodOffsetPageSpace + initialPeriodPageSpace)
-      case Map.lookup nodeId (state ^. _synthState).synthNodes of
-        Nothing -> pure unit
-        Just synthNodeState -> do
-          H.modify_ $ _synthNodeState nodeId <<< traversed <<< _synthNodeDelayPeriod .~ newPeriod
-          case synthNodeState ^? _delayNode of
-            Nothing -> pure unit
-            Just delayNode -> do
-              _ <- H.liftEffect $ setTargetValue newPeriod (state ^. _synthState).audioContext =<< WebAudio.delayTime delayNode
-              pure unit
+      case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
+                 (lookupNode (state ^. _graph) nodeId) of
+        Tuple (Just (DelayParams oldPeriod)) (Just node) -> do
+          modifyM $ dooM $ AppOperation $ updateSynthParam node DelayPeriod oldPeriod newPeriod
+        _ -> pure unit
 
     DelayDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -1220,21 +1226,39 @@ drawingEdgeWithinNodeHalo :: DrawingEdge -> UINode -> Boolean
 drawingEdgeWithinNodeHalo drawingEdgeState' node =
   haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
 
-tearDownSynthState :: AppState -> Effect SynthState
+tearDownSynthState :: AppState -> Effect Synth
 tearDownSynthState appState =
-  foldM
-  (flip deleteSynthNode)
-  (appState ^. _synthState)
-  $ appState ^. _graph <<< _nodes
+  let
+    teardownOps = Array.catMaybes $ Array.fromFoldable $ (appState ^. _graph <<< _nodes) <#> \node ->
+      case Map.lookup (node ^. _nodeId) (unwrap (appState ^. _synth).synthParams) of
+        Nothing -> Nothing
+        Just synthNodeParams -> Just $ deleteSynthNode node synthNodeParams
+    deleteNodeFuncs = (Tuple.fst <<< Run.extract <<< interpretSynthOp) <$> teardownOps
+  in
+    foldl bind (pure (appState ^. _synth)) deleteNodeFuncs
+
+initializeSynthNodes :: UninitializedAppState -> Synth -> Effect Synth
+initializeSynthNodes uninitializedAppState uninitializedSynth =
+  let
+    synthParams = unwrap uninitializedSynth.synthParams
+    graph' = (uninitializedAppState ^. _current).graph
+    initializeOps = Array.catMaybes $ Array.fromFoldable $ (graph' ^. _nodes) <#> \node ->
+      case Map.lookup (node ^. _nodeId) synthParams of
+        Nothing -> Nothing
+        Just synthNodeParams -> Just $ createSynthNode node synthNodeParams
+    createNodeFuncs = (Tuple.fst <<< Run.extract <<< interpretSynthOp) <$> initializeOps
+  in
+    foldl bind (pure uninitializedSynth) createNodeFuncs
 
 initializeSynthState :: UninitializedAppState -> Effect AppState
 initializeSynthState uninitializedAppState = do
   audioContext <- WebAudio.newAudioContext
-  let bareSynthState = { audioContext : audioContext, synthNodes : Map.empty }
-  newSynthState <- foldM
-                   (flip tryCreateSynthNode)
-                   bareSynthState
-                   ((uninitializedAppState ^. _current).graph ^. _nodes)
+  let
+    bareSynthState = { audioContext : audioContext, synthNodeStates : Map.empty }
+    uninitializedSynth = { synthParams : (uninitializedAppState ^. _current).synthParams
+                         , synthState : bareSynthState
+                         }
+  synth <- initializeSynthNodes uninitializedAppState uninitializedSynth
   analyserBuffer <- createUint8Buffer defaultFrequencyBinCount
   pure $ uninitializedAppState
          # _current .~ AppStateCurrent
@@ -1244,20 +1268,19 @@ initializeSynthState uninitializedAppState = do
                        , boundingRect : (uninitializedAppState ^. _current).boundingRect
                        , graphOrigin : (uninitializedAppState ^. _current).graphOrigin
                        , zoom : (uninitializedAppState ^. _current).zoom
-                       , synthState : newSynthState
-                       , analyserBuffer : analyserBuffer
-                       , analyserArray : []
+                       , synth : synth
                        }
 
 toUninitializedAppState :: AppState -> Effect UninitializedAppState
 toUninitializedAppState state = do
-  WebAudio.close (state ^. _synthState).audioContext
+  WebAudio.close (state ^. _synth).synthState.audioContext
   pure $ state # _current .~ { graph : state ^. _graph
                              , drawingEdges : state ^. _drawingEdges
                              , hoveredElementId : state ^. _hoveredElementId
                              , boundingRect : state ^. _boundingRect
                              , graphOrigin : state ^. _graphOrigin
                              , zoom : state ^. _zoom
+                             , synthParams : (state ^. _synth).synthParams
                              }
 
 modifyM :: (AppState -> Effect AppState) -> H.HalogenM AppState Action Slots Message Aff Unit
