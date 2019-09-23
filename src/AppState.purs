@@ -7,7 +7,6 @@ import Control.Alt ((<|>))
 import Data.Bifunctor (lmap)
 import Data.Collapsable (class Collapsable)
 import Data.Array as Array
-import Data.Generic.Rep (class Generic)
 import Data.Group (class Group)
 import Data.Lens (Lens', Traversal', lens, traversed, (^.), (.~), (%~))
 import Data.Lens.At (at)
@@ -26,17 +25,15 @@ import Effect.Console as Console
 import Foreign (Foreign, unsafeToForeign)
 import Foreign as Foreign
 import Foreign.Class (class Encode, class Decode, decode)
-import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
 import Foreign.Unit (ForeignUnit)
 import Point2D (Point2D)
 import Prim.Row (class Cons)
 import Run (Run(..), FProxy, Step(..))
 import Run as Run
 import Web.HTML.HTMLElement as WHE
-import Workflow.Core (NodeId, EdgeId, _nodes, _source, _target)
+import Workflow.Core (Graph, Edge, NodeId, EdgeId, _nodes, _source, _target, _pos)
 import Workflow.Synth (Synth, SynthParams)
 import Workflow.Synth.SynthOp (_synthOp, SYNTHOP, SynthOpF, interpretSynthOp, handleUIGraphOpAsSynthUpdate, invertSynthOp, showSynthOp, encodeSynthOpF, collapseSynthOp)
-import Workflow.UIGraph.Types (UIEdge, UIGraph, _pos)
 
 
 appStateVersion :: String
@@ -68,11 +65,7 @@ toPageSpace boundingRect zoom (GraphSpacePos graphPos) =
                    , y : (graphPos.y + boundingRect.top + graphOrigin.y) / zoom
                    }
 
-type Edge = { source :: NodeId
-            , target :: NodeId
-            }
-
-edgeIdStr :: UIEdge -> String
+edgeIdStr :: Edge -> String
 edgeIdStr edge = show (edge ^. _source) <> "_" <> show (edge ^. _target)
 
 type DrawingEdge = { source :: NodeId
@@ -102,7 +95,7 @@ data HoveredElementId
 derive instance eqGraphElementId :: Eq HoveredElementId
 
 type AppStateInner =
-  { graph :: UIGraph
+  { graph :: Graph
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId :: Maybe HoveredElementId
   , boundingRect :: WHE.DOMRect
@@ -116,11 +109,11 @@ derive instance newtypeAppStateCurrent :: Newtype AppStateCurrent _
 type AppState = Undoable AppStateCurrent (AppOperation Unit)
 
 -- | Action instance required by Undoable
-instance actUIGraphOpAppState :: Monoid a => ActionM Effect (AppOperation a) AppStateCurrent where
+instance actGraphOpAppState :: Monoid a => ActionM Effect (AppOperation a) AppStateCurrent where
   actM op = interpretAppOperation op
 
 type UninitializedAppStateInner =
-  { graph :: UIGraph
+  { graph :: Graph
   , drawingEdges :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId :: Maybe HoveredElementId
   , boundingRect :: WHE.DOMRect
@@ -135,10 +128,10 @@ type UninitializedAppState =
 _AppStateCurrent :: Lens' AppStateCurrent AppStateInner
 _AppStateCurrent = (lens (\(AppStateCurrent appStateCurrent) -> appStateCurrent) (\_ -> AppStateCurrent))
 
-_graph' :: Lens' AppStateCurrent UIGraph
+_graph' :: Lens' AppStateCurrent Graph
 _graph' = _AppStateCurrent <<< prop (SProxy :: SProxy "graph")
 
-_graph :: Lens' AppState UIGraph
+_graph :: Lens' AppState Graph
 _graph = _current <<< _graph'
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
@@ -173,34 +166,18 @@ _zoom = _current <<< _AppStateCurrent <<< prop (SProxy :: SProxy "zoom")
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)
 
-data GraphOpF next
-  = Asdf next
-  | Fdsa next
-derive instance functorGraphOpF :: Functor GraphOpF
-
-type GRAPHOP = FProxy GraphOpF
-
-_graphOp :: SProxy "graphOp"
-_graphOp = SProxy
-
-derive instance genericGraphOpF :: (Generic a z) => Generic (GraphOpF a) _
-instance encodeGraphOpF' :: (Generic a z, Encode a) => Encode (GraphOpF a) where
-  encode x = x # genericEncode defaultOptions
-instance decodeGraphOpF' :: (Generic a z, Decode a) => Decode (GraphOpF a) where
-  decode x = x # genericDecode defaultOptions
-
-interpretGraphOpToAppStateUpdate :: forall r a. (AppStateCurrent -> Effect AppStateCurrent)
-                                    -> Run (graphOp :: GRAPHOP | r) a
-                                    -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
-interpretGraphOpToAppStateUpdate =
-  Run.runAccumPure
-  (\accumulator -> Run.on
-                   _graphOp
-                   (case _ of
-                       Asdf next -> Loop $ Tuple accumulator next
-                       Fdsa next -> Loop $ Tuple accumulator next)
-                   Done)
-  (\accumulator a -> Tuple accumulator a)
+--interpretGraphOpToAppStateUpdate :: forall r a. (AppStateCurrent -> Effect AppStateCurrent)
+--                                    -> Run (graphOp :: GRAPHOP | r) a
+--                                    -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
+--interpretGraphOpToAppStateUpdate =
+--  Run.runAccumPure
+--  (\accumulator -> Run.on
+--                   _graphOp
+--                   (case _ of
+--                       Asdf next -> Loop $ Tuple accumulator next
+--                       Fdsa next -> Loop $ Tuple accumulator next)
+--                   Done)
+--  (\accumulator a -> Tuple accumulator a)
 
 interpretUIGraphOpToAppStateUpdate :: forall r a. Run (uiGraphOp :: UIGRAPHOP | r) a
                                       -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
@@ -230,7 +207,7 @@ interpretUIGraphOpToAppStateUpdate =
   (\accumulator a -> Tuple accumulator a)
   pure
 
-type AppOperationRow = (uiGraphOp :: UIGRAPHOP, graphOp :: GRAPHOP, synthOp :: SYNTHOP)
+type AppOperationRow = (uiGraphOp :: UIGRAPHOP, synthOp :: SYNTHOP)--, graphOp :: GRAPHOP)
 
 newtype AppOperation a = AppOperation (Run AppOperationRow a)
 
@@ -247,7 +224,7 @@ interpretAppOperation (AppOperation op) =
     smoosh (Tuple f g) = \appState -> f appState >>= g
   in
     interpretUIGraphOpToAppStateUpdate op              # map fst
-    # interpretGraphOpToAppStateUpdate pure            # map smoosh
+    --# interpretGraphOpToAppStateUpdate pure            # map smoosh
     # interpretSynthOp # (map (lmap (overM _synth')) >>> map smoosh)
     # Run.extract
 
@@ -257,9 +234,9 @@ instance showAppOperation :: Show (AppOperation a) where
       (\accumulator -> Run.match
         { uiGraphOp : Loop <<< lmap (append accumulator) <<< showUIGraphOp
         , synthOp : Loop <<< lmap (append accumulator) <<< showSynthOp
-        , graphOp : case _ of
-          Asdf next -> Loop $ Tuple accumulator next
-          Fdsa next -> Loop $ Tuple accumulator next
+        --, graphOp : case _ of
+        --  Asdf next -> Loop $ Tuple accumulator next
+        --  Fdsa next -> Loop $ Tuple accumulator next
         })
       (\accumulator a -> accumulator)
       "")
@@ -275,7 +252,7 @@ instance groupAppOperation :: Monoid a => Group (AppOperation a) where
     inverseOp = op # (Run.interpret (Run.match
       { uiGraphOp : invertUIGraphOp >>> Run.lift _uiGraphOp
       , synthOp : invertSynthOp >>> Run.lift _synthOp
-      , graphOp : \asdf -> Run.lift _graphOp asdf
+      --, graphOp : \asdf -> Run.lift _graphOp asdf
       }))
 
 -- | Collapsable instance required by Undoable
@@ -314,17 +291,17 @@ encodeAppOperation (AppOperation op) =
     (\accumulator -> Run.match
       { uiGraphOp : \uiGraphOp ->
          let
-           Tuple encodedUIGraphOp next = encodeUIGraphOpF uiGraphOp
+           Tuple encodedGraphOp next = encodeUIGraphOpF uiGraphOp
          in
-           Loop $ Tuple (accumulator <> [encodedUIGraphOp]) next
+           Loop $ Tuple (accumulator <> [encodedGraphOp]) next
       , synthOp : \synthOp ->
          let
            Tuple encodedSynthOp next = encodeSynthOpF synthOp
          in
           Loop $ Tuple (accumulator <> [encodedSynthOp]) next
-      , graphOp : case _ of
-        Asdf next -> Loop $ Tuple accumulator next
-        Fdsa next -> Loop $ Tuple accumulator next
+      --, graphOp : case _ of
+      --  Asdf next -> Loop $ Tuple accumulator next
+      --  Fdsa next -> Loop $ Tuple accumulator next
       })
     (\accumulator a -> accumulator)
     [])
@@ -336,9 +313,9 @@ decodeAppOperation foreignOpArray =
     decodeUIGraphOp = map (Run.lift _uiGraphOp) <<< (decode :: Foreign -> Foreign.F (UIGraphOpF ForeignUnit))
     decodeSynthOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
     decodeSynthOp = map (Run.lift _synthOp) <<< (decode :: Foreign -> Foreign.F (SynthOpF ForeignUnit))
-    decodeGraphOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
-    decodeGraphOp = map (Run.lift _graphOp) <<< (decode :: Foreign -> Foreign.F (GraphOpF ForeignUnit))
-    tryDecode op = decodeUIGraphOp op <|> decodeSynthOp op <|> decodeGraphOp op
+    --decodeGraphOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
+    --decodeGraphOp = map (Run.lift _graphOp) <<< (decode :: Foreign -> Foreign.F (GraphOpF ForeignUnit))
+    tryDecode op = decodeUIGraphOp op <|> decodeSynthOp op-- <|> decodeGraphOp op
   in do
     arrayForeign <- Foreign.readArray foreignOpArray
     decodedOperations <- traverse tryDecode arrayForeign

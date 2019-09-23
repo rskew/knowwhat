@@ -19,7 +19,7 @@ import Halogen.Query.EventSource as ES
 import Web.Event.Event as WE
 import Web.HTML as WH
 import Web.HTML.Window as WHW
-import Workflow.UIGraph.Types (UIGraph)
+import Workflow.Core (Graph)
 
 data PanePos = LeftPane | RightPane
 derive instance ordPanePos :: Ord PanePos
@@ -29,7 +29,7 @@ data PaneConfiguration = SinglePane | DoublePane
 
 type State = { configuration :: PaneConfiguration
              , windowShape :: Shape
-             , demoGraph :: UIGraph
+             , demoGraph :: Graph
              , audioContext :: WebAudio.AudioContext
              }
 
@@ -43,7 +43,7 @@ data Action
 data Query a = ResizeWindow WE.Event a
 
 type Input = { windowShape :: Shape
-             , demoGraph :: UIGraph
+             , demoGraph :: Graph
              , audioContext :: WebAudio.AudioContext
              }
 

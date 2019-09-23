@@ -26,9 +26,8 @@ import Foreign.Object (Object)
 import Foreign.Unit (ForeignUnit, toForeignUnit, fromForeignUnit)
 import Point2D (Point2D)
 import Web.HTML.HTMLElement as WHE
-import Workflow.Core (EdgeId)
+import Workflow.Core (EdgeId, Graph, ForeignNodeId, ForeignEdgeId(..), toForeignMap, fromForeignMap, parseUUIDEither)
 import Workflow.Synth (SynthParams)
-import Workflow.UIGraph.Types (UIGraph, ForeignNodeId, ForeignEdgeId(..), toForeignMap, fromForeignMap, parseUUIDEither)
 
 
 -- | A whole bunch of boilerplate to use generic JSON serialisation/deserialisation
@@ -71,7 +70,7 @@ instance decodeForeignPos :: Decode ForeignPos where
   decode x = genericDecode defaultOptions x
 
 type ForeignAppStateInner =
-  { graph :: UIGraph
+  { graph :: Graph
   , drawingEdges :: Object ForeignDrawingEdge
   , hoveredElementId :: Maybe ForeignGraphElementId
   , boundingRect :: WHE.DOMRect

@@ -64,11 +64,11 @@ import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
-import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
+import Workflow.Core (Graph, Node, Edge, Focus(..), _pos, _nodeText, _edgeText, _focus, EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target)
+import Workflow.Graph (freshNode, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
 import Workflow.Synth (FilterState_, Synth, SynthNodeParams(..), SynthNodeState(..), SynthParameter(..), SynthParams(..), defaultFrequencyBinCount, freshSynthNodeParams, parseSynthNodeType)
 import Workflow.Synth.SynthOp (createSynthNode, deleteSynthNode, updateSynthParam, interpretSynthOp)
-import Workflow.UIGraph (freshUINode, graphTitle)
-import Workflow.UIGraph.Types (UIGraph, UINode, UIEdge, Focus(..), _pos, _nodeText, _edgeText, _focus)
+import Workflow.UIGraph (graphTitle)
 import Workflow.UIGraph.UIGraphOp (disconnectNodesOp, deleteNodeOp, connectNodesOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
@@ -148,7 +148,7 @@ filterTextBoxOffset = { x : 0.0
                       }
 
 type Input = { boundingRect :: WHE.DOMRect
-             , graph :: UIGraph
+             , graph :: Graph
              , audioContext :: WebAudio.AudioContext
              }
 
@@ -182,9 +182,9 @@ data Action
   | NodeTextInput NodeId SVGContentEditable.Message
   | EdgeTextInput EdgeId SVGContentEditable.Message
   | AppCreateNode ME.MouseEvent
-  | AppDeleteNode UINode
-  | AppCreateEdge UINode UINode
-  | AppDeleteEdge UINode UINode
+  | AppDeleteNode Node
+  | AppCreateEdge Node Node
+  | AppDeleteEdge Node Node
   | FocusOn Focus
   | DeleteFocus
   | Hover (Maybe HoveredElementId)
@@ -370,7 +370,7 @@ graph =
               ]
             ]
 
-  renderGraphNode :: AppState -> UINode -> H.ComponentHTML Action Slots Aff
+  renderGraphNode :: AppState -> Node -> H.ComponentHTML Action Slots Aff
   renderGraphNode state node =
     let
       hoveredOverBorder = (state ^. _hoveredElementId) == (Just $ NodeBorderId $ node ^. _nodeId)
@@ -659,7 +659,7 @@ graph =
       [ SA.transform [ SVGT.Translate (node ^. _pos).x (node ^. _pos).y ] ]
       nodeHTML
 
-  renderEdge :: AppState -> UIEdge -> Maybe (Tuple (H.ComponentHTML Action Slots Aff) (Maybe (H.ComponentHTML Action Slots Aff)))
+  renderEdge :: AppState -> Edge -> Maybe (Tuple (H.ComponentHTML Action Slots Aff) (Maybe (H.ComponentHTML Action Slots Aff)))
   renderEdge state edge = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
@@ -727,7 +727,7 @@ graph =
        ]
       )
 
-  renderEdgeBorder :: AppState -> UIEdge -> Maybe (H.ComponentHTML Action Slots Aff)
+  renderEdgeBorder :: AppState -> Edge -> Maybe (H.ComponentHTML Action Slots Aff)
   renderEdgeBorder state edge = do
     sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
     targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
@@ -973,7 +973,7 @@ graph =
       H.unsubscribe subscriptionId
 
     AppCreateNode mouseEvent -> do
-      newNode <- H.liftEffect freshUINode
+      newNode <- H.liftEffect freshNode
       state <- H.get
       let
         GraphSpacePos newPos = mouseEventPosition mouseEvent
@@ -1222,7 +1222,7 @@ euclideanDistance (GraphSpacePos pos1) (GraphSpacePos pos2) =
   $ (Math.pow (pos1.x - pos2.x) 2.0)
   + (Math.pow (pos1.y - pos2.y) 2.0)
 
-drawingEdgeWithinNodeHalo :: DrawingEdge -> UINode -> Boolean
+drawingEdgeWithinNodeHalo :: DrawingEdge -> Node -> Boolean
 drawingEdgeWithinNodeHalo drawingEdgeState' node =
   haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
 
@@ -1289,5 +1289,5 @@ modifyM op = do
   updatedState <- H.liftEffect $ op state
   H.put updatedState
 
-edgeTextFieldIdStr :: UIEdge -> String
+edgeTextFieldIdStr :: Edge -> String
 edgeTextFieldIdStr edge = edgeIdStr edge <> "textField"

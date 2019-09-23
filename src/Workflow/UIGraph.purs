@@ -4,10 +4,8 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Point2D (Point2D)
-import Data.Array (sortWith, (!!), null)
 import Data.Array as Array
-import Data.Foldable (length, class Foldable, maximumBy, minimumBy, elem, foldr)
-import Data.Function (on)
+import Data.Foldable (minimumBy, elem, foldr)
 import Data.Lens (view, (^.), (.~), (%~), toListOf, traversed)
 import Data.List as List
 import Data.Map as Map
@@ -16,45 +14,15 @@ import Data.Set (Set)
 import Data.Set as Set
 import Data.String (Pattern(..))
 import Data.String as String
-import Data.UUID (genUUID)
-import Effect (Effect)
 import Math as Math
-import Workflow.Core (EdgeId, NodeId, _edgeId, _nodeId, _isDual, _nodes, _source, _subgraph, _target, allEdges, deleteEdgeId, deleteNode, glue, insertEdge, insertNode, lookupChildren, lookupCoparents, lookupEdgesBetweenGraphs, lookupIncomingEdges, lookupNode, lookupOutgoingEdges, lookupParents, lookupSiblings, unglue, withDual)
-import Workflow.UIGraph.Types (UIGraph(..), UINode(..), UIEdge(..), Focus(..), _focus, _highlighted, _pos, _x, _y, _nodeText)
-
-
-freshUIEdge :: EdgeId -> UIEdge
-freshUIEdge edgeId = UIEdge
-                     { id : edgeId
-                     , text : ""
-                     , isValid : true
-                     }
-
-freshUINode :: Effect UINode
-freshUINode = genUUID >>= \id -> pure $
-              UINode
-              { id : id
-              , children : Map.empty
-              , parents : Map.empty
-              , subgraph : emptyUIGraph
-              , position : { x : 0.0, y : 0.0 }
-              , text : ""
-              , isValid : true
-              }
-
-emptyUIGraph :: UIGraph
-emptyUIGraph = UIGraph
-  { nodes : Map.empty
-  , isDual : false
-  , focus : NoFocus
-  , highlighted : Set.empty
-  }
+import Workflow.Core (Graph, Node, Edge, NodeId, Focus(..), _focus, _nodeId, _highlighted, _edgeId, _nodes, _source, _target, _subgraph, _nodeText, _pos)
+import Workflow.Graph (insertNode, insertEdge, deleteEdgeId, lookupNode, lookupParents, lookupChildren, deleteNode, glue, unglue, allEdges, lookupEdgesBetweenGraphs)
 
 
 ------
 -- Focusing
 
-removeFocus :: UIGraph -> UIGraph
+removeFocus :: Graph -> Graph
 removeFocus graph =
   case graph ^. _focus of
     NoFocus -> graph
@@ -76,7 +44,7 @@ removeFocus graph =
             # _highlighted %~ Set.delete (focusNode ^. _nodeId)
             # deleteNode focusNode
 
-edgeInFocusGroup :: UIGraph -> UIEdge -> Boolean
+edgeInFocusGroup :: Graph -> Edge -> Boolean
 edgeInFocusGroup graph edge =
   case graph ^. _focus of
     FocusEdge _ focusGroup -> elem (edge ^. _edgeId) focusGroup
@@ -86,17 +54,17 @@ edgeInFocusGroup graph edge =
 ------
 -- Highlighting
 
-highlightFocus :: UIGraph -> UIGraph
+highlightFocus :: Graph -> Graph
 highlightFocus graph = case graph ^. _focus of
   FocusNode nodeId -> graph # _highlighted %~ Set.insert nodeId
   _ -> graph
 
-unHighlightFocus :: UIGraph -> UIGraph
+unHighlightFocus :: Graph -> Graph
 unHighlightFocus graph = case graph ^. _focus of
   FocusNode nodeId -> graph # _highlighted %~ Set.delete nodeId
   _ -> graph
 
-toggleHighlightFocus :: UIGraph -> UIGraph
+toggleHighlightFocus :: Graph -> Graph
 toggleHighlightFocus graph = case graph ^. _focus of
   FocusNode nodeId ->
     case Set.member nodeId (graph ^. _highlighted) of
@@ -106,188 +74,188 @@ toggleHighlightFocus graph = case graph ^. _focus of
   _ -> graph
 
 
---------
----- Traversal
-
--- | Move the focus to the element 'above', using the graph connectivity for
--- | direction rather than spatial direction.
--- |
--- | case focus of:
--- |   nothing in focus: no-op
--- |   edge in focus: move focus to source node
--- |   node in focus:
--- |     move the focus to on of the incident edges, but keep track of all
--- |     the other incident edges, which can be cycled through by left/right
--- |     motion to select the intended edge.
-traverseUp :: UIGraph -> UIGraph
-traverseUp graph =
-  case graph ^. _focus of
-    NoFocus -> graph
-    FocusEdge edgeId _ -> graph # _focus .~ FocusNode edgeId.source
-    FocusNode nodeId -> fromMaybe graph do
-      node <- Map.lookup nodeId $ graph ^. _nodes
-      let upEdges' = Array.fromFoldable $ lookupIncomingEdges graph node
-      newFocusEdge <- upEdges' !! 0
-      -- If the focus group has a single element then collapse the focus
-      let upEdges = if length upEdges' == 1 then [] else upEdges'
-      let newFocus = FocusEdge (newFocusEdge ^. _edgeId) (view _edgeId <$> upEdges)
-      pure $ graph # _focus .~ newFocus
-
--- | Dual of traverseUp, in the sense of flipping the direction
--- | of all the edges.
-traverseDown :: UIGraph -> UIGraph
-traverseDown = withDual traverseUp
-
-data DirectionLR = MoveLeft | MoveRight
-
-edgePosition :: UIGraph -> UIEdge -> Point2D
-edgePosition graph edge =
-  fromMaybe { x : 0.0, y : 0.0 } $ do
-    source <- lookupNode graph (edge ^. _source)
-    target <- lookupNode graph (edge ^. _target)
-    pure $ { x : ((source ^. _pos <<< _x) + (target ^. _pos <<< _x)) / 2.0
-           , y : ((source ^. _pos <<< _y) + (target ^. _pos <<< _y)) / 2.0
-           }
-
--- | The next edge group from an edge is the edges that share a source or target.
-nextEdgeGroup :: DirectionLR -> UIGraph -> EdgeId -> Array UIEdge
-nextEdgeGroup dir graph edgeId =
-  fromMaybe [] $ do
-    source <- lookupNode graph edgeId.source
-    target <- lookupNode graph edgeId.target
-    pure
-      $ sortWith (edgePosition graph)
-      $ Array.fromFoldable
-      $ lookupIncomingEdges graph target
-      <> lookupOutgoingEdges graph source
-
-nextInGroup :: forall a. Eq a => DirectionLR -> a -> Array a -> a
-nextInGroup MoveLeft x xs = fromMaybe x $
-  Array.elemIndex x xs >>= \xIndex -> xs !! (xIndex + 1) `mod` length xs
-nextInGroup MoveRight x xs = fromMaybe x $
-  Array.elemIndex x xs >>= \xIndex -> xs !! (xIndex - 1) `mod` length xs
-
--- | Pseudo code for functionality
--- | Aim for code to be close to the pseudcode
-
-
--- | Changing the focus to the node or edge that is spatially on the right/left.
-
--- | case current focus:
--- |   Nothing in focus: no-op
--- |   Node in focus:
--- |     get the nodes that share a parent or child, and pick the node
--- |     on the left or right (depending on `dir` parameter) that is closest
--- |   Edge:
--- |     if there is an edge set in focus, then keep cycling through these,
--- |     otherwise find the edges between the target node's parents and the source
--- |       node's children, and pick the closest edge on the left or right
--- |       (depending on the input `dir` parameter) according to the edge's centroid.
-changeFocusLeftRight :: DirectionLR -> UIGraph -> UIGraph
-changeFocusLeftRight dir graph =
-  case graph ^. _focus of
-    NoFocus -> graph
-    FocusNode nodeId -> case lookupNode graph nodeId of
-      Nothing -> graph
-      Just node ->
-        let
-          siblingsAndCoparents = Array.fromFoldable $ lookupSiblings graph node <> lookupCoparents graph node
-          viewX = view $ _pos <<< _x
-          sortedByX = sortWith viewX siblingsAndCoparents
-          nextNode = fromMaybe node $ do
-            nextNodeIndex <- case dir of
-              MoveLeft -> sortedByX # Array.findLastIndex (node # (>) `on` viewX)
-              MoveRight -> sortedByX # Array.findIndex (node # (<=) `on` viewX)
-            sortedByX !! nextNodeIndex
-        in
-          graph # _focus .~ FocusNode (nextNode ^. _nodeId)
-    FocusEdge edgeId focusGroup ->
-      let
-        newFocus = if not $ null focusGroup
-          then -- There is an active focusGroup, keep cycling though
-            let
-              nextEdgeId = nextInGroup dir edgeId focusGroup
-            in
-              FocusEdge nextEdgeId focusGroup
-          else -- Make a new focus group
-            let
-              newGroup' = view _edgeId <$> nextEdgeGroup dir graph edgeId
-              newFocusEdgeId = fromMaybe edgeId $ newGroup' !! 0
-              -- If the focus group has a single element then collapse the focus
-              newGroup = if length newGroup' == 1 then [] else newGroup'
-            in
-            FocusEdge newFocusEdgeId newGroup
-      in
-        graph # _focus .~ newFocus
-
-traverseLeft :: UIGraph -> UIGraph
-traverseLeft = changeFocusLeftRight MoveLeft
-
-traverseRight :: UIGraph -> UIGraph
-traverseRight = changeFocusLeftRight MoveRight
-
-
-------
--- Positioning nodes
+----------
+------ Traversal
 --
-
-rightmostNode :: forall f. Foldable f =>
-                 f UINode -> Maybe UINode
-rightmostNode = maximumBy $ comparing $ view $ _pos <<< _x
-
-newChildPosition :: Point2D -> UINode -> UIGraph -> Point2D
-newChildPosition offset node graph =
-  let
-    defaultChildPos = { x: node ^. _pos <<< _x
-                      , y: (node ^. _pos <<< _y) + offset.y
-                      }
-  in
-    fromMaybe defaultChildPos do
-      rightmostChild <- rightmostNode $ lookupChildren graph node
-      pure { x: (rightmostChild ^. _pos <<< _x) + offset.x
-           , y: (rightmostChild ^. _pos <<< _y)
-           }
-
-newParentPosition :: Point2D -> UINode -> UIGraph -> Point2D
-newParentPosition offset node graph =
-  graph
-  # _isDual %~ not
-  # newChildPosition { x : offset.x, y : -offset.y } node
-
-newChildOfFocus :: Point2D -> UIGraph -> Effect UIGraph
-newChildOfFocus offset graph = case graph ^. _focus of
-  FocusNode nodeId -> case lookupNode graph nodeId of
-    Nothing -> pure graph
-    Just node ->
-      let
-        newChildPos = newChildPosition offset node graph
-        newChildParents = Set.fromFoldable $ [node ^. _nodeId]
-      in do
-        newChildNode' <- freshUINode
-        let
-          newChildNode = newChildNode' # _pos .~ newChildPos
-          newEdge = freshUIEdge { source : nodeId, target : newChildNode ^. _nodeId }
-        pure $ graph
-             # insertNode newChildNode
-             # insertEdge newEdge
-             # _focus .~ FocusNode (newChildNode ^. _nodeId)
-  _ -> pure graph
-
-newParentOfFocus :: Point2D -> UIGraph -> Effect UIGraph
-newParentOfFocus offset graph =
-  graph
-  # _isDual %~ not
-  # newChildOfFocus { x : offset.x, y : -offset.y }
+---- | Move the focus to the element 'above', using the graph connectivity for
+---- | direction rather than spatial direction.
+---- |
+---- | case focus of:
+---- |   nothing in focus: no-op
+---- |   edge in focus: move focus to source node
+---- |   node in focus:
+---- |     move the focus to on of the incident edges, but keep track of all
+---- |     the other incident edges, which can be cycled through by left/right
+---- |     motion to select the intended edge.
+--traverseUp :: Graph -> Graph
+--traverseUp graph =
+--  case graph ^. _focus of
+--    NoFocus -> graph
+--    FocusEdge edgeId _ -> graph # _focus .~ FocusNode edgeId.source
+--    FocusNode nodeId -> fromMaybe graph do
+--      node <- Map.lookup nodeId $ graph ^. _nodes
+--      let upEdges' = Array.fromFoldable $ lookupIncomingEdges graph node
+--      newFocusEdge <- upEdges' !! 0
+--      -- If the focus group has a single element then collapse the focus
+--      let upEdges = if length upEdges' == 1 then [] else upEdges'
+--      let newFocus = FocusEdge (newFocusEdge ^. _edgeId) (view _edgeId <$> upEdges)
+--      pure $ graph # _focus .~ newFocus
+--
+---- | Dual of traverseUp, in the sense of flipping the direction
+---- | of all the edges.
+--traverseDown :: Graph -> Graph
+--traverseDown = withDual traverseUp
+--
+--data DirectionLR = MoveLeft | MoveRight
+--
+--edgePosition :: Graph -> Edge -> Point2D
+--edgePosition graph edge =
+--  fromMaybe { x : 0.0, y : 0.0 } $ do
+--    source <- lookupNode graph (edge ^. _source)
+--    target <- lookupNode graph (edge ^. _target)
+--    pure $ { x : ((source ^. _pos <<< _x) + (target ^. _pos <<< _x)) / 2.0
+--           , y : ((source ^. _pos <<< _y) + (target ^. _pos <<< _y)) / 2.0
+--           }
+--
+---- | The next edge group from an edge is the edges that share a source or target.
+--nextEdgeGroup :: DirectionLR -> Graph -> EdgeId -> Array Edge
+--nextEdgeGroup dir graph edgeId =
+--  fromMaybe [] $ do
+--    source <- lookupNode graph edgeId.source
+--    target <- lookupNode graph edgeId.target
+--    pure
+--      $ sortWith (edgePosition graph)
+--      $ Array.fromFoldable
+--      $ lookupIncomingEdges graph target
+--      <> lookupOutgoingEdges graph source
+--
+--nextInGroup :: forall a. Eq a => DirectionLR -> a -> Array a -> a
+--nextInGroup MoveLeft x xs = fromMaybe x $
+--  Array.elemIndex x xs >>= \xIndex -> xs !! (xIndex + 1) `mod` length xs
+--nextInGroup MoveRight x xs = fromMaybe x $
+--  Array.elemIndex x xs >>= \xIndex -> xs !! (xIndex - 1) `mod` length xs
+--
+---- | Pseudo code for functionality
+---- | Aim for code to be close to the pseudcode
+--
+--
+---- | Changing the focus to the node or edge that is spatially on the right/left.
+--
+---- | case current focus:
+---- |   Nothing in focus: no-op
+---- |   Node in focus:
+---- |     get the nodes that share a parent or child, and pick the node
+---- |     on the left or right (depending on `dir` parameter) that is closest
+---- |   Edge:
+---- |     if there is an edge set in focus, then keep cycling through these,
+---- |     otherwise find the edges between the target node's parents and the source
+---- |       node's children, and pick the closest edge on the left or right
+---- |       (depending on the input `dir` parameter) according to the edge's centroid.
+--changeFocusLeftRight :: DirectionLR -> Graph -> Graph
+--changeFocusLeftRight dir graph =
+--  case graph ^. _focus of
+--    NoFocus -> graph
+--    FocusNode nodeId -> case lookupNode graph nodeId of
+--      Nothing -> graph
+--      Just node ->
+--        let
+--          siblingsAndCoparents = Array.fromFoldable $ lookupSiblings graph node <> lookupCoparents graph node
+--          viewX = view $ _pos <<< _x
+--          sortedByX = sortWith viewX siblingsAndCoparents
+--          nextNode = fromMaybe node $ do
+--            nextNodeIndex <- case dir of
+--              MoveLeft -> sortedByX # Array.findLastIndex (node # (>) `on` viewX)
+--              MoveRight -> sortedByX # Array.findIndex (node # (<=) `on` viewX)
+--            sortedByX !! nextNodeIndex
+--        in
+--          graph # _focus .~ FocusNode (nextNode ^. _nodeId)
+--    FocusEdge edgeId focusGroup ->
+--      let
+--        newFocus = if not $ null focusGroup
+--          then -- There is an active focusGroup, keep cycling though
+--            let
+--              nextEdgeId = nextInGroup dir edgeId focusGroup
+--            in
+--              FocusEdge nextEdgeId focusGroup
+--          else -- Make a new focus group
+--            let
+--              newGroup' = view _edgeId <$> nextEdgeGroup dir graph edgeId
+--              newFocusEdgeId = fromMaybe edgeId $ newGroup' !! 0
+--              -- If the focus group has a single element then collapse the focus
+--              newGroup = if length newGroup' == 1 then [] else newGroup'
+--            in
+--            FocusEdge newFocusEdgeId newGroup
+--      in
+--        graph # _focus .~ newFocus
+--
+--traverseLeft :: Graph -> Graph
+--traverseLeft = changeFocusLeftRight MoveLeft
+--
+--traverseRight :: Graph -> Graph
+--traverseRight = changeFocusLeftRight MoveRight
+--
+--
+--------
+---- Positioning nodes
+----
+--
+--rightmostNode :: forall f. Foldable f =>
+--                 f Node -> Maybe Node
+--rightmostNode = maximumBy $ comparing $ view $ _pos <<< _x
+--
+--newChildPosition :: Point2D -> Node -> Graph -> Point2D
+--newChildPosition offset node graph =
+--  let
+--    defaultChildPos = { x: node ^. _pos <<< _x
+--                      , y: (node ^. _pos <<< _y) + offset.y
+--                      }
+--  in
+--    fromMaybe defaultChildPos do
+--      rightmostChild <- rightmostNode $ lookupChildren graph node
+--      pure { x: (rightmostChild ^. _pos <<< _x) + offset.x
+--           , y: (rightmostChild ^. _pos <<< _y)
+--           }
+--
+--newParentPosition :: Point2D -> Node -> Graph -> Point2D
+--newParentPosition offset node graph =
+--  graph
+--  # _isDual %~ not
+--  # newChildPosition { x : offset.x, y : -offset.y } node
+--
+--newChildOfFocus :: Point2D -> Graph -> Effect Graph
+--newChildOfFocus offset graph = case graph ^. _focus of
+--  FocusNode nodeId -> case lookupNode graph nodeId of
+--    Nothing -> pure graph
+--    Just node ->
+--      let
+--        newChildPos = newChildPosition offset node graph
+--        newChildParents = Set.fromFoldable $ [node ^. _nodeId]
+--      in do
+--        newChildNode' <- freshNode
+--        let
+--          newChildNode = newChildNode' # _pos .~ newChildPos
+--          newEdge = freshEdge { source : nodeId, target : newChildNode ^. _nodeId }
+--        pure $ graph
+--             # insertNode newChildNode
+--             # insertEdge newEdge
+--             # _focus .~ FocusNode (newChildNode ^. _nodeId)
+--  _ -> pure graph
+--
+--newParentOfFocus :: Point2D -> Graph -> Effect Graph
+--newParentOfFocus offset graph =
+--  graph
+--  # _isDual %~ not
+--  # newChildOfFocus { x : offset.x, y : -offset.y }
 
 
 ------
 -- Subgraph collapse/expand
 
--- | Handle UIGraph extensions (i.e. highlighing, focus) for the glue operation
+-- | Handle Graph extensions (i.e. highlighing, focus) for the glue operation
 -- |
 -- | merge highlighted
 -- | take focus from first arg
-glueUI :: UIGraph -> UIGraph -> UIGraph
+glueUI :: Graph -> Graph -> Graph
 glueUI graphA graphB =
   glue graphA graphB
   # _highlighted .~ Set.union (graphA ^. _highlighted) (graphB ^. _highlighted)
@@ -300,7 +268,7 @@ glueUI graphA graphB =
 -- | remove nodes in the childGraph from the parentGraph's highlighted set
 -- | add the highlighted nodes in the childGraph to its highlighted set
 -- TODO: quickcheck test for unglueUI >>> glueUI
-unglueUI :: Set UINode -> UIGraph -> { parentGraph :: UIGraph, childGraph :: UIGraph }
+unglueUI :: Set Node -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
 unglueUI nodes graph =
   let
     unglued = unglue nodes graph
@@ -345,7 +313,7 @@ unglueUI nodes graph =
 -- |   insert the subgraph into the group node
 -- | insert the group node into the non-highlighted graph
 -- |   focus on the group node
-groupHighlighted :: UIGraph -> UIGraph
+groupHighlighted :: Graph -> Graph
 groupHighlighted graph =
   -- | Grab some highlighted node. If there are none, don't do anything.
   case Set.findMin (graph ^. _highlighted) >>= lookupNode graph of
@@ -423,7 +391,7 @@ groupHighlighted graph =
 -- | glue in its subgraph.
 -- TODO: propagate new edges to group node to expanded subgraph
 -- TODO: propagate movement of group node to expanded subgraph
-expandFocus :: UIGraph -> UIGraph
+expandFocus :: Graph -> Graph
 expandFocus graph =
   case graph ^. _focus of
     FocusNode groupNodeId ->
@@ -466,7 +434,7 @@ expandFocus graph =
 --            glued'''
 --    _ -> graph
 
-toggleGroupExpand :: UIGraph -> UIGraph
+toggleGroupExpand :: Graph -> Graph
 toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
   0 -> expandFocus graph
   _ -> groupHighlighted graph
@@ -475,7 +443,7 @@ toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
 ------
 -- Text
 
-graphTitle :: UIGraph -> Maybe String
+graphTitle :: Graph -> Maybe String
 graphTitle graph =
   List.head titles >>= String.stripPrefix titlePattern
   where
@@ -492,9 +460,9 @@ graphTitle graph =
 -- Utilities
 
 -- | Eventually replace with KD tree or something cooler then linear search
-getNearestNeighbor :: Point2D -> UIGraph -> Maybe { nodeId :: NodeId
-                                                  , distance :: Number
-                                                  }
+getNearestNeighbor :: Point2D -> Graph -> Maybe { nodeId :: NodeId
+                                                , distance :: Number
+                                                }
 getNearestNeighbor point graph =
   let
     distanceToPoint node =

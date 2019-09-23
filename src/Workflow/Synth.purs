@@ -32,8 +32,7 @@ import Effect.Ref as Ref
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
 import Foreign.Object (Object)
-import Workflow.Core (NodeId)
-import Workflow.UIGraph.Types (toForeignMap, fromForeignMap, parseUUIDEither, toExceptT)
+import Workflow.Core (NodeId, toForeignMap, fromForeignMap, parseUUIDEither, toExceptT)
 
 updateValueRampTime :: WebAudio.Seconds
 updateValueRampTime = 0.1

@@ -1,60 +1,33 @@
-module Workflow.Core
-       ( NodeId
-       , EdgeId
-       , class Graph
-       , withDual
-       , dualEdge
-       , _isDual
-       , _nodes
-       , _parents
-       , _children
-       , _nodeId
-       , _subgraph
-       , _edgeId
-       , _source
-       , _target
-       , lookupEdge
-       , insertEdge
-       , deleteEdge
-       , deleteEdgeId
-       , modifyEdge
-       , lookupNode
-       , lookupChildren
-       , lookupParents
-       , lookupSiblings
-       , lookupCoparents
-       , lookupIncomingEdges
-       , lookupOutgoingEdges
-       , lookupNodeEdges
-       , allEdges
-       , insertNode
-       , deleteNode
-       , glue
-       , unglue
-       , lookupEdgesBetweenGraphs
-       ) where
+module Workflow.Core where
 
 import Prelude
 
-import Control.Alt ((<|>))
-import Data.Foldable (foldl, foldr, foldMap)
-import Data.Lens (Lens', Traversal', traversed, view, (^.), (^?), (.~), (%~), (?~))
-import Data.Lens.At (at)
+import Control.Monad.Except.Trans (ExceptT, except, withExceptT)
+import Data.Array as Array
+import Data.Either (Either(..), note)
 import Data.Map (Map)
+import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
+import Data.Lens (Lens', Traversal', lens, traversed, (%~))
+import Data.Lens.At (at)
+import Data.Lens.Record (prop)
+import Data.List.NonEmpty (NonEmptyList, singleton)
+import Data.Identity (Identity)
 import Data.Map as Map
+import Data.Maybe (Maybe)
 import Data.Set (Set)
 import Data.Set as Set
-import Data.Maybe (Maybe(..))
-import Data.UUID (UUID)
 import Data.Symbol (SProxy(..))
-import Data.Lens.Record (prop)
-
-
-------
--- Constants
-
-version :: String
-version = "0.0.001"
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
+import Data.UUID (UUID, parseUUID)
+import Data.UUID as UUID
+import Foreign (ForeignError(..))
+import Foreign.Class (class Encode, class Decode)
+import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
+import Foreign.Object (Object)
+import Foreign.Object as Object
+import Point2D (Point2D)
 
 
 ------
@@ -64,15 +37,6 @@ type NodeId = UUID
 
 type EdgeId = { source :: NodeId, target :: NodeId }
 
-class (Ord edge, Ord node) <= Graph graph node edge | graph -> node, graph -> edge, node -> graph, edge -> graph where
-  _isDual :: Lens' graph Boolean
-  _nodes :: Lens' graph (Map NodeId node)
-  _parents :: Lens' node (Map NodeId edge)
-  _children :: Lens' node (Map NodeId edge)
-  _nodeId :: Lens' node NodeId
-  _subgraph :: Lens' node graph
-  _edgeId :: Lens' edge EdgeId
-
 -- | The dual graph is the graph with the edge directions flipped.
 -- | Using the dual representation allows the use of the symmetry of edge flipping
 -- | explicitly.
@@ -80,217 +44,365 @@ class (Ord edge, Ord node) <= Graph graph node edge | graph -> node, graph -> ed
 -- | The lookupEdge, insertEdge and deleteEdge functions respect the
 -- | current view (dual or not dual) of the graph. withDual allows running
 -- | a graph operation temprarily with the dual representation.
-withDual :: forall graph node edge. Graph graph node edge =>
-            (graph -> graph) -> graph -> graph
+withDual :: (Graph -> Graph) -> Graph -> Graph
 withDual op graph =
   graph
   # _isDual %~ not
   # op
   # _isDual %~ not
 
+type EdgeInner =
+  { id :: EdgeId
+  , text :: String
+  , isValid :: Boolean
+  }
+
+newtype Edge = Edge EdgeInner
+
+derive instance eqEdge :: Eq Edge
+
+derive instance ordEdge :: Ord Edge
+
+derive instance genericEdge :: Generic Edge _
+
+instance showEdge :: Show Edge where
+  show (Edge edge) = show edge
+
+type NodeInner =
+  { id :: NodeId
+  , children :: Map NodeId Edge
+  , parents :: Map NodeId Edge
+  , subgraph :: Graph
+  , position :: Point2D
+  , text :: String
+  , isValid :: Boolean
+  }
+
+newtype Node = Node NodeInner
+
+derive instance eqNode :: Eq Node
+
+derive instance ordNode :: Ord Node
+
+derive instance genericNode :: Generic Node _
+
+instance showNode :: Show Node where
+  show (Node node) = show node
+
+data Focus =
+  FocusNode NodeId
+  | FocusEdge EdgeId (Array EdgeId)
+  | NoFocus
+
+derive instance eqFocus :: Eq Focus
+
+derive instance ordFocus :: Ord Focus
+
+derive instance genericFocus :: Generic Focus _
+
+instance showFocus :: Show Focus where
+  show = genericShow
+
+type GraphInner =
+  { nodes :: Map NodeId Node
+  , isDual :: Boolean
+  , focus :: Focus
+  , highlighted :: Set NodeId
+  }
+
+newtype Graph = Graph GraphInner
+
+derive instance eqGraph :: Eq Graph
+
+derive instance ordGraph :: Ord Graph
+
+derive instance genericGraph :: Generic Graph _
+
+instance showGraph :: Show Graph where
+  show (Graph graph) = show graph
+
 
 ------
 -- Lenses
 
-_source :: forall graph node edge. Graph graph node edge =>
-           Lens' edge NodeId
+_source :: Lens' Edge NodeId
 _source = _edgeId <<< prop (SProxy :: SProxy "source")
 
-_target :: forall graph node edge. Graph graph node edge =>
-           Lens' edge NodeId
+_target :: Lens' Edge NodeId
 _target = _edgeId <<< prop (SProxy :: SProxy "target")
 
-_sourceTarget :: forall graph node edge. Graph graph node edge =>
-                 NodeId -> NodeId -> Traversal' graph (Maybe edge)
+_sourceTarget :: NodeId -> NodeId -> Traversal' Graph (Maybe Edge)
 _sourceTarget source target = _nodes <<< at source <<< traversed <<< _children <<< at target
-_targetSource :: forall graph node edge. Graph graph node edge =>
-                 NodeId -> NodeId -> Traversal' graph (Maybe edge)
+
+_targetSource :: NodeId -> NodeId -> Traversal' Graph (Maybe Edge)
 _targetSource source target = _nodes <<< at target <<< traversed <<< _parents <<< at source
+
+_Graph :: Lens' Graph GraphInner
+_Graph = lens (\(Graph g) -> g) (\_ -> Graph)
+
+_Node :: Lens' Node NodeInner
+_Node = lens (\(Node n) -> n) (\_ -> Node)
+
+_Edge :: Lens' Edge EdgeInner
+_Edge = lens (\(Edge e) -> e) (\_ -> Edge)
+
+_isDual :: Lens' Graph Boolean
+_isDual = _Graph <<< prop (SProxy :: SProxy "isDual")
+
+_nodes :: Lens' Graph (Map NodeId Node)
+_nodes = _Graph <<< prop (SProxy :: SProxy "nodes")
+
+_parents :: Lens' Node (Map NodeId Edge)
+_parents = _Node <<< prop (SProxy :: SProxy "parents")
+
+_children :: Lens' Node (Map NodeId Edge)
+_children = _Node <<< prop (SProxy :: SProxy "children")
+
+_nodeId :: Lens' Node NodeId
+_nodeId = _Node <<< prop (SProxy :: SProxy "id")
+
+_subgraph :: Lens' Node Graph
+_subgraph = _Node <<< prop (SProxy :: SProxy "subgraph")
+
+_edgeId :: Lens' Edge EdgeId
+_edgeId = _Edge <<< prop (SProxy :: SProxy "id")
+
+_isValidEdge :: Lens' Edge Boolean
+_isValidEdge = _Edge <<< prop (SProxy :: SProxy "isValid")
+
+_isValidNode :: Lens' Node Boolean
+_isValidNode = _Node <<< prop (SProxy :: SProxy "isValid")
+
+_pos :: Lens' Node Point2D
+_pos = _Node <<< prop (SProxy :: SProxy "position")
+
+_x :: Lens' Point2D Number
+_x = prop (SProxy :: SProxy "x")
+
+_y :: Lens' Point2D Number
+_y = prop (SProxy :: SProxy "y")
+
+_nodeText :: Lens' Node String
+_nodeText = _Node <<< prop (SProxy :: SProxy "text")
+
+_edgeText :: Lens' Edge String
+_edgeText = _Edge <<< prop (SProxy :: SProxy "text")
+
+_focus :: Lens' Graph Focus
+_focus = _Graph <<< prop (SProxy :: SProxy "focus")
+
+_highlighted :: Lens' Graph (Set NodeId)
+_highlighted = _Graph <<< prop (SProxy :: SProxy "highlighted")
 
 
 ------
--- Interface
+-- Serialisation/deserialisation types
 
-lookupNode :: forall graph node edge. Graph graph node edge =>
-              graph -> NodeId -> Maybe node
-lookupNode g nodeId = g ^. _nodes <<< at nodeId
+-- | Since Maps and Sets aren't Generic, need to convert them
 
-insertNode :: forall graph node edge. Graph graph node edge =>
-              node -> graph -> graph
-insertNode node graph =
-  graph
-  # ((_nodes <<< (at (node ^. _nodeId))) ?~ node)
-  # (\graph' -> (foldr insertEdge graph' (lookupNodeEdges graph' node)))
+type ForeignNodeId = String
 
-deleteNode :: forall graph node edge. Graph graph node edge =>
-              node -> graph -> graph
-deleteNode node graph =
-    graph
-    # (\graph' -> foldr deleteEdge graph' $ (node ^. _children) <> (node ^. _parents))
-    # (_nodes <<< at (node ^. _nodeId)) .~ Nothing
+newtype ForeignEdgeId =
+  ForeignEdgeId
+  { source :: ForeignNodeId
+  , target :: ForeignNodeId
+  }
+derive instance genericForeignEdgeId :: Generic ForeignEdgeId _
+instance encodeForeignEdgeId :: Encode ForeignEdgeId where
+  encode = genericEncode defaultOptions
+instance decodeForeignEdgeId :: Decode ForeignEdgeId where
+  decode = genericDecode defaultOptions
 
-dualEdgeId :: EdgeId -> EdgeId
-dualEdgeId edgeId = { source : edgeId.target
-                    , target : edgeId.source
-                    }
+newtype ForeignEdge =
+  ForeignEdge
+  { id :: ForeignEdgeId
+  , text :: String
+  , isValid :: Boolean
+  }
+derive instance genericForeignEdge :: Generic ForeignEdge _
+instance encodeForeignEdge :: Encode ForeignEdge where
+  encode = genericEncode defaultOptions
+instance decodeForeignEdge :: Decode ForeignEdge where
+  decode = genericDecode defaultOptions
 
-dualEdge :: forall graph node edge. Graph graph node edge =>
-            edge -> edge
-dualEdge edge =
-  edge # _edgeId %~ dualEdgeId
+newtype ForeignNode =
+  ForeignNode
+  { id :: ForeignNodeId
+  , children :: Object Edge
+  , parents :: Object Edge
+  , subgraph :: Graph
+  , position :: Point2D
+  , text :: String
+  , isValid :: Boolean
+  }
+derive instance genericForeignNode :: Generic ForeignNode _
+instance encodeForeignNode :: Encode ForeignNode where
+  encode = genericEncode defaultOptions
+instance decodeForeignNode :: Decode ForeignNode where
+  decode = genericDecode defaultOptions
 
-lookupChildren :: forall graph node edge. Graph graph node edge =>
-                  graph -> node -> Set node
-lookupChildren g n =
+data ForeignFocus
+  = ForeignFocusNode ForeignNodeId
+  | ForeignFocusEdge ForeignEdgeId (Array ForeignEdgeId)
+  | ForeignNoFocus
+derive instance genericForeignFocus :: Generic ForeignFocus _
+instance encodeForeignFocus :: Encode ForeignFocus where
+  encode = genericEncode defaultOptions
+instance decodeForeignFocus :: Decode ForeignFocus where
+  decode = genericDecode defaultOptions
+
+newtype ForeignGraph =
+  ForeignGraph
+  { nodes :: Object Node
+  , isDual :: Boolean
+  , focus :: ForeignFocus
+  , highlighted :: Array ForeignNodeId
+  }
+derive instance genericForeignGraph :: Generic ForeignGraph _
+instance encodeForeignGraph :: Encode ForeignGraph where
+  encode x = genericEncode defaultOptions x
+instance decodeForeignGraph :: Decode ForeignGraph where
+  decode x = genericDecode defaultOptions x
+
+
+------
+-- Serialisation
+
+toForeignEdgeId :: EdgeId -> ForeignEdgeId
+toForeignEdgeId edgeId =
+  ForeignEdgeId $
+  { source : UUID.toString edgeId.source
+  , target : UUID.toString edgeId.target
+  }
+
+toForeignEdge :: Edge -> ForeignEdge
+toForeignEdge (Edge edge) =
+  ForeignEdge $
+  edge { id = toForeignEdgeId edge.id }
+
+toForeignMap :: forall a b c. (a -> b) -> (c -> String) -> Map c a -> Object b
+toForeignMap toForeignValue showKey someMap =
   let
-    children = case g ^. _isDual of
-      false -> n ^. _children
-      true -> n ^. _parents
-    childIds = Map.keys children
+    tuples :: Array (Tuple c a)
+    tuples = Map.toUnfoldable someMap
+    foreignTuples = (\(Tuple key value) ->
+                      Tuple (showKey key) (toForeignValue value)) <$> tuples
   in
-    Set.mapMaybe (lookupNode g) $ childIds
+   Object.fromFoldable foreignTuples
 
-lookupParents :: forall graph node edge. Graph graph node edge =>
-                 graph -> node -> Set node
-lookupParents graph node =
+toForeignNode :: Node -> ForeignNode
+toForeignNode (Node node) =
+  ForeignNode $
+  node { id = UUID.toString node.id
+       , children = toForeignMap identity UUID.toString node.children
+       , parents = toForeignMap identity UUID.toString node.parents
+       , subgraph = node.subgraph
+       }
+
+toForeignFocus :: Focus -> ForeignFocus
+toForeignFocus (FocusNode nodeId) = ForeignFocusNode $ UUID.toString nodeId
+toForeignFocus (FocusEdge edgeId edgeIdSet) =
+  ForeignFocusEdge
+  (toForeignEdgeId edgeId)
+  (toForeignEdgeId <$> Array.fromFoldable edgeIdSet)
+toForeignFocus NoFocus = ForeignNoFocus
+
+toForeignGraph :: Graph -> ForeignGraph
+toForeignGraph (Graph graph) =
+  ForeignGraph $
+  graph { nodes = toForeignMap identity UUID.toString graph.nodes
+        , highlighted = UUID.toString <$> Array.fromFoldable graph.highlighted
+        , focus = toForeignFocus graph.focus
+        }
+
+instance encodeEdge :: Encode Edge where
+  encode x = x # toForeignEdge >>> genericEncode defaultOptions
+
+instance encodeNode :: Encode Node where
+  encode x = x # toForeignNode >>> genericEncode defaultOptions
+
+instance encodeGraph :: Encode Graph where
+  encode x = x # toForeignGraph >>> genericEncode defaultOptions
+
+
+------
+-- Deserialisation
+
+fromForeignEdgeId :: ForeignEdgeId -> Either String EdgeId
+fromForeignEdgeId (ForeignEdgeId foreignEdgeId) =
+  note "Failed to convert EdgeId from foreign" do
+  source <- parseUUID foreignEdgeId.source
+  target <- parseUUID foreignEdgeId.target
+  pure $ { source : source
+         , target : target
+         }
+
+fromForeignEdge :: ForeignEdge -> Either String Edge
+fromForeignEdge (ForeignEdge foreignEdge) = do
+  id <- fromForeignEdgeId foreignEdge.id
+  pure $ Edge $ foreignEdge { id = id }
+
+fromForeignMap :: forall a b c s. Ord c =>
+                  (b -> Either s a) -> (String -> Either s c) -> Object b -> Either s (Map c a)
+fromForeignMap fromForeignValue unShowKey someObject =
   let
-    dualG = graph # _isDual %~ not
+    foreignTuples :: Array (Tuple String b)
+    foreignTuples = Object.toUnfoldable someObject
+    tuples = traverse
+             (\(Tuple str foreignValue) -> do
+                 key <- unShowKey str
+                 value <- fromForeignValue foreignValue
+                 pure (Tuple key value))
+             foreignTuples
   in
-    lookupChildren dualG node
+    Map.fromFoldable <$> tuples
 
-lookupParentsOfGroup :: forall graph node edge. Graph graph node edge =>
-                        graph -> Set node -> Set node
-lookupParentsOfGroup graph nodes = foldMap (lookupParents graph) nodes
+parseUUIDEither :: String -> Either String UUID
+parseUUIDEither = parseUUID >>> note "failed to convert UUID from foreign"
 
-lookupChildrenOfGroup :: forall graph node edge. Graph graph node edge =>
-                         graph -> Set node -> Set node
-lookupChildrenOfGroup graph nodes = lookupParentsOfGroup (graph # _isDual %~ not) nodes
+fromForeignNode :: ForeignNode -> Either String Node
+fromForeignNode (ForeignNode foreignNode) = do
+  id <- parseUUIDEither foreignNode.id
+  children <- fromForeignMap pure parseUUIDEither foreignNode.children
+  parents <- fromForeignMap pure parseUUIDEither foreignNode.parents
+  let subgraph = foreignNode.subgraph
+  pure $ Node $
+    foreignNode { id = id
+                , children = children
+                , parents = parents
+                , subgraph = subgraph
+                }
 
-lookupSiblings :: forall graph node edge. Graph graph node edge =>
-                  graph -> node -> Set node
-lookupSiblings graph node = foldMap (lookupChildren graph) $ lookupParents graph node
+fromForeignFocus :: ForeignFocus -> Either String Focus
+fromForeignFocus foreignFocus =
+  case foreignFocus of
+    ForeignNoFocus -> Right NoFocus
+    ForeignFocusNode foreignNodeId ->
+      FocusNode <$> parseUUIDEither foreignNodeId
+    ForeignFocusEdge foreignEdgeId foreignEdgeIdSet -> do
+      edgeId <- fromForeignEdgeId foreignEdgeId
+      edgeIdSet <- traverse fromForeignEdgeId foreignEdgeIdSet
+      pure $ FocusEdge edgeId edgeIdSet
 
-lookupCoparents :: forall graph node edge. Graph graph node edge =>
-             graph -> node -> Set node
-lookupCoparents g n =
-  let
-    dualG = g # _isDual %~ not
-  in
-    lookupSiblings dualG n
+fromForeignGraph :: ForeignGraph -> Either String Graph
+fromForeignGraph (ForeignGraph foreignGraph) = do
+  nodes <- fromForeignMap pure parseUUIDEither foreignGraph.nodes
+  highlighted <- Set.fromFoldable <$> traverse parseUUIDEither foreignGraph.highlighted
+  focus <- fromForeignFocus foreignGraph.focus
+  pure $ Graph $
+    foreignGraph { nodes = nodes
+                 , highlighted = highlighted
+                 , focus = focus
+                 }
 
-lookupEdge :: forall graph node edge. Graph graph node edge =>
-              graph -> EdgeId -> Maybe edge
-lookupEdge graph edgeId =
-  case graph ^. _isDual of
-    false ->              graph ^? _sourceTarget edgeId.source edgeId.target # join
-    true -> dualEdge <$> (graph ^? _sourceTarget edgeId.target edgeId.source # join)
+toExceptT :: forall a. Either String a -> ExceptT (NonEmptyList ForeignError) Identity a
+toExceptT = except >>> withExceptT (singleton <<< ForeignError)
 
-lookupOutgoingEdges :: forall graph node edge. Graph graph node edge =>
-                       graph -> node -> Set edge
-lookupOutgoingEdges graph node =
-  case graph ^. _isDual of
-    false ->              Set.fromFoldable $ Map.values $ node ^. _children
-    true -> dualEdge `Set.map` (Set.fromFoldable $ Map.values $ node ^. _parents)
+instance decodeEdge :: Decode Edge where
+  decode x = x # genericDecode defaultOptions >>= fromForeignEdge >>> toExceptT
 
-lookupIncomingEdges :: forall graph node edge. Graph graph node edge =>
-                       graph -> node -> Set edge
-lookupIncomingEdges graph node =
-  case graph ^. _isDual of
-    false ->              Set.fromFoldable $ Map.values $ node ^. _parents
-    true -> dualEdge `Set.map` (Set.fromFoldable $ Map.values $ node ^. _children)
+instance decodeNode :: Decode Node where
+  decode x = x # genericDecode defaultOptions >>= fromForeignNode >>> toExceptT
 
-lookupNodeEdges :: forall graph node edge. Graph graph node edge =>
-                   graph -> node -> Set edge
-lookupNodeEdges graph node =
-  lookupOutgoingEdges graph node <> lookupIncomingEdges graph node
-
-allEdges :: forall graph node edge. Graph graph node edge =>
-            graph -> Set edge
-allEdges graph =
-  foldl (\edges node -> foldr Set.insert edges (lookupNodeEdges graph node)) Set.empty $ graph ^. _nodes
-
-insertEdge :: forall graph node edge. Graph graph node edge =>
-              edge -> graph -> graph
-insertEdge edge graph =
-  let
-    edge' = if graph ^. _isDual then dualEdge edge else edge
-    edgeId = edge' ^. _edgeId
-  in
-    -- check that source and target both exist in the graph
-    case lookupNode graph edgeId.source <|> lookupNode graph edgeId.target of
-      Nothing -> graph
-      Just _ ->
-        graph
-        # _sourceTarget edgeId.source edgeId.target ?~ edge'
-        # _targetSource edgeId.source edgeId.target ?~ edge'
-
-deleteEdge :: forall graph node edge. Graph graph node edge =>
-              edge -> graph -> graph
-deleteEdge = view _edgeId >>> deleteEdgeId
-
-deleteEdgeId :: forall graph node edge. Graph graph node edge =>
-             EdgeId -> graph -> graph
-deleteEdgeId edgeId graph =
-  if graph ^. _isDual
-  then graph
-       # _sourceTarget edgeId.target edgeId.source .~ Nothing
-       # _targetSource edgeId.target edgeId.source .~ Nothing
-  else graph
-       # _sourceTarget edgeId.source edgeId.target .~ Nothing
-       # _targetSource edgeId.source edgeId.target .~ Nothing
-
-modifyEdge :: forall graph node edge. Graph graph node edge =>
-              EdgeId -> (edge -> edge) -> graph -> graph
-modifyEdge edgeId f graph =
-  let
-    edgeId' = if graph ^. _isDual then dualEdgeId edgeId else edgeId
-  in
-    graph
-    # _sourceTarget edgeId'.source edgeId'.target %~ map (dualEdge >>> f >>> dualEdge)
-    # _targetSource edgeId'.source edgeId'.target %~ map (dualEdge >>> f >>> dualEdge)
-
-lookupEdgesBetweenGraphs :: forall graph node edge. Graph graph node edge =>
-                            graph -> graph -> Set edge
-lookupEdgesBetweenGraphs graphA graphB =
-  let
-    edgePartiallyInGraph graph edge =
-      Map.member (edge ^. _source) (graph ^. _nodes)
-      ||
-      Map.member (edge ^. _target) (graph ^. _nodes)
-    aToFromB = Set.filter (edgePartiallyInGraph graphB) $ allEdges graphA
-    bToFromA = Set.filter (edgePartiallyInGraph graphA) $ allEdges graphB
-  in
-    aToFromB <> bToFromA
-
--- | Take a child graph that has edges to a parent graph that are not
--- | represented in the parent graph, add the matching edges from parent
--- | graph to child graph and merge the node sets.
--- | This is used to merge a collapsed subgraph back into the main graph,
--- | and will also support splitting and joining graphs for filtering
--- | and composing semantic networks or something :D
-glue :: forall graph node edge. Graph graph node edge =>
-        graph -> graph -> graph
-glue graphA graphB =
-  let
-    graphBNodes = Map.values $ graphB ^. _nodes
-    graphBEdges = allEdges graphB
-    edgesBetweenAB = lookupEdgesBetweenGraphs graphA graphB
-  in
-    graphA
-    # (\g -> foldr insertNode g graphBNodes)
-    # (\g -> foldr insertEdge g graphBEdges)
-    # (\g -> foldr insertEdge g edgesBetweenAB)
-
--- | Inverse of glue (given the array of nodes that made up
--- | the glued-in child graph)
-unglue :: forall graph node edge. Graph graph node edge =>
-          Set node -> graph -> { parentGraph :: graph, childGraph :: graph }
-unglue subgraphNodes graph =
-  let
-    parentGraph = foldr deleteNode graph subgraphNodes
-    emptyGraph = foldr deleteNode graph $ graph ^. _nodes
-    childGraph = foldr insertNode emptyGraph subgraphNodes
-  in
-    { parentGraph : parentGraph
-    , childGraph : childGraph
-    }
+instance decodeGraph :: Decode Graph where
+  decode x = x # genericDecode defaultOptions >>= fromForeignGraph >>> toExceptT

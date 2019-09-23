@@ -22,17 +22,16 @@ import Foreign (Foreign)
 import Foreign.Unit (ForeignUnit(..))
 import Run (FProxy, Run, Step(..))
 import Run as Run
-import Workflow.Core (_children, _nodeId, _parents)
+import Workflow.Core (Node, _children, _nodeId, _parents, _nodeText)
 import Workflow.Synth (Synth, SynthParams(..), SynthNodeParams, SynthNodeState(..), SynthParameter, freshSynthNodeParams, newSynthNodeState, inputPort, outputPort, parseSynthNodeType, updateParam)
-import Workflow.UIGraph.Types (UINode, _nodeText)
 import Workflow.UIGraph.UIGraphOp (UIGraphOpF(..))
 
 data SynthOpF next
-  = CreateSynthNode UINode SynthNodeParams next
-  | DeleteSynthNode UINode SynthNodeParams next
-  | ConnectSynthNodes UINode UINode next
-  | DisconnectSynthNodes UINode UINode next
-  | UpdateParameter UINode SynthParameter WebAudio.Value WebAudio.Value next
+  = CreateSynthNode Node SynthNodeParams next
+  | DeleteSynthNode Node SynthNodeParams next
+  | ConnectSynthNodes Node Node next
+  | DisconnectSynthNodes Node Node next
+  | UpdateParameter Node SynthParameter WebAudio.Value WebAudio.Value next
 derive instance functorSynthOpF :: Functor SynthOpF
 showSynthOp :: forall a. SynthOpF a -> Tuple String a
 showSynthOp = case _ of
@@ -271,7 +270,7 @@ disconnectAudioNodes source target = case source of
 -- be executed outside of any graph operations. isDual
 -- should only be used internally in graph operations.
 mapParentChildSynthNodes :: (SynthNodeState -> SynthNodeState -> Effect Unit)
-                            -> SynthNodeState -> UINode -> Synth -> Effect Unit
+                            -> SynthNodeState -> Node -> Synth -> Effect Unit
 mapParentChildSynthNodes connectOrDisconnect synthNodeState node synth = do
   let parentSynthNodes = Map.keys (node ^. _parents)
                          # Array.fromFoldable
@@ -284,29 +283,29 @@ mapParentChildSynthNodes connectOrDisconnect synthNodeState node synth = do
   for_ childSynthNodes \childSynthNode ->
                          connectOrDisconnect synthNodeState childSynthNode
 
-connectParentChildSynthNodes :: SynthNodeState -> UINode -> Synth -> Effect Unit
+connectParentChildSynthNodes :: SynthNodeState -> Node -> Synth -> Effect Unit
 connectParentChildSynthNodes = mapParentChildSynthNodes (connectSynthNodeStatesWith connectAudioNodes)
 
-disconnectParentChildSynthNodes :: SynthNodeState -> UINode -> Synth -> Effect Unit
+disconnectParentChildSynthNodes :: SynthNodeState -> Node -> Synth -> Effect Unit
 disconnectParentChildSynthNodes = mapParentChildSynthNodes (connectSynthNodeStatesWith disconnectAudioNodes)
 
-createSynthNode :: forall r. UINode -> SynthNodeParams -> Run (synthOp :: SYNTHOP | r) Unit
+createSynthNode :: forall r. Node -> SynthNodeParams -> Run (synthOp :: SYNTHOP | r) Unit
 createSynthNode node synthNodeParams =
   Run.lift _synthOp $ CreateSynthNode node synthNodeParams unit
 
-deleteSynthNode :: forall r. UINode -> SynthNodeParams -> Run (synthOp :: SYNTHOP | r) Unit
+deleteSynthNode :: forall r. Node -> SynthNodeParams -> Run (synthOp :: SYNTHOP | r) Unit
 deleteSynthNode node synthNodeParams =
   Run.lift _synthOp $ DeleteSynthNode node synthNodeParams unit
 
-connectSynthNodes :: forall r. UINode -> UINode -> Run (synthOp :: SYNTHOP | r) Unit
+connectSynthNodes :: forall r. Node -> Node -> Run (synthOp :: SYNTHOP | r) Unit
 connectSynthNodes source target =
   Run.lift _synthOp $ ConnectSynthNodes source target unit
 
-disconnectSynthNodes :: forall r. UINode -> UINode -> Run (synthOp :: SYNTHOP | r) Unit
+disconnectSynthNodes :: forall r. Node -> Node -> Run (synthOp :: SYNTHOP | r) Unit
 disconnectSynthNodes source target =
   Run.lift _synthOp $ DisconnectSynthNodes source target unit
 
-updateSynthParam :: forall r. UINode -> SynthParameter -> WebAudio.Value -> WebAudio.Value -> Run (synthOp :: SYNTHOP | r) Unit
+updateSynthParam :: forall r. Node -> SynthParameter -> WebAudio.Value -> WebAudio.Value -> Run (synthOp :: SYNTHOP | r) Unit
 updateSynthParam node parameter oldValue newValue =
   Run.lift _synthOp $ UpdateParameter node parameter oldValue newValue unit
 
