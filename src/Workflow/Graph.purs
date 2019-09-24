@@ -1,7 +1,7 @@
 module Workflow.Graph where
 
 import Prelude
-import Workflow.Core (Graph(..), Node(..), Edge(..), NodeId, EdgeId, Focus(..), _nodes, _nodeId, _edgeId, _isDual, _children, _parents, _sourceTarget, _targetSource, _source, _target)
+import Workflow.Core (Graph(..), Node(..), Edge(..), NodeId, EdgeId, Focus(..), _nodes, _edgeId, _isDual, _children, _parents, _sourceTarget, _targetSource, _source, _target)
 
 import Control.Alt ((<|>))
 import Data.Foldable (foldl, foldr, foldMap)
@@ -41,19 +41,6 @@ emptyGraph = Graph
   , focus : NoFocus
   , highlighted : Set.empty
   }
-
-
-insertNode :: Node -> Graph -> Graph
-insertNode node graph =
-  graph
-  # ((_nodes <<< at (node ^. _nodeId)) ?~ node)
-  # (\graph' -> foldr insertEdge graph' (lookupNodeEdges graph' node))
-
-deleteNode :: Node -> Graph -> Graph
-deleteNode node graph =
-  graph
-  # ((_nodes <<< at (node ^. _nodeId)) .~ Nothing)
-  # (\graph' -> foldr deleteEdge graph' (lookupNodeEdges graph' node))
 
 
 ------
@@ -130,8 +117,8 @@ allEdges :: Graph -> Set Edge
 allEdges graph =
   foldl (\edges node -> foldr Set.insert edges (lookupNodeEdges graph node)) Set.empty $ graph ^. _nodes
 
-insertEdge :: Edge -> Graph -> Graph
-insertEdge edge graph =
+insertEdgeImpl :: Edge -> Graph -> Graph
+insertEdgeImpl edge graph =
   let
     edge' = if graph ^. _isDual then dualEdge edge else edge
     edgeId = edge' ^. _edgeId
@@ -144,8 +131,8 @@ insertEdge edge graph =
         # _sourceTarget edgeId.source edgeId.target ?~ edge'
         # _targetSource edgeId.source edgeId.target ?~ edge'
 
-deleteEdge :: Edge -> Graph -> Graph
-deleteEdge = view _edgeId >>> deleteEdgeId
+deleteEdgeImpl :: Edge -> Graph -> Graph
+deleteEdgeImpl = view _edgeId >>> deleteEdgeId
 
 deleteEdgeId :: EdgeId -> Graph -> Graph
 deleteEdgeId edgeId graph =
@@ -178,33 +165,34 @@ lookupEdgesBetweenGraphs graphA graphB =
   in
     aToFromB <> bToFromA
 
--- | Take a child graph that has edges to a parent graph that are not
--- | represented in the parent graph, add the matching edges from parent
--- | graph to child graph and merge the node sets.
--- | This is used to merge a collapsed subgraph back into the main graph,
--- | and will also support splitting and joining graphs for filtering
--- | and composing semantic networks or something :D
-glue :: Graph -> Graph -> Graph
-glue graphA graphB =
-  let
-    graphBNodes = Map.values $ graphB ^. _nodes
-    graphBEdges = allEdges graphB
-    edgesBetweenAB = lookupEdgesBetweenGraphs graphA graphB
-  in
-    graphA
-    # (\g -> foldr insertNode g graphBNodes)
-    # (\g -> foldr insertEdge g graphBEdges)
-    # (\g -> foldr insertEdge g edgesBetweenAB)
-
--- | Inverse of glue (given the array of nodes that made up
--- | the glued-in child graph)
-unglue :: Set Node -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
-unglue subgraphNodes graph =
-  let
-    parentGraph = foldr deleteNode graph subgraphNodes
-    emptyGraph' = foldr deleteNode graph $ graph ^. _nodes
-    childGraph = foldr insertNode emptyGraph' subgraphNodes
-  in
-    { parentGraph : parentGraph
-    , childGraph : childGraph
-    }
+---- TODO: update to return GraphOp or remove
+---- | Take a child graph that has edges to a parent graph that are not
+---- | represented in the parent graph, add the matching edges from parent
+---- | graph to child graph and merge the node sets.
+---- | This is used to merge a collapsed subgraph back into the main graph,
+---- | and will also support splitting and joining graphs for filtering
+---- | and composing semantic networks or something :D
+--glue :: Graph -> Graph -> Graph
+--glue graphA graphB =
+--  let
+--    graphBNodes = Map.values $ graphB ^. _nodes
+--    graphBEdges = allEdges graphB
+--    edgesBetweenAB = lookupEdgesBetweenGraphs graphA graphB
+--  in
+--    graphA
+--    # (\g -> foldr insertNode g graphBNodes)
+--    # (\g -> foldr insertEdge g graphBEdges)
+--    # (\g -> foldr insertEdge g edgesBetweenAB)
+--
+---- | Inverse of glue (given the array of nodes that made up
+---- | the glued-in child graph)
+--unglue :: Set Node -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
+--unglue subgraphNodes graph =
+--  let
+--    parentGraph = foldr deleteNode graph subgraphNodes
+--    emptyGraph' = foldr deleteNode graph $ graph ^. _nodes
+--    childGraph = foldr insertNode emptyGraph' subgraphNodes
+--  in
+--    { parentGraph : parentGraph
+--    , childGraph : childGraph
+--    }

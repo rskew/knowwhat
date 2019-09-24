@@ -2,53 +2,49 @@ module Workflow.UIGraph where
 
 import Prelude
 
-import Control.Alt ((<|>))
 import Point2D (Point2D)
-import Data.Array as Array
-import Data.Foldable (minimumBy, elem, foldr)
-import Data.Lens (view, (^.), (.~), (%~), toListOf, traversed)
+import Data.Foldable (minimumBy)
+import Data.Lens (view, (^.), (.~), (%~))
 import Data.List as List
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
-import Data.Set (Set)
+import Data.Maybe (Maybe)
 import Data.Set as Set
 import Data.String (Pattern(..))
 import Data.String as String
 import Math as Math
-import Workflow.Core (Graph, Node, Edge, NodeId, Focus(..), _focus, _nodeId, _highlighted, _edgeId, _nodes, _source, _target, _subgraph, _nodeText, _pos)
-import Workflow.Graph (insertNode, insertEdge, deleteEdgeId, lookupNode, lookupParents, lookupChildren, deleteNode, glue, unglue, allEdges, lookupEdgesBetweenGraphs)
+import Workflow.Core (Focus(..), Graph, NodeId, _focus, _highlighted, _nodeId, _nodeText, _nodes, _pos)
 
 
-------
--- Focusing
-
-removeFocus :: Graph -> Graph
-removeFocus graph =
-  case graph ^. _focus of
-    NoFocus -> graph
-    FocusEdge edgeId _ ->
-      graph
-      # _focus .~ FocusNode edgeId.source
-      # deleteEdgeId edgeId
-    FocusNode nodeId ->
-      case lookupNode graph nodeId of
-        Nothing -> graph
-        Just focusNode ->
-          let
-            maybeNewFocus =     Set.findMin (lookupParents graph focusNode)
-                            <|> Set.findMin (lookupChildren graph focusNode)
-            newFocus = fromMaybe NoFocus $ (FocusNode <<< view _nodeId) <$> maybeNewFocus
-          in
-            graph
-            # _focus .~ newFocus
-            # _highlighted %~ Set.delete (focusNode ^. _nodeId)
-            # deleteNode focusNode
-
-edgeInFocusGroup :: Graph -> Edge -> Boolean
-edgeInFocusGroup graph edge =
-  case graph ^. _focus of
-    FocusEdge _ focusGroup -> elem (edge ^. _edgeId) focusGroup
-    _ -> false
+--------
+---- Focusing
+--
+--removeFocus :: Graph -> Graph
+--removeFocus graph =
+--  case graph ^. _focus of
+--    NoFocus -> graph
+--    FocusEdge edgeId _ ->
+--      graph
+--      # _focus .~ FocusNode edgeId.source
+--      # deleteEdgeId edgeId
+--    FocusNode nodeId ->
+--      case lookupNode graph nodeId of
+--        Nothing -> graph
+--        Just focusNode ->
+--          let
+--            maybeNewFocus =     Set.findMin (lookupParents graph focusNode)
+--                            <|> Set.findMin (lookupChildren graph focusNode)
+--            newFocus = fromMaybe NoFocus $ (FocusNode <<< view _nodeId) <$> maybeNewFocus
+--          in
+--            graph
+--            # _focus .~ newFocus
+--            # _highlighted %~ Set.delete (focusNode ^. _nodeId)
+--            # deleteNode focusNode
+--
+--edgeInFocusGroup :: Graph -> Edge -> Boolean
+--edgeInFocusGroup graph edge =
+--  case graph ^. _focus of
+--    FocusEdge _ focusGroup -> elem (edge ^. _edgeId) focusGroup
+--    _ -> false
 
 
 ------
@@ -248,196 +244,196 @@ toggleHighlightFocus graph = case graph ^. _focus of
 --  # newChildOfFocus { x : offset.x, y : -offset.y }
 
 
-------
--- Subgraph collapse/expand
-
--- | Handle Graph extensions (i.e. highlighing, focus) for the glue operation
--- |
--- | merge highlighted
--- | take focus from first arg
-glueUI :: Graph -> Graph -> Graph
-glueUI graphA graphB =
-  glue graphA graphB
-  # _highlighted .~ Set.union (graphA ^. _highlighted) (graphB ^. _highlighted)
-  # _focus .~ graphA ^. _focus
-
--- | Logic for handling focus and highlighted nodes in the unglue operation
--- |
--- | If the focused element is in the parent or child graph then keep it there,
--- | and for the other give it NoFocus.
--- | remove nodes in the childGraph from the parentGraph's highlighted set
--- | add the highlighted nodes in the childGraph to its highlighted set
--- TODO: quickcheck test for unglueUI >>> glueUI
-unglueUI :: Set Node -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
-unglueUI nodes graph =
-  let
-    unglued = unglue nodes graph
-    propagateHighlighted subgraph =
-      subgraph # _highlighted .~ Set.filter
-        (\nodeId -> List.elem nodeId (toListOf (_nodes <<< traversed <<< _nodeId) subgraph))
-        (graph ^. _highlighted)
-    propagateFocus subgraph = subgraph # _focus .~
-      case graph ^. _focus of
-        NoFocus -> NoFocus
-        FocusEdge edgeId focusGroup ->
-          let
-            subgraphEdgeIds = Array.fromFoldable (allEdges subgraph) <#> view _edgeId
-            focusGroupInSubgraph = focusGroup # Array.filter ((flip Array.elem) subgraphEdgeIds)
-          in
-            if Array.elem edgeId subgraphEdgeIds
-            then FocusEdge edgeId focusGroupInSubgraph
-            else NoFocus
-        FocusNode nodeId ->
-          if Set.member nodeId $ Map.keys (subgraph ^. _nodes)
-          then FocusNode nodeId
-          else NoFocus
-  in
-    { parentGraph : unglued.parentGraph # propagateHighlighted >>> propagateFocus
-    , childGraph : unglued.childGraph # propagateHighlighted >>> propagateFocus
-    }
-
-
-
--- | Take the highlighted nodes and extract them into a subgraph
--- | of the focus node (making the focus node a 'group node')
--- | if the focus is in the highlighted group,
--- | otherwise just pick an arbitrary node to be the group node.
--- |
--- | pick a group node:
--- |   if the focus node is highlighted, pick that
--- |   otherwise pick the first element of the highlighted group
--- | extract subgraph:
--- |   take highlighted nodes, unglue them
--- |   get the edges from the subgraph to the parent graph
--- |   add the edges to the group node
--- |   insert the subgraph into the group node
--- | insert the group node into the non-highlighted graph
--- |   focus on the group node
-groupHighlighted :: Graph -> Graph
-groupHighlighted graph =
-  -- | Grab some highlighted node. If there are none, don't do anything.
-  case Set.findMin (graph ^. _highlighted) >>= lookupNode graph of
-    Nothing -> graph
-    Just defaultGroupNode ->
-      let
-        -- Pick a group node
-        maybeFocusNodeId = case graph ^. _focus of
-          FocusNode nodeId -> if Set.member nodeId (graph ^. _highlighted)
-                              then Just nodeId
-                              else Nothing
-          _ -> Nothing
-        groupNode = fromMaybe defaultGroupNode $ maybeFocusNodeId >>= lookupNode graph
-        -- Extract subgraph
-        highlightedNodes = Set.mapMaybe (lookupNode graph) (graph ^. _highlighted)
-        unglued = unglueUI highlightedNodes graph
-        edgesBetween = lookupEdgesBetweenGraphs unglued.childGraph unglued.parentGraph
-        -- Collapse edges between subgraph and main graph to the groupNode
-        subgraph = unglued.childGraph # _highlighted .~ Set.empty
-        subgraphEdgeToGroupNode edge =
-          if Map.member (edge ^. _source) (subgraph ^. _nodes)
-          then edge # _edgeId .~ { source : groupNode ^. _nodeId, target : edge ^. _target }
-          else edge # _edgeId .~ { source : edge ^. _source, target : groupNode ^. _nodeId }
-        edgesToGroupNode = Set.map subgraphEdgeToGroupNode edgesBetween
-        -- Insert subgraph into groupNode
-        groupNode' = groupNode # _subgraph .~ subgraph
-      in
-        -- Insert groupNode into parent graph
-        unglued.parentGraph
-        # insertNode groupNode'
-        # (\g -> foldr insertEdge g edgesToGroupNode)
-        # _focus .~ FocusNode (groupNode' ^. _nodeId)
-
---  case do
---    defaultGroupNodeId <- Array.index (keys (viewHighlighted g)) 0
---    lookupNode defaultGroupNodeId graph
---  of
+--------
+---- Subgraph collapse/expand
+--
+---- | Handle Graph extensions (i.e. highlighing, focus) for the glue operation
+---- |
+---- | merge highlighted
+---- | take focus from first arg
+--glueUI :: Graph -> Graph -> Graph
+--glueUI graphA graphB =
+--  glue graphA graphB
+--  # _highlighted .~ Set.union (graphA ^. _highlighted) (graphB ^. _highlighted)
+--  # _focus .~ graphA ^. _focus
+--
+---- | Logic for handling focus and highlighted nodes in the unglue operation
+---- |
+---- | If the focused element is in the parent or child graph then keep it there,
+---- | and for the other give it NoFocus.
+---- | remove nodes in the childGraph from the parentGraph's highlighted set
+---- | add the highlighted nodes in the childGraph to its highlighted set
+---- TODO: quickcheck test for unglueUI >>> glueUI
+--unglueUI :: Set Node -> Graph -> { parentGraph :: Graph, childGraph :: Graph }
+--unglueUI nodes graph =
+--  let
+--    unglued = unglue nodes graph
+--    propagateHighlighted subgraph =
+--      subgraph # _highlighted .~ Set.filter
+--        (\nodeId -> List.elem nodeId (toListOf (_nodes <<< traversed <<< _nodeId) subgraph))
+--        (graph ^. _highlighted)
+--    propagateFocus subgraph = subgraph # _focus .~
+--      case graph ^. _focus of
+--        NoFocus -> NoFocus
+--        FocusEdge edgeId focusGroup ->
+--          let
+--            subgraphEdgeIds = Array.fromFoldable (allEdges subgraph) <#> view _edgeId
+--            focusGroupInSubgraph = focusGroup # Array.filter ((flip Array.elem) subgraphEdgeIds)
+--          in
+--            if Array.elem edgeId subgraphEdgeIds
+--            then FocusEdge edgeId focusGroupInSubgraph
+--            else NoFocus
+--        FocusNode nodeId ->
+--          if Set.member nodeId $ Map.keys (subgraph ^. _nodes)
+--          then FocusNode nodeId
+--          else NoFocus
+--  in
+--    { parentGraph : unglued.parentGraph # propagateHighlighted >>> propagateFocus
+--    , childGraph : unglued.childGraph # propagateHighlighted >>> propagateFocus
+--    }
+--
+--
+--
+---- | Take the highlighted nodes and extract them into a subgraph
+---- | of the focus node (making the focus node a 'group node')
+---- | if the focus is in the highlighted group,
+---- | otherwise just pick an arbitrary node to be the group node.
+---- |
+---- | pick a group node:
+---- |   if the focus node is highlighted, pick that
+---- |   otherwise pick the first element of the highlighted group
+---- | extract subgraph:
+---- |   take highlighted nodes, unglue them
+---- |   get the edges from the subgraph to the parent graph
+---- |   add the edges to the group node
+---- |   insert the subgraph into the group node
+---- | insert the group node into the non-highlighted graph
+---- |   focus on the group node
+--groupHighlighted :: Graph -> Graph
+--groupHighlighted graph =
+--  -- | Grab some highlighted node. If there are none, don't do anything.
+--  case Set.findMin (graph ^. _highlighted) >>= lookupNode graph of
 --    Nothing -> graph
 --    Just defaultGroupNode ->
 --      let
---        groupNode = case viewFocus graph of
---          FocusNode nodeId ->
---            if Array.elem nodeId $ keys $ viewHighlighted graph
---               then case lookupNode nodeId graph of
---                 Just focusNode -> focusNode
---                 Nothing -> defaultGroupNode
---               else defaultGroupNode
---          _ -> defaultGroupNode
---        subgraphNodes = lookupNodes (viewHighlighted g) graph
---        unglued = unglue subgraphNodes graph
---        groupParents = parentsOfGroup subgraphNodes
---        groupChildren = childrenOfGroup subgraphNodes
---        groupNodeId = viewId groupNode
---        parentGraph = updateFocus (FocusNode groupNodeId) unglued.parentGraph
---        parentGraph' = clearHighlighted parentGraph
---        parentEdges = (\parentId -> createEdge parentId groupNodeId)
---                      <$> keys groupParents
---        childEdges = (\childId -> createEdge groupNodeId childId)
---                     <$> keys groupChildren
---        groupExternalEdges = parentEdges <> childEdges
---        subgraph = updateFocus (FocusNode groupNodeId) unglued.childGraph
---        subgraph' = clearHighlighted subgraph
---        groupInterNode =
---          replaceSubgraph subgraph' groupNode
+--        -- Pick a group node
+--        maybeFocusNodeId = case graph ^. _focus of
+--          FocusNode nodeId -> if Set.member nodeId (graph ^. _highlighted)
+--                              then Just nodeId
+--                              else Nothing
+--          _ -> Nothing
+--        groupNode = fromMaybe defaultGroupNode $ maybeFocusNodeId >>= lookupNode graph
+--        -- Extract subgraph
+--        highlightedNodes = Set.mapMaybe (lookupNode graph) (graph ^. _highlighted)
+--        unglued = unglueUI highlightedNodes graph
+--        edgesBetween = lookupEdgesBetweenGraphs unglued.childGraph unglued.parentGraph
+--        -- Collapse edges between subgraph and main graph to the groupNode
+--        subgraph = unglued.childGraph # _highlighted .~ Set.empty
+--        subgraphEdgeToGroupNode edge =
+--          if Map.member (edge ^. _source) (subgraph ^. _nodes)
+--          then edge # _edgeId .~ { source : groupNode ^. _nodeId, target : edge ^. _target }
+--          else edge # _edgeId .~ { source : edge ^. _source, target : groupNode ^. _nodeId }
+--        edgesToGroupNode = Set.map subgraphEdgeToGroupNode edgesBetween
+--        -- Insert subgraph into groupNode
+--        groupNode' = groupNode # _subgraph .~ subgraph
 --      in
---       (insertNode groupInterNode
---        >>>
---        (replaceEdges groupNodeId groupExternalEdges))
---       $ parentGraph'
-
--- | Take the focus node and expand its subgraph into the current graph.
--- |
--- | take focus node
--- | remove it from graph
--- | glue in its subgraph.
--- TODO: propagate new edges to group node to expanded subgraph
--- TODO: propagate movement of group node to expanded subgraph
-expandFocus :: Graph -> Graph
-expandFocus graph =
-  case graph ^. _focus of
-    FocusNode groupNodeId ->
-      case lookupNode graph groupNodeId of
-        Just groupNode ->
-          let
-            subgraph = groupNode ^. _subgraph
-            subgraph' = subgraph # _highlighted .~ Map.keys (subgraph ^. _nodes)
-          in
-            if not $ Map.isEmpty ((groupNode ^. _subgraph) ^. _nodes)
-            then  graph
-                  # deleteNode groupNode
-                  # glueUI subgraph'
-            else graph
-        Nothing -> graph
-    _ -> graph
---  case viewFocus graph of
+--        -- Insert groupNode into parent graph
+--        unglued.parentGraph
+--        # insertNode groupNode'
+--        # (\g -> foldr insertEdge g edgesToGroupNode)
+--        # _focus .~ FocusNode (groupNode' ^. _nodeId)
+--
+----  case do
+----    defaultGroupNodeId <- Array.index (keys (viewHighlighted g)) 0
+----    lookupNode defaultGroupNodeId graph
+----  of
+----    Nothing -> graph
+----    Just defaultGroupNode ->
+----      let
+----        groupNode = case viewFocus graph of
+----          FocusNode nodeId ->
+----            if Array.elem nodeId $ keys $ viewHighlighted graph
+----               then case lookupNode nodeId graph of
+----                 Just focusNode -> focusNode
+----                 Nothing -> defaultGroupNode
+----               else defaultGroupNode
+----          _ -> defaultGroupNode
+----        subgraphNodes = lookupNodes (viewHighlighted g) graph
+----        unglued = unglue subgraphNodes graph
+----        groupParents = parentsOfGroup subgraphNodes
+----        groupChildren = childrenOfGroup subgraphNodes
+----        groupNodeId = viewId groupNode
+----        parentGraph = updateFocus (FocusNode groupNodeId) unglued.parentGraph
+----        parentGraph' = clearHighlighted parentGraph
+----        parentEdges = (\parentId -> createEdge parentId groupNodeId)
+----                      <$> keys groupParents
+----        childEdges = (\childId -> createEdge groupNodeId childId)
+----                     <$> keys groupChildren
+----        groupExternalEdges = parentEdges <> childEdges
+----        subgraph = updateFocus (FocusNode groupNodeId) unglued.childGraph
+----        subgraph' = clearHighlighted subgraph
+----        groupInterNode =
+----          replaceSubgraph subgraph' groupNode
+----      in
+----       (insertNode groupInterNode
+----        >>>
+----        (replaceEdges groupNodeId groupExternalEdges))
+----       $ parentGraph'
+--
+---- | Take the focus node and expand its subgraph into the current graph.
+---- |
+---- | take focus node
+---- | remove it from graph
+---- | glue in its subgraph.
+---- TODO: propagate new edges to group node to expanded subgraph
+---- TODO: propagate movement of group node to expanded subgraph
+--expandFocus :: Graph -> Graph
+--expandFocus graph =
+--  case graph ^. _focus of
 --    FocusNode groupNodeId ->
---      case lookupNode groupNodeId graph of
---        Nothing -> graph
+--      case lookupNode graph groupNodeId of
 --        Just groupNode ->
---          let subgraph = viewSubgraph groupNode in
---          if Object.isEmpty (nodes subgraph) then graph else
 --          let
---            groupNodePos = viewPos groupNode
---            subgraphGroupNodePos = case lookupNode groupNodeId subgraph of
---              Nothing -> viewPos groupNode
---              Just subgraphNode -> viewPos subgraphNode
---            groupMovement = groupNodePos `subtract` subgraphGroupNodePos
---            movedSubgraph = foldl
---                            (\graph_ node -> moveNodeAmount groupMovement node graph_)
---                            subgraph
---                            $ values $ nodes subgraph
---            glued = glue movedSubgraph $ removeNode (viewId groupNode) graph
---            glued' = updateFocus (FocusNode groupNodeId) glued
---            glued'' = clearHighlighted glued'
---            newHighlighted = keys $ nodes subgraph
---            glued''' = foldl (flip highlight) glued'' newHighlighted
+--            subgraph = groupNode ^. _subgraph
+--            subgraph' = subgraph # _highlighted .~ Map.keys (subgraph ^. _nodes)
 --          in
---            glued'''
+--            if not $ Map.isEmpty ((groupNode ^. _subgraph) ^. _nodes)
+--            then  graph
+--                  # deleteNode groupNode
+--                  # glueUI subgraph'
+--            else graph
+--        Nothing -> graph
 --    _ -> graph
-
-toggleGroupExpand :: Graph -> Graph
-toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
-  0 -> expandFocus graph
-  _ -> groupHighlighted graph
+----  case viewFocus graph of
+----    FocusNode groupNodeId ->
+----      case lookupNode groupNodeId graph of
+----        Nothing -> graph
+----        Just groupNode ->
+----          let subgraph = viewSubgraph groupNode in
+----          if Object.isEmpty (nodes subgraph) then graph else
+----          let
+----            groupNodePos = viewPos groupNode
+----            subgraphGroupNodePos = case lookupNode groupNodeId subgraph of
+----              Nothing -> viewPos groupNode
+----              Just subgraphNode -> viewPos subgraphNode
+----            groupMovement = groupNodePos `subtract` subgraphGroupNodePos
+----            movedSubgraph = foldl
+----                            (\graph_ node -> moveNodeAmount groupMovement node graph_)
+----                            subgraph
+----                            $ values $ nodes subgraph
+----            glued = glue movedSubgraph $ removeNode (viewId groupNode) graph
+----            glued' = updateFocus (FocusNode groupNodeId) glued
+----            glued'' = clearHighlighted glued'
+----            newHighlighted = keys $ nodes subgraph
+----            glued''' = foldl (flip highlight) glued'' newHighlighted
+----          in
+----            glued'''
+----    _ -> graph
+--
+--toggleGroupExpand :: Graph -> Graph
+--toggleGroupExpand graph = case Set.size (graph ^. _highlighted) of
+--  0 -> expandFocus graph
+--  _ -> groupHighlighted graph
 
 
 ------

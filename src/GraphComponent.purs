@@ -65,11 +65,12 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
 import Workflow.Core (Graph, Node, Edge, Focus(..), _pos, _nodeText, _edgeText, _focus, EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target)
-import Workflow.Graph (freshNode, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
+import Workflow.Graph (freshNode, freshEdge, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
+import Workflow.Graph.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge)
 import Workflow.Synth (FilterState_, Synth, SynthNodeParams(..), SynthNodeState(..), SynthParameter(..), SynthParams(..), defaultFrequencyBinCount, freshSynthNodeParams, parseSynthNodeType)
 import Workflow.Synth.SynthOp (createSynthNode, deleteSynthNode, updateSynthParam, interpretSynthOp)
 import Workflow.UIGraph (graphTitle)
-import Workflow.UIGraph.UIGraphOp (disconnectNodesOp, deleteNodeOp, connectNodesOp, insertNodeOp, moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
+import Workflow.UIGraph.UIGraphOp (moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
@@ -927,6 +928,8 @@ graph =
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
         Just node -> do
+          H.liftEffect $ log $ "new pos: " <> show newNodePos
+          H.liftEffect $ log $ "node pos: " <> show (node ^. _pos)
           modifyM $ dooM $ AppOperation $ moveNodeOp node newNodePos
 
     NodeDragMove (Drag.Done _) _ _ subscriptionId ->
@@ -965,7 +968,8 @@ graph =
         Just newEdgeTarget ->
           case Tuple (lookupNode (state ^. _graph) drawingEdgeSourceId)
                      (lookupNode (state ^. _graph) (newEdgeTarget ^. _nodeId)) of
-            Tuple (Just source) (Just target) -> handleAction $ AppCreateEdge source target
+            Tuple (Just source) (Just target) ->
+              handleAction $ AppCreateEdge source target
             _ -> pure unit
         _ -> pure unit
       -- Remove the drawing edge
@@ -980,28 +984,39 @@ graph =
                                # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
-      modifyM $ dooM $ AppOperation $ insertNodeOp newNode'
+      modifyM $ dooM $ AppOperation $ insertNode newNode' $ state ^. _graph
       handleAction $ FocusOn (FocusNode $ newNode' ^. _nodeId)
 
     AppDeleteNode node -> do
-      modifyM $ dooM $ AppOperation $ deleteNodeOp node
       state <- H.get
       case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
         Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
         Nothing -> pure unit
+      state' <- H.get
+      modifyM $ dooM $ AppOperation $ deleteNode node $ state' ^. _graph
 
     AppCreateEdge source target ->
       let
         edgeId = { source : source ^. _nodeId
                  , target : target ^. _nodeId
                  }
+        edge = freshEdge edgeId
       in do
-        modifyM $ dooM $ AppOperation $ connectNodesOp source target
+        modifyM $ dooM $ AppOperation $ insertEdge edge
         handleAction $ FocusOn (FocusEdge edgeId [])
 
-    AppDeleteEdge source target -> do
-      modifyM $ dooM $ AppOperation $ disconnectNodesOp source target
-      handleAction $ FocusOn (FocusNode (source ^. _nodeId))
+    AppDeleteEdge source target ->
+      let
+        edgeId = { source : source ^. _nodeId
+                 , target : target ^. _nodeId
+                 }
+      in do
+        state <- H.get
+        case lookupEdge (state ^. _graph) edgeId of
+          Nothing -> pure unit
+          Just edge -> do
+            modifyM $ dooM $ AppOperation $ deleteEdge edge
+            handleAction $ FocusOn (FocusNode (source ^. _nodeId))
 
     FocusOn newFocus -> do
       H.modify_ $ _graph <<< _focus .~ newFocus
@@ -1012,11 +1027,13 @@ graph =
         NoFocus -> pure unit
         FocusNode nodeId -> case lookupNode (state ^. _graph) nodeId of
           Nothing -> pure unit
-          Just node -> handleAction $ AppDeleteNode node
+          Just node ->
+            handleAction $ AppDeleteNode node
         FocusEdge edgeId _ ->
           case Tuple (lookupNode (state ^. _graph) edgeId.source)
                      (lookupNode (state ^. _graph) edgeId.target) of
-            Tuple (Just source) (Just target) -> handleAction $ AppDeleteEdge source target
+            Tuple (Just source) (Just target) ->
+              handleAction $ AppDeleteEdge source target
             _ -> pure unit
 
     Hover maybeElementId -> do

@@ -1,27 +1,27 @@
 module AppState where
 
 import Prelude
-import Workflow.UIGraph.UIGraphOp (UIGraphOpF, UIGRAPHOP, _uiGraphOp, handleUIGraphOp, invertUIGraphOp, collapseUIGraphOp, encodeUIGraphOpF, showUIGraphOp)
 
 import Control.Alt ((<|>))
+import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Collapsable (class Collapsable)
-import Data.Array as Array
 import Data.Group (class Group)
-import Data.Lens (Lens', Traversal', lens, traversed, (^.), (.~), (%~))
+import Data.Lens (Lens', Traversal', lens, traversed, over, (^.), (.~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..))
 import Data.Monoid.Action (class ActionM)
 import Data.Newtype (class Newtype)
+import Data.NonEmpty (NonEmpty(..))
+import Data.NonEmpty as NonEmpty
 import Data.Symbol (SProxy(..), class IsSymbol)
 import Data.Traversable (traverse, foldl)
-import Data.Tuple (Tuple(..), fst)
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.UUID (UUID)
 import Data.Undoable (Undoable, _current)
 import Effect (Effect)
-import Effect.Console as Console
 import Foreign (Foreign, unsafeToForeign)
 import Foreign as Foreign
 import Foreign.Class (class Encode, class Decode, decode)
@@ -32,8 +32,10 @@ import Run (Run(..), FProxy, Step(..))
 import Run as Run
 import Web.HTML.HTMLElement as WHE
 import Workflow.Core (Graph, Edge, NodeId, EdgeId, _nodes, _source, _target, _pos)
+import Workflow.Graph.GraphOp (GraphOpF, _graphOp, GRAPHOP, handleGraphOp, showGraphOp, invertGraphOp, encodeGraphOpF)
 import Workflow.Synth (Synth, SynthParams)
-import Workflow.Synth.SynthOp (_synthOp, SYNTHOP, SynthOpF, interpretSynthOp, handleUIGraphOpAsSynthUpdate, invertSynthOp, showSynthOp, encodeSynthOpF, collapseSynthOp)
+import Workflow.Synth.SynthOp (_synthOp, SYNTHOP, SynthOpF, interpretSynthOp, handleGraphOpAsSynthUpdate, handleUIGraphOpAsSynthUpdate, invertSynthOp, showSynthOp, encodeSynthOpF, collapseSynthOp)
+import Workflow.UIGraph.UIGraphOp (UIGraphOpF, UIGRAPHOP, _uiGraphOp, handleUIGraphOp, invertUIGraphOp, collapseUIGraphOp, encodeUIGraphOpF, showUIGraphOp)
 
 
 appStateVersion :: String
@@ -166,48 +168,58 @@ _zoom = _current <<< _AppStateCurrent <<< prop (SProxy :: SProxy "zoom")
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)
 
---interpretGraphOpToAppStateUpdate :: forall r a. (AppStateCurrent -> Effect AppStateCurrent)
---                                    -> Run (graphOp :: GRAPHOP | r) a
---                                    -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
---interpretGraphOpToAppStateUpdate =
---  Run.runAccumPure
---  (\accumulator -> Run.on
---                   _graphOp
---                   (case _ of
---                       Asdf next -> Loop $ Tuple accumulator next
---                       Fdsa next -> Loop $ Tuple accumulator next)
---                   Done)
---  (\accumulator a -> Tuple accumulator a)
-
-interpretUIGraphOpToAppStateUpdate :: forall r a. Run (uiGraphOp :: UIGRAPHOP | r) a
-                                      -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
-interpretUIGraphOpToAppStateUpdate =
+interpretOpMulti :: forall sym f a b r r'.
+                    Cons sym (FProxy f) r' r
+                    => IsSymbol sym
+                    => SProxy sym
+                    -> NonEmpty Array (f (Run r a) -> Tuple b (Run r a))
+                    -> (b -> b -> b)
+                    -> b
+                    -> Run r a
+                    -> Run r' (Tuple b a)
+interpretOpMulti sym handlers joiner =
   Run.runAccumPure
   (\accumulator ->
     Run.on
-    _uiGraphOp
-    (\uiGraphOp ->
+    sym
+    (\symOp ->
       let
-        Tuple uiGraphOpStr _ = showUIGraphOp uiGraphOp
-        Tuple synthStateUpdate _ = handleUIGraphOpAsSynthUpdate uiGraphOp
-        Tuple uiGraphUpdate next = handleUIGraphOp uiGraphOp
+        appliedHandlers = handlers <#> \handler -> handler symOp
+        handlerFuncs = fst <$> appliedHandlers
+        next = snd $ NonEmpty.head appliedHandlers
+        handlerAccumulator = foldl joiner (NonEmpty.head handlerFuncs) (NonEmpty.tail handlerFuncs)
+        combinedHandler = joiner accumulator handlerAccumulator
       in
-        Loop $ Tuple (\appStateCurrent -> do
-                         Console.log "interpreting uiGraphOp"
-                         Console.log uiGraphOpStr
-                         newAppStateCurrent <- accumulator appStateCurrent
-                         Console.log $ "old synth params: " <> show (newAppStateCurrent ^. _synth').synthParams
-                         newSynthState <- synthStateUpdate $ newAppStateCurrent ^. _synth'
-                         Console.log $ "new synth params: " <> show newSynthState.synthParams
-                         pure $ newAppStateCurrent
-                           # _synth' .~ newSynthState
-                           # _graph' %~ uiGraphUpdate)
-                     next)
+        Loop $ Tuple combinedHandler next)
     Done)
   (\accumulator a -> Tuple accumulator a)
+
+
+interpretUIGraphOpAsAppStateUpdate :: forall r a.
+                                      Run (uiGraphOp :: UIGRAPHOP | r) a
+                                      -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
+interpretUIGraphOpAsAppStateUpdate =
+  interpretOpMulti
+  _uiGraphOp
+  (NonEmpty
+    (handleUIGraphOpAsSynthUpdate >>> lmap (overM _synth'))
+    [ handleUIGraphOp >>> lmap (over _graph' >>> compose pure) ])
+  (>=>)
   pure
 
-type AppOperationRow = (uiGraphOp :: UIGRAPHOP, synthOp :: SYNTHOP)--, graphOp :: GRAPHOP)
+interpretGraphOpAsAppStateUpdate :: forall r a.
+                                    Run (graphOp :: GRAPHOP | r) a
+                                    -> Run r (Tuple (AppStateCurrent -> Effect AppStateCurrent) a)
+interpretGraphOpAsAppStateUpdate =
+  interpretOpMulti
+  _graphOp
+  (NonEmpty
+    (handleGraphOpAsSynthUpdate >>> lmap (overM _synth'))
+    [ handleGraphOp >>> lmap (over _graph' >>> compose pure) ])
+  (>=>)
+  pure
+
+type AppOperationRow = (uiGraphOp :: UIGRAPHOP, synthOp :: SYNTHOP, graphOp :: GRAPHOP)
 
 newtype AppOperation a = AppOperation (Run AppOperationRow a)
 
@@ -217,15 +229,12 @@ interpretAppOperation :: forall a. AppOperation a
                          -> (AppStateCurrent -> Effect AppStateCurrent)
 interpretAppOperation (AppOperation op) =
   let
-    overM :: forall s a' m. Monad m => Lens' s a' -> (a' -> m a') -> s -> m s
-    overM lens_ f val = do
-      newSubVal <- f $ val ^. lens_
-      pure $ (val # (lens_ .~ newSubVal))
-    smoosh (Tuple f g) = \appState -> f appState >>= g
-  in
-    interpretUIGraphOpToAppStateUpdate op              # map fst
-    --# interpretGraphOpToAppStateUpdate pure            # map smoosh
-    # interpretSynthOp # (map (lmap (overM _synth')) >>> map smoosh)
+    smooshTupleM (Tuple f g) = f >=> g
+  in do
+    op
+    # interpretUIGraphOpAsAppStateUpdate               # map fst
+    # interpretGraphOpAsAppStateUpdate                 # map smooshTupleM
+    # interpretSynthOp # (map (lmap (overM _synth')) >>> map smooshTupleM)
     # Run.extract
 
 instance showAppOperation :: Show (AppOperation a) where
@@ -233,10 +242,8 @@ instance showAppOperation :: Show (AppOperation a) where
     Run.extract (op # Run.runAccumPure
       (\accumulator -> Run.match
         { uiGraphOp : Loop <<< lmap (append accumulator) <<< showUIGraphOp
-        , synthOp : Loop <<< lmap (append accumulator) <<< showSynthOp
-        --, graphOp : case _ of
-        --  Asdf next -> Loop $ Tuple accumulator next
-        --  Fdsa next -> Loop $ Tuple accumulator next
+        , synthOp   : Loop <<< lmap (append accumulator) <<< showSynthOp
+        , graphOp   : Loop <<< lmap (append accumulator) <<< showGraphOp
         })
       (\accumulator a -> accumulator)
       "")
@@ -252,7 +259,7 @@ instance groupAppOperation :: Monoid a => Group (AppOperation a) where
     inverseOp = op # (Run.interpret (Run.match
       { uiGraphOp : invertUIGraphOp >>> Run.lift _uiGraphOp
       , synthOp : invertSynthOp >>> Run.lift _synthOp
-      --, graphOp : \asdf -> Run.lift _graphOp asdf
+      , graphOp : invertGraphOp >>> Run.lift _graphOp
       }))
 
 -- | Collapsable instance required by Undoable
@@ -299,9 +306,7 @@ encodeAppOperation (AppOperation op) =
            Tuple encodedSynthOp next = encodeSynthOpF synthOp
          in
           Loop $ Tuple (accumulator <> [encodedSynthOp]) next
-      --, graphOp : case _ of
-      --  Asdf next -> Loop $ Tuple accumulator next
-      --  Fdsa next -> Loop $ Tuple accumulator next
+      , graphOp : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< encodeGraphOpF
       })
     (\accumulator a -> accumulator)
     [])
@@ -313,12 +318,21 @@ decodeAppOperation foreignOpArray =
     decodeUIGraphOp = map (Run.lift _uiGraphOp) <<< (decode :: Foreign -> Foreign.F (UIGraphOpF ForeignUnit))
     decodeSynthOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
     decodeSynthOp = map (Run.lift _synthOp) <<< (decode :: Foreign -> Foreign.F (SynthOpF ForeignUnit))
-    --decodeGraphOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
-    --decodeGraphOp = map (Run.lift _graphOp) <<< (decode :: Foreign -> Foreign.F (GraphOpF ForeignUnit))
-    tryDecode op = decodeUIGraphOp op <|> decodeSynthOp op-- <|> decodeGraphOp op
+    decodeGraphOp :: Foreign -> Foreign.F (Run AppOperationRow ForeignUnit)
+    decodeGraphOp = map (Run.lift _graphOp) <<< (decode :: Foreign -> Foreign.F (GraphOpF ForeignUnit))
+    tryDecode op = decodeUIGraphOp op <|> decodeSynthOp op <|> decodeGraphOp op
   in do
     arrayForeign <- Foreign.readArray foreignOpArray
     decodedOperations <- traverse tryDecode arrayForeign
     case Array.uncons decodedOperations of
       Nothing -> Foreign.fail $ Foreign.ForeignError "No operations in decoded array"
-      Just unconsOps -> pure $ foldl (\ops op -> (ops >>= \_ -> op)) unconsOps.head unconsOps.tail
+      Just unconsOps -> pure $ foldl (\ops op -> (ops >>= const op)) unconsOps.head unconsOps.tail
+
+
+------
+-- Utilities
+
+overM :: forall s a' m. Monad m => Lens' s a' -> (a' -> m a') -> s -> m s
+overM lens_ f val = do
+  newSubVal <- f $ val ^. lens_
+  pure $ (val # (lens_ .~ newSubVal))

@@ -6,6 +6,7 @@ import Audio.WebAudio.Oscillator (stopOscillator) as WebAudio
 import Audio.WebAudio.Types (AudioNode(..), Value, connect, disconnect) as WebAudio
 import Data.Array as Array
 import Data.Bifunctor (lmap)
+import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.Generic.Rep (class Generic)
 import Data.Lens ((^.), (.~))
@@ -14,26 +15,32 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
+import Data.UUID (toString)
 import Effect (Effect)
 import Effect.Console (log)
-import Foreign.Class (class Encode, class Decode)
+import Foreign.Class (class Encode, encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Foreign (Foreign)
+import Foreign (Foreign, ForeignError(..))
 import Foreign.Unit (ForeignUnit(..))
+import Foreign as Foreign
 import Run (FProxy, Run, Step(..))
 import Run as Run
-import Workflow.Core (Node, _children, _nodeId, _parents, _nodeText)
+import Workflow.Core (Node, NodeId, EdgeId, _children, _nodeId, _parents, _nodeText, _edgeId, parseUUIDEither)
 import Workflow.Synth (Synth, SynthParams(..), SynthNodeParams, SynthNodeState(..), SynthParameter, freshSynthNodeParams, newSynthNodeState, inputPort, outputPort, parseSynthNodeType, updateParam)
+import Workflow.Graph.GraphOp (GraphOpF(..))
 import Workflow.UIGraph.UIGraphOp (UIGraphOpF(..))
 
 data SynthOpF next
   = CreateSynthNode Node SynthNodeParams next
   | DeleteSynthNode Node SynthNodeParams next
-  | ConnectSynthNodes Node Node next
-  | DisconnectSynthNodes Node Node next
+  | ConnectSynthNodes NodeId NodeId next
+  | DisconnectSynthNodes NodeId NodeId next
   | UpdateParameter Node SynthParameter WebAudio.Value WebAudio.Value next
+
 derive instance functorSynthOpF :: Functor SynthOpF
+
 showSynthOp :: forall a. SynthOpF a -> Tuple String a
+
 showSynthOp = case _ of
   CreateSynthNode node synthNodeParams a ->
     Tuple ("CreateSynthNode " <> show node <> " " <> show synthNodeParams) a
@@ -101,24 +108,23 @@ handleSynthOp = case _ of
                              })
           next
 
-  ConnectSynthNodes source target next ->
+  ConnectSynthNodes sourceId targetId next ->
     Tuple (\synth -> do
               log "interpretSynth InsertEdge"
-              case Tuple (Map.lookup (source ^. _nodeId) synth.synthState.synthNodeStates)
-                         (Map.lookup (target ^. _nodeId) synth.synthState.synthNodeStates) of
+              case Tuple (Map.lookup sourceId synth.synthState.synthNodeStates)
+                         (Map.lookup targetId synth.synthState.synthNodeStates) of
                 Tuple (Just sourceNodeState) (Just targetNodeState) -> do
                   log "connecting two audio nodes"
                   connectSynthNodeStatesWith connectAudioNodes sourceNodeState targetNodeState
                 _ -> do
-                  log "interpretSynth InsertEdge case failed"
                   pure unit
               pure synth)
           next
 
-  DisconnectSynthNodes source target next ->
+  DisconnectSynthNodes sourceId targetId next ->
     Tuple (\synth -> do
-              case Tuple (Map.lookup (source ^. _nodeId) synth.synthState.synthNodeStates)
-                         (Map.lookup (target ^. _nodeId) synth.synthState.synthNodeStates) of
+              case Tuple (Map.lookup sourceId synth.synthState.synthNodeStates)
+                         (Map.lookup targetId synth.synthState.synthNodeStates) of
                 Tuple (Just sourceNodeState) (Just targetNodeState) -> do
                   log $ "disconnecting " <> show sourceNodeState <> " from " <> show targetNodeState
                   connectSynthNodeStatesWith disconnectAudioNodes sourceNodeState targetNodeState
@@ -145,31 +151,14 @@ interpretSynthOp =
   (\accumulator a -> Tuple accumulator a)
   pure
 
-
---discardSynthOp :: forall a. SynthOpF a -> a
---discardSynthOp = case _ of
---  CreateSynthNode _ _ next      -> next
---  DeleteSynthNode _ _ next      -> next
---  ConnectSynthNodes _ _ next    -> next
---  DisconnectSynthNodes _ _ next -> next
---  UpdateParameter _ _ _ _ next  -> next
---
---discardSynthOps :: forall r a. Run (synthOp :: SYNTHOP | r) a -> Run r a
---discardSynthOps = Run.run $ Run.on _synthOp discardSynthOp Run.send
-
--- | Compile an operation on the graph to an operation on the synthesiser
--- | that changes the synth context as an Effect and returns a function that
--- | changes the AppState.synthState
-handleUIGraphOpAsSynthUpdate :: forall a. UIGraphOpF a -> Tuple (Synth -> Effect Synth) a
-handleUIGraphOpAsSynthUpdate = case _ of
+-- | Interpret an operation on graphs to an operation on synthesisers
+handleGraphOpAsSynthUpdate :: forall a. GraphOpF a -> Tuple (Synth -> Effect Synth) a
+handleGraphOpAsSynthUpdate = case _ of
   -- If the node text is a valid synth node type, create the corresponding
   -- synth node
   InsertNode node next ->
     case parseSynthNodeType (node ^. _nodeText) of
-      Nothing -> Tuple (\synth -> do
-                           log $ "failed parse of node text: " <> node ^. _nodeText
-                           pure synth)
-                       next
+      Nothing -> Tuple pure next
       Just synthNodeType ->
         let
           synthNodeParams = freshSynthNodeParams synthNodeType
@@ -194,22 +183,24 @@ handleUIGraphOpAsSynthUpdate = case _ of
 
   -- If the node text is a valid synth node type, create the corresponding
   -- connection between synth nodes
-  ConnectNodes source target next ->
+  InsertEdge edge next ->
     let
-      synthOp = connectSynthNodes source target
+      synthOp = connectSynthNodes $ edge ^. _edgeId
       Tuple synthStateUpdate _ = Run.extract $ interpretSynthOp synthOp
     in
       Tuple synthStateUpdate next
 
   -- If the node text is a valid synth node type, delete the corresponding
   -- connection between synth nodes
-  DisconnectNodes source target next ->
+  DeleteEdge edge next ->
     let
-      synthOp = disconnectSynthNodes source target
+      synthOp = disconnectSynthNodes $ edge ^. _edgeId
       Tuple synthStateUpdate _ = Run.extract $ interpretSynthOp synthOp
     in
      Tuple synthStateUpdate next
 
+handleUIGraphOpAsSynthUpdate :: forall a. UIGraphOpF a -> Tuple (Synth -> Effect Synth) a
+handleUIGraphOpAsSynthUpdate = case _ of
   -- Moving a node doesn't affect the synth
   MoveNode node from to next ->
     Tuple pure next
@@ -221,9 +212,9 @@ handleUIGraphOpAsSynthUpdate = case _ of
   UpdateNodeText node from to next ->
     case Tuple (parseSynthNodeType from) (parseSynthNodeType to) of
       Tuple Nothing (Just nodeType) ->
-        handleUIGraphOpAsSynthUpdate $ InsertNode (node # _nodeText .~ to) next
+        handleGraphOpAsSynthUpdate $ InsertNode (node # _nodeText .~ to) next
       Tuple (Just _) Nothing -> do
-        handleUIGraphOpAsSynthUpdate $ DeleteNode (node # _nodeText .~ to) next
+        handleGraphOpAsSynthUpdate $ DeleteNode (node # _nodeText .~ to) next
       _ -> Tuple pure next
 
   -- Edge text doesn't affect the synth
@@ -297,13 +288,13 @@ deleteSynthNode :: forall r. Node -> SynthNodeParams -> Run (synthOp :: SYNTHOP 
 deleteSynthNode node synthNodeParams =
   Run.lift _synthOp $ DeleteSynthNode node synthNodeParams unit
 
-connectSynthNodes :: forall r. Node -> Node -> Run (synthOp :: SYNTHOP | r) Unit
-connectSynthNodes source target =
-  Run.lift _synthOp $ ConnectSynthNodes source target unit
+connectSynthNodes :: forall r. EdgeId -> Run (synthOp :: SYNTHOP | r) Unit
+connectSynthNodes edgeId =
+  Run.lift _synthOp $ ConnectSynthNodes edgeId.source edgeId.target unit
 
-disconnectSynthNodes :: forall r. Node -> Node -> Run (synthOp :: SYNTHOP | r) Unit
-disconnectSynthNodes source target =
-  Run.lift _synthOp $ DisconnectSynthNodes source target unit
+disconnectSynthNodes :: forall r. EdgeId -> Run (synthOp :: SYNTHOP | r) Unit
+disconnectSynthNodes edgeId =
+  Run.lift _synthOp $ DisconnectSynthNodes edgeId.source edgeId.target unit
 
 updateSynthParam :: forall r. Node -> SynthParameter -> WebAudio.Value -> WebAudio.Value -> Run (synthOp :: SYNTHOP | r) Unit
 updateSynthParam node parameter oldValue newValue =
@@ -313,14 +304,65 @@ updateSynthParam node parameter oldValue newValue =
 ------
 -- Serialisation/deserialisation
 
-derive instance genericSynthOpF :: (Generic a z) => Generic (SynthOpF a) _
-instance encodeSynthOpF' :: (Generic a z, Encode a) => Encode (SynthOpF a) where
+data ForeignSynthOpF next
+  = ForeignCreateSynthNode Node SynthNodeParams next
+  | ForeignDeleteSynthNode Node SynthNodeParams next
+  | ForeignConnectSynthNodes String String next
+  | ForeignDisconnectSynthNodes String String next
+  | ForeignUpdateParameter Node SynthParameter WebAudio.Value WebAudio.Value next
+
+derive instance genericForeignSynthOpF :: (Generic a z) => Generic (ForeignSynthOpF a) _
+
+instance encodeForeignSynthOpF' :: (Generic a z, Encode a) => Encode (ForeignSynthOpF a) where
   encode x = x # genericEncode defaultOptions
-instance decodeSynthOpF' :: (Generic a z, Decode a) => Decode (SynthOpF a) where
+
+instance decodeForeignSynthOpF' :: (Generic a z, Decode a) => Decode (ForeignSynthOpF a) where
   decode x = x # genericDecode defaultOptions
 
+toForeign :: SynthOpF ~> ForeignSynthOpF
+toForeign = case _ of
+  CreateSynthNode node synthNodeParams next ->
+    ForeignCreateSynthNode node synthNodeParams next
+  DeleteSynthNode node synthNodeParams next ->
+    ForeignDeleteSynthNode node synthNodeParams next
+  ConnectSynthNodes sourceId targetId next ->
+    ForeignConnectSynthNodes (toString sourceId) (toString targetId) next
+  DisconnectSynthNodes sourceId targetId next ->
+    ForeignDisconnectSynthNodes (toString sourceId) (toString targetId) next
+  UpdateParameter node synthParameter from to next ->
+    ForeignUpdateParameter node synthParameter from to next
+
+fromForeign :: forall a. ForeignSynthOpF a -> Either String (SynthOpF a)
+fromForeign = case _ of
+  ForeignCreateSynthNode node synthNodeParams next ->
+    pure $ CreateSynthNode node synthNodeParams next
+  ForeignDeleteSynthNode node synthNodeParams next ->
+    pure $ DeleteSynthNode node synthNodeParams next
+  ForeignConnectSynthNodes sourceIdStr targetIdStr next -> do
+    sourceId <- parseUUIDEither sourceIdStr
+    targetId <- parseUUIDEither targetIdStr
+    pure $ ConnectSynthNodes sourceId targetId next
+  ForeignDisconnectSynthNodes sourceIdStr targetIdStr next -> do
+    sourceId <- parseUUIDEither sourceIdStr
+    targetId <- parseUUIDEither targetIdStr
+    pure $ DisconnectSynthNodes sourceId targetId next
+  ForeignUpdateParameter node synthParameter from to next ->
+    pure $ UpdateParameter node synthParameter from to next
+
+derive instance genericSynthOpF :: (Generic a z) => Generic (SynthOpF a) _
+
+instance encodeSynthOpF' :: (Generic a z, Encode a) => Encode (SynthOpF a) where
+  encode x = x # genericEncode defaultOptions <<< toForeign
+
+instance decodeSynthOpF' :: (Generic a z, Decode a) => Decode (SynthOpF a) where
+  decode x = do
+    decodedForeignGraphOp <- genericDecode defaultOptions x
+    case fromForeign decodedForeignGraphOp of
+      Left message -> Foreign.fail $ ForeignError message
+      Right graphOp -> pure graphOp
+
 encodeSynthOpF :: forall a. SynthOpF a -> Tuple Foreign a
-encodeSynthOpF = lmap (genericEncode defaultOptions) <<< case _ of
+encodeSynthOpF = lmap encode <<< case _ of
   CreateSynthNode node synthNodeParams next ->
     Tuple (CreateSynthNode node synthNodeParams ForeignUnit) next
   DeleteSynthNode node synthNodeParams next ->

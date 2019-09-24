@@ -17,7 +17,7 @@ import Point2D (Point2D)
 import Run (Run, FProxy)
 import Run as Run
 import Workflow.Core (Graph, Node, Edge, _pos, _nodeText, _edgeText, _edgeId, _nodeId, _nodes)
-import Workflow.Graph (insertNode, deleteNode, insertEdge, deleteEdgeId, modifyEdge, freshEdge)
+import Workflow.Graph (modifyEdge)
 
 
 -- | Free Monad DSL
@@ -25,11 +25,7 @@ import Workflow.Graph (insertNode, deleteNode, insertEdge, deleteEdgeId, modifyE
 -- |Mostly for supporting Undoable
 
 data UIGraphOpF next
-  = InsertNode Node next
-  | DeleteNode Node next
-  | ConnectNodes Node Node next
-  | DisconnectNodes Node Node next
-  | MoveNode Node Point2D Point2D next
+  = MoveNode Node Point2D Point2D next
   | UpdateNodeText Node String String next
   | UpdateEdgeText Edge String String next
 derive instance functorUIGraphOpF :: Functor UIGraphOpF
@@ -41,10 +37,6 @@ _uiGraphOp = SProxy
 
 invertUIGraphOp :: UIGraphOpF ~> UIGraphOpF
 invertUIGraphOp = case _ of
-  InsertNode node next               -> DeleteNode node next
-  DeleteNode node next               -> InsertNode node next
-  ConnectNodes source target next    -> DisconnectNodes source target next
-  DisconnectNodes source target next -> ConnectNodes source target next
   MoveNode node from to next         -> MoveNode node to from next
   UpdateNodeText node from to next   -> UpdateNodeText node to from next
   UpdateEdgeText edge from to next   -> UpdateEdgeText edge to from next
@@ -79,25 +71,6 @@ collapseUIGraphOp nextOp prevOp =
 
 handleUIGraphOp :: forall a. UIGraphOpF a -> Tuple (Graph -> Graph) a
 handleUIGraphOp = case _ of
-  InsertNode node next ->
-    Tuple (insertNode node) next
-
-  DeleteNode node next -> Tuple (deleteNode node) next
-
-  ConnectNodes source target next ->
-    let
-      newEdge = freshEdge { source : source ^. _nodeId
-                            , target : target ^. _nodeId
-                            }
-    in
-      Tuple (insertEdge newEdge) next
-
-  DisconnectNodes source target next ->
-    Tuple (deleteEdgeId { source : source ^. _nodeId
-                        , target : target ^. _nodeId
-                        }
-          ) next
-
   MoveNode node from to next -> Tuple
     (_nodes <<< at (node ^. _nodeId) <<< traversed <<< _pos .~ to)
     next
@@ -116,10 +89,6 @@ handleUIGraphOp = case _ of
 
 showUIGraphOp :: forall a. UIGraphOpF a -> Tuple String a
 showUIGraphOp = case _  of
-  InsertNode node next -> Tuple ("InsertNode " <> show (node ^. _nodeId) <> " >>= ") next
-  DeleteNode node next -> Tuple ("DeleteNode " <> show (node ^. _nodeId) <> " >>= ") next
-  ConnectNodes source target next -> Tuple ("ConnectNodes " <> show source <> " " <> show target <> " >>= ") next
-  DisconnectNodes source target next -> Tuple ("DisconnectNodes " <> show source <> " " <> show target <> " >>= ") next
   MoveNode node from to next -> Tuple ("MoveNode " <> show (node ^. _nodeId) <> " from " <> show from <> " to " <> show to <> " >>= ") next
   UpdateNodeText node from to next -> Tuple ("UpdateNodeText " <> show (node ^. _nodeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
   UpdateEdgeText edge from to next -> Tuple ("UpdateEdgeText " <> show (edge ^. _edgeId) <> " from \"" <> from <> "\" to \"" <> to <> "\" >>= ") next
@@ -136,10 +105,6 @@ instance decodeUIGraphOpF' :: (Generic a z, Decode a) => Decode (UIGraphOpF a) w
 
 encodeUIGraphOpF :: forall a. UIGraphOpF a -> Tuple Foreign a
 encodeUIGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
-  InsertNode node next -> Tuple (InsertNode node ForeignUnit) next
-  DeleteNode node next -> Tuple (DeleteNode node ForeignUnit) next
-  ConnectNodes source target next -> Tuple (ConnectNodes source target ForeignUnit) next
-  DisconnectNodes source target next -> Tuple (DisconnectNodes source target ForeignUnit) next
   MoveNode node from to next -> Tuple (MoveNode node from to ForeignUnit) next
   UpdateNodeText node from to next -> Tuple (UpdateNodeText node from to ForeignUnit) next
   UpdateEdgeText edge from to next -> Tuple (UpdateEdgeText edge from to ForeignUnit) next
@@ -147,22 +112,6 @@ encodeUIGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
 
 --------
 ---- Interface
-
-insertNodeOp :: forall r. Node -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
-insertNodeOp node = Run.lift _uiGraphOp $
-                    InsertNode node unit
-
-deleteNodeOp :: forall r. Node -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
-deleteNodeOp node = Run.lift _uiGraphOp $
-                    DeleteNode node unit
-
-connectNodesOp :: forall r. Node -> Node -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
-connectNodesOp source target = Run.lift _uiGraphOp $
-                               ConnectNodes source target unit
-
-disconnectNodesOp :: forall r. Node -> Node -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
-disconnectNodesOp source target = Run.lift _uiGraphOp $
-                                  DisconnectNodes source target unit
 
 moveNodeOp :: forall r. Node -> Point2D -> Run (uiGraphOp :: UIGRAPHOP | r) Unit
 moveNodeOp node newPos = Run.lift _uiGraphOp $
