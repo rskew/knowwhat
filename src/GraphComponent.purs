@@ -3,7 +3,7 @@ module GraphComponent where
 import Prelude
 
 import AnalyserComponent as AnalyserComponent
-import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synth, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace)
+import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synth, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace, interpretUndoOp)
 import AppState.Foreign (appStateFromJSON, appStateToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
 import Audio.WebAudio.Types (AudioContext) as WebAudio
@@ -29,7 +29,8 @@ import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.Tuple as Tuple
-import Data.Undoable (initUndoable, dooM, undoM, redoM, _current, _history, _undone)
+import Data.Undoable (initUndoable, _current, _history, _undone)
+import Data.Undoable.UndoOp (dooOp, undoOp, redoOp)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
@@ -885,14 +886,14 @@ graph =
       case lookupNode (state ^. _graph) nodeId of
         Nothing -> pure unit
         Just node -> do
-          modifyM $ dooM $ AppOperation $ updateNodeTextOp node text
+          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateNodeTextOp node text
 
     EdgeTextInput edgeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
       case lookupEdge (state ^. _graph) edgeId of
         Nothing -> pure unit
         Just edge -> do
-          modifyM $ dooM $ AppOperation $ updateEdgeTextOp edge text
+          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateEdgeTextOp edge text
 
     BackgroundDragStart initialGraphOrigin mouseEvent -> do
       H.modify_ $ _graph <<< _focus .~ NoFocus
@@ -930,7 +931,7 @@ graph =
         Just node -> do
           H.liftEffect $ log $ "new pos: " <> show newNodePos
           H.liftEffect $ log $ "node pos: " <> show (node ^. _pos)
-          modifyM $ dooM $ AppOperation $ moveNodeOp node newNodePos
+          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ moveNodeOp node newNodePos
 
     NodeDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -984,7 +985,7 @@ graph =
                                # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
         newNode' = newNode # _pos .~ newPos
                            # _nodeText .~ "new node hey"
-      modifyM $ dooM $ AppOperation $ insertNode newNode' $ state ^. _graph
+      modifyM $ interpretUndoOp $ dooOp $ AppOperation $ insertNode newNode' $ state ^. _graph
       handleAction $ FocusOn (FocusNode $ newNode' ^. _nodeId)
 
     AppDeleteNode node -> do
@@ -993,7 +994,7 @@ graph =
         Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
         Nothing -> pure unit
       state' <- H.get
-      modifyM $ dooM $ AppOperation $ deleteNode node $ state' ^. _graph
+      modifyM $ interpretUndoOp $ dooOp $ AppOperation $ deleteNode node $ state' ^. _graph
 
     AppCreateEdge source target ->
       let
@@ -1002,7 +1003,7 @@ graph =
                  }
         edge = freshEdge edgeId
       in do
-        modifyM $ dooM $ AppOperation $ insertEdge edge
+        modifyM $ interpretUndoOp $ dooOp $ AppOperation $ insertEdge edge
         handleAction $ FocusOn (FocusEdge edgeId [])
 
     AppDeleteEdge source target ->
@@ -1015,7 +1016,7 @@ graph =
         case lookupEdge (state ^. _graph) edgeId of
           Nothing -> pure unit
           Just edge -> do
-            modifyM $ dooM $ AppOperation $ deleteEdge edge
+            modifyM $ interpretUndoOp $ dooOp $ AppOperation $ deleteEdge edge
             handleAction $ FocusOn (FocusNode (source ^. _nodeId))
 
     FocusOn newFocus -> do
@@ -1134,13 +1135,13 @@ graph =
             case parseSynthNodeType (node ^. _nodeText) of
               Nothing -> pure unit
               Just synthNodeType ->
-                modifyM $ dooM $ AppOperation $ createSynthNode node $ freshSynthNodeParams synthNodeType
+                modifyM $ interpretUndoOp $ dooOp $ AppOperation $ createSynthNode node $ freshSynthNodeParams synthNodeType
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
           H.liftEffect $ log $ "Undoable history: " <> show (state ^. _history)
-          modifyM undoM
+          modifyM $ interpretUndoOp undoOp
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
         "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
@@ -1148,7 +1149,7 @@ graph =
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
           H.liftEffect $ log $ "Undoable undone: " <> show (state ^. _undone)
-          modifyM redoM
+          modifyM $ interpretUndoOp redoOp
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
         "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
@@ -1192,7 +1193,7 @@ graph =
       case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
                  (lookupNode (state ^. _graph) nodeId) of
         Tuple (Just (AmplifierParams oldGain)) (Just node) -> do
-          modifyM $ dooM $ AppOperation $ updateSynthParam node AmplifierGain oldGain newGain
+          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateSynthParam node AmplifierGain oldGain newGain
         _ -> pure unit
 
     GainDragMove (Drag.Done _) _ _ subscriptionId ->
@@ -1213,7 +1214,7 @@ graph =
       case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
                  (lookupNode (state ^. _graph) nodeId) of
         Tuple (Just (DelayParams oldPeriod)) (Just node) -> do
-          modifyM $ dooM $ AppOperation $ updateSynthParam node DelayPeriod oldPeriod newPeriod
+          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateSynthParam node DelayPeriod oldPeriod newPeriod
         _ -> pure unit
 
     DelayDragMove (Drag.Done _) _ _ subscriptionId ->

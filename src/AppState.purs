@@ -10,6 +10,7 @@ import Data.Group (class Group)
 import Data.Lens (Lens', Traversal', lens, traversed, over, (^.), (.~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
+import Data.List (List)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..))
 import Data.Monoid.Action (class ActionM)
@@ -21,6 +22,7 @@ import Data.Traversable (traverse, foldl)
 import Data.Tuple (Tuple(..), fst, snd)
 import Data.UUID (UUID)
 import Data.Undoable (Undoable, _current)
+import Data.Undoable.UndoOp (_undoOp, UNDOOP, handleUndoOpM)
 import Effect (Effect)
 import Foreign (Foreign, unsafeToForeign)
 import Foreign as Foreign
@@ -40,6 +42,9 @@ import Workflow.UIGraph.UIGraphOp (UIGraphOpF, UIGRAPHOP, _uiGraphOp, handleUIGr
 
 appStateVersion :: String
 appStateVersion = "0.0.0.0.0.0.0.1"
+
+------
+-- Types
 
 type Shape = { width :: Number, height :: Number }
 
@@ -108,10 +113,10 @@ type AppStateInner =
 newtype AppStateCurrent = AppStateCurrent AppStateInner
 derive instance newtypeAppStateCurrent :: Newtype AppStateCurrent _
 
-type AppState = Undoable AppStateCurrent (AppOperation Unit)
+type AppState = Undoable AppStateCurrent (AppOperation Unit) List
 
 -- | Action instance required by Undoable
-instance actGraphOpAppState :: Monoid a => ActionM Effect (AppOperation a) AppStateCurrent where
+instance actGraphOpAppState :: ActionM Effect (AppOperation Unit) AppStateCurrent where
   actM op = interpretAppOperation op
 
 type UninitializedAppStateInner =
@@ -124,8 +129,11 @@ type UninitializedAppStateInner =
   , synthParams :: SynthParams
   }
 
-type UninitializedAppState =
-  Undoable UninitializedAppStateInner (AppOperation Unit)
+type UninitializedAppState = Undoable UninitializedAppStateInner (AppOperation Unit) List
+
+
+------
+-- Lenses
 
 _AppStateCurrent :: Lens' AppStateCurrent AppStateInner
 _AppStateCurrent = (lens (\(AppStateCurrent appStateCurrent) -> appStateCurrent) (\_ -> AppStateCurrent))
@@ -168,32 +176,34 @@ _zoom = _current <<< _AppStateCurrent <<< prop (SProxy :: SProxy "zoom")
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePos
 _coerceToGraphSpace = lens GraphSpacePos (\_ (GraphSpacePos pos) -> pos)
 
-interpretOpMulti :: forall sym f a b r r'.
-                    Cons sym (FProxy f) r' r
-                    => IsSymbol sym
-                    => SProxy sym
-                    -> NonEmpty Array (f (Run r a) -> Tuple b (Run r a))
-                    -> (b -> b -> b)
-                    -> b
-                    -> Run r a
-                    -> Run r' (Tuple b a)
-interpretOpMulti sym handlers joiner =
-  Run.runAccumPure
-  (\accumulator ->
-    Run.on
-    sym
-    (\symOp ->
-      let
-        appliedHandlers = handlers <#> \handler -> handler symOp
-        handlerFuncs = fst <$> appliedHandlers
-        next = snd $ NonEmpty.head appliedHandlers
-        handlerAccumulator = foldl joiner (NonEmpty.head handlerFuncs) (NonEmpty.tail handlerFuncs)
-        combinedHandler = joiner accumulator handlerAccumulator
-      in
-        Loop $ Tuple combinedHandler next)
-    Done)
-  (\accumulator a -> Tuple accumulator a)
 
+
+------
+-- AppOperation DSL for actions that change the graph state and
+-- associated state (e.g. synth state) directly
+
+type AppOperationRow =
+  ( uiGraphOp :: UIGRAPHOP
+  , synthOp :: SYNTHOP
+  , graphOp :: GRAPHOP
+  )
+
+newtype AppOperation a = AppOperation (Run AppOperationRow a)
+
+derive newtype instance functorAppOperation :: Functor AppOperation
+
+
+interpretAppOperation :: forall a. AppOperation a
+                         -> (AppStateCurrent -> Effect AppStateCurrent)
+interpretAppOperation (AppOperation op) =
+  let
+    smooshTupleM (Tuple f g) = f >=> g
+  in do
+    op
+    # interpretUIGraphOpAsAppStateUpdate               # map fst
+    # interpretGraphOpAsAppStateUpdate                 # map smooshTupleM
+    # interpretSynthOp # (map (lmap (overM _synth')) >>> map smooshTupleM)
+    # Run.extract
 
 interpretUIGraphOpAsAppStateUpdate :: forall r a.
                                       Run (uiGraphOp :: UIGRAPHOP | r) a
@@ -218,24 +228,6 @@ interpretGraphOpAsAppStateUpdate =
     [ handleGraphOp >>> lmap (over _graph' >>> compose pure) ])
   (>=>)
   pure
-
-type AppOperationRow = (uiGraphOp :: UIGRAPHOP, synthOp :: SYNTHOP, graphOp :: GRAPHOP)
-
-newtype AppOperation a = AppOperation (Run AppOperationRow a)
-
-derive newtype instance functorAppOperation :: Functor AppOperation
-
-interpretAppOperation :: forall a. AppOperation a
-                         -> (AppStateCurrent -> Effect AppStateCurrent)
-interpretAppOperation (AppOperation op) =
-  let
-    smooshTupleM (Tuple f g) = f >=> g
-  in do
-    op
-    # interpretUIGraphOpAsAppStateUpdate               # map fst
-    # interpretGraphOpAsAppStateUpdate                 # map smooshTupleM
-    # interpretSynthOp # (map (lmap (overM _synth')) >>> map smooshTupleM)
-    # Run.extract
 
 instance showAppOperation :: Show (AppOperation a) where
   show (AppOperation op) =
@@ -281,6 +273,24 @@ instance collapsableAppOperation :: Collapsable (AppOperation Unit) where
       collapsedOp =
         collapseWith _uiGraphOp collapseUIGraphOp opA opB
         <|> collapseWith _synthOp collapseSynthOp opA opB
+
+
+------
+-- UndoOp DSL for performing actions or undo/redoing performed actions
+
+interpretUndoOp :: ActionM Effect (AppOperation Unit) AppStateCurrent
+                   => Run (undoOp :: UNDOOP (AppOperation Unit)) Unit
+                   -> (AppState -> (Effect AppState))
+interpretUndoOp op =
+  Run.extract
+  $ op # Run.runAccumPure
+         (\accumulator ->
+           Run.on
+           _undoOp
+           (Loop <<< lmap ((>=>) accumulator) <<< handleUndoOpM)
+           Done)
+         (\accumulator a -> accumulator)
+         pure
 
 
 ------
@@ -336,3 +346,29 @@ overM :: forall s a' m. Monad m => Lens' s a' -> (a' -> m a') -> s -> m s
 overM lens_ f val = do
   newSubVal <- f $ val ^. lens_
   pure $ (val # (lens_ .~ newSubVal))
+
+interpretOpMulti :: forall sym f a b r r'.
+                    Cons sym (FProxy f) r' r
+                    => IsSymbol sym
+                    => SProxy sym
+                    -> NonEmpty Array (f (Run r a) -> Tuple b (Run r a))
+                    -> (b -> b -> b)
+                    -> b
+                    -> Run r a
+                    -> Run r' (Tuple b a)
+interpretOpMulti sym handlers joiner =
+  Run.runAccumPure
+  (\accumulator ->
+    Run.on
+    sym
+    (\symOp ->
+      let
+        appliedHandlers = handlers <#> \handler -> handler symOp
+        handlerFuncs = fst <$> appliedHandlers
+        next = snd $ NonEmpty.head appliedHandlers
+        handlerAccumulator = foldl joiner (NonEmpty.head handlerFuncs) (NonEmpty.tail handlerFuncs)
+        combinedHandler = joiner accumulator handlerAccumulator
+      in
+       Loop $ Tuple combinedHandler next)
+    Done)
+  (\accumulator a -> Tuple accumulator a)

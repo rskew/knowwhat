@@ -141,7 +141,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-undoable.git"
       , version =
-          "3e3074049766d921eea5de6a69418732a5d49b01"
+          "f0079a71cbaad1f8738abc51ca2b7a085ab19fd3"
       }
   , halogen-contenteditable =
       { dependencies =

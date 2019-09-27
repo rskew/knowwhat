@@ -11,6 +11,7 @@ import Data.Either (Either, note)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity(..))
 import Data.Lens ((^.), (.~), (%~))
+import Data.List (List)
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe)
 import Data.String (Pattern(..), split)
@@ -79,7 +80,7 @@ type ForeignAppStateInner =
   , synthParams :: SynthParams
   }
 
-type UndoableForeignAppState = Undoable ForeignAppStateInner (AppOperation ForeignUnit)
+type UndoableForeignAppState = Undoable ForeignAppStateInner (AppOperation ForeignUnit) List
 
 newtype ForeignAppState =
   ForeignAppState UndoableForeignAppState
