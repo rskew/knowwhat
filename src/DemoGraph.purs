@@ -4,6 +4,7 @@ import Prelude
 import Effect (Effect)
 
 import Data.Map as Map
+import Data.Maybe (Maybe(..))
 import Data.UUID (genUUID)
 import Data.Tuple (fst)
 import Run as Run
@@ -28,7 +29,7 @@ demo = do
                      , id : oscillatorId
                      , parents : Map.empty
                      , children : Map.empty
-                     , subgraph : emptyGraph
+                     , subgraph : Nothing
                      })
                emptyGraph
     >>= \_ ->
@@ -40,7 +41,7 @@ demo = do
                        , id : delayId
                        , parents : Map.empty
                        , children : Map.empty
-                       , subgraph : emptyGraph
+                       , subgraph : Nothing
                        })
                  emptyGraph
     >>= \_ ->
@@ -52,7 +53,7 @@ demo = do
                        , id : amplifierId
                        , parents : Map.empty
                        , children : Map.empty
-                       , subgraph : emptyGraph
+                       , subgraph : Nothing
                        })
                  emptyGraph
     >>= \_ ->
@@ -64,7 +65,7 @@ demo = do
                        , id : outputId
                        , parents : Map.empty
                        , children : Map.empty
-                       , subgraph : emptyGraph
+                       , subgraph : Nothing
                        })
                  emptyGraph
     >>= \_ ->
@@ -76,7 +77,7 @@ demo = do
                        , id : filterId
                        , parents : Map.empty
                        , children : Map.empty
-                       , subgraph : emptyGraph
+                       , subgraph : Nothing
                        })
                  emptyGraph
     >>= \_ ->

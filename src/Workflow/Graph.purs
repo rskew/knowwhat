@@ -28,7 +28,7 @@ freshNode = genUUID >>= \id -> pure $
             { id : id
             , children : Map.empty
             , parents : Map.empty
-            , subgraph : emptyGraph
+            , subgraph : Nothing
             , position : { x : 0.0, y : 0.0 }
             , text : ""
             , isValid : true

@@ -451,7 +451,7 @@ graph =
         -- Node center
         , SE.circle
           [ SA.class_ nodeClasses
-          , SA.r $ show $ if (not (Map.isEmpty (node ^. _subgraph <<< _nodes)))
+          , SA.r $ show $ if (isJust (node ^. _subgraph))
                           then groupNodeRadius
                           else nodeRadius
           ]
@@ -674,7 +674,7 @@ graph =
           then Just "focused"
           else Nothing
         ]
-      markerRef = if (Map.isEmpty (targetNode ^. _subgraph <<< _nodes))
+      markerRef = if (isJust (targetNode ^. _subgraph))
                   then "url(#arrow)"
                   else "url(#arrow-to-group)"
       markerRef' = if isJust $ Map.lookup (edge ^. _target) (unwrap (state ^. _synth).synthParams)

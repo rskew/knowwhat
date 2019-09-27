@@ -14,7 +14,7 @@ import Data.Lens.Record (prop)
 import Data.List.NonEmpty (NonEmptyList, singleton)
 import Data.Identity (Identity)
 import Data.Map as Map
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
@@ -36,6 +36,8 @@ import Point2D (Point2D)
 type NodeId = UUID
 
 type EdgeId = { source :: NodeId, target :: NodeId }
+
+type GraphId = UUID
 
 -- | The dual graph is the graph with the edge directions flipped.
 -- | Using the dual representation allows the use of the symmetry of edge flipping
@@ -72,7 +74,7 @@ type NodeInner =
   { id :: NodeId
   , children :: Map NodeId Edge
   , parents :: Map NodeId Edge
-  , subgraph :: Graph
+  , subgraph :: Maybe GraphId
   , position :: Point2D
   , text :: String
   , isValid :: Boolean
@@ -161,7 +163,7 @@ _children = _Node <<< prop (SProxy :: SProxy "children")
 _nodeId :: Lens' Node NodeId
 _nodeId = _Node <<< prop (SProxy :: SProxy "id")
 
-_subgraph :: Lens' Node Graph
+_subgraph :: Lens' Node (Maybe GraphId)
 _subgraph = _Node <<< prop (SProxy :: SProxy "subgraph")
 
 _edgeId :: Lens' Edge EdgeId
@@ -230,7 +232,7 @@ newtype ForeignNode =
   { id :: ForeignNodeId
   , children :: Object Edge
   , parents :: Object Edge
-  , subgraph :: Graph
+  , subgraph :: Maybe String
   , position :: Point2D
   , text :: String
   , isValid :: Boolean
@@ -296,7 +298,7 @@ toForeignNode (Node node) =
   node { id = UUID.toString node.id
        , children = toForeignMap identity UUID.toString node.children
        , parents = toForeignMap identity UUID.toString node.parents
-       , subgraph = node.subgraph
+       , subgraph = UUID.toString <$> node.subgraph
        }
 
 toForeignFocus :: Focus -> ForeignFocus
@@ -365,7 +367,9 @@ fromForeignNode (ForeignNode foreignNode) = do
   id <- parseUUIDEither foreignNode.id
   children <- fromForeignMap pure parseUUIDEither foreignNode.children
   parents <- fromForeignMap pure parseUUIDEither foreignNode.parents
-  let subgraph = foreignNode.subgraph
+  subgraph <- case foreignNode.subgraph of
+                   Nothing -> pure Nothing
+                   Just graphIdStr -> Just <$> parseUUIDEither graphIdStr
   pure $ Node $
     foreignNode { id = id
                 , children = children
