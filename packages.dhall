@@ -124,26 +124,7 @@ let upstream =
 let overrides = {=}
 
 let additions =
-  { undoable =
-      { dependencies =
-          [ "assert"
-          , "console"
-          , "effect"
-          , "prelude"
-          , "psci-support"
-          , "maybe"
-          , "tuples"
-          , "profunctor-lenses"
-          , "group"
-          , "generics-rep"
-          , "foreign-generic"
-          ]
-      , repo =
-          "https://github.com/rskew/purescript-undoable.git"
-      , version =
-          "f0079a71cbaad1f8738abc51ca2b7a085ab19fd3"
-      }
-  , halogen-contenteditable =
+  { halogen-contenteditable =
       { dependencies =
           [ "console"
           , "effect"
@@ -170,7 +151,7 @@ let additions =
       , repo =
           "https://github.com/rskew/purescript-halogen-svg.git"
       , version =
-          "7cbcd1e176a84220c0e66ca5e38a158bc3636dca"
+          "a92405a937ba3f0e3756fd35bf92ea12ab62cffb"
       }
   , webaudio =
       { dependencies =

@@ -1,110 +1,70 @@
 module DemoGraph where
 
+import AppOperation (AppOperation)
+import AppOperation.GraphOp (insertNode, insertEdge, moveNode, updateNodeText)
+import AppOperation.UIOp (insertPane)
 import Prelude
 import Effect (Effect)
-
-import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Core (GraphId, GraphSpacePoint2D(..), freshNode)
+import Data.Newtype (wrap)
 import Data.UUID (genUUID)
-import Data.Tuple (fst)
-import Run as Run
+import Data.Tuple (Tuple(..))
 
-import Workflow.Core (Graph, Node(..), Edge(..))
-import Workflow.Graph (emptyGraph)
-import Workflow.Graph.GraphOp (interpretGraphOp, insertNode, insertEdge)
 
-demo :: Effect Graph
+demo :: Effect (Tuple GraphId (AppOperation Unit))
 demo = do
+  graphId <- genUUID
   oscillatorId <- genUUID
   delayId <- genUUID
   amplifierId <- genUUID
   outputId <- genUUID
   filterId <- genUUID
-  pure $ emptyGraph # (fst $ Run.extract $ interpretGraphOp $
-    insertNode (Node { text: "oscillator"
-                     , isValid: true
-                     , position : { x: 450.0
-                                  , y: 270.0
-                                  }
-                     , id : oscillatorId
-                     , parents : Map.empty
-                     , children : Map.empty
-                     , subgraph : Nothing
-                     })
-               emptyGraph
-    >>= \_ ->
-      insertNode (Node { text: "delay"
-                       , isValid: true
-                       , position : { x: 450.0
-                                    , y: 170.0
-                                    }
-                       , id : delayId
-                       , parents : Map.empty
-                       , children : Map.empty
-                       , subgraph : Nothing
-                       })
-                 emptyGraph
-    >>= \_ ->
-      insertNode (Node { text: "gain"
-                       , isValid: true
-                       , position : { x: 650.0
-                                    , y: 270.0
-                                    }
-                       , id : amplifierId
-                       , parents : Map.empty
-                       , children : Map.empty
-                       , subgraph : Nothing
-                       })
-                 emptyGraph
-    >>= \_ ->
-      insertNode (Node { text: "output"
-                       , isValid: true
-                       , position : { x: 800.0
-                                    , y: 270.0
-                                    }
-                       , id : outputId
-                       , parents : Map.empty
-                       , children : Map.empty
-                       , subgraph : Nothing
-                       })
-                 emptyGraph
-    >>= \_ ->
-      insertNode (Node { text: "filter"
-                       , isValid: true
-                       , position : { x: 550.0
-                                    , y: 370.0
-                                    }
-                       , id : filterId
-                       , parents : Map.empty
-                       , children : Map.empty
-                       , subgraph : Nothing
-                       })
-                 emptyGraph
-    >>= \_ ->
-      insertEdge (Edge  { id : { source : oscillatorId
-                               , target : delayId
-                               }
-                        , text : ""
-                        , isValid : false
-                        })
-    >>= \_ ->
-      insertEdge (Edge  { id : { source : delayId
-                               , target : amplifierId
-                               }
-                        , text : ""
-                        , isValid : false
-                        })
-    >>= \_ ->
-      insertEdge (Edge  { id : { source : amplifierId
-                               , target : outputId
-                               }
-                        , text : ""
-                        , isValid : false
-                        })
-    >>= \_ ->
-      insertEdge (Edge  { id : { source : amplifierId
-                               , target : filterId
-                               }
-                        , text : ""
-                        , isValid : false
-                        }))
+  let
+    oscillatorNode = freshNode graphId oscillatorId
+    delayNode      = freshNode graphId delayId
+    amplifierNode  = freshNode graphId amplifierId
+    outputNode     = freshNode graphId outputId
+    filterNode     = freshNode graphId filterId
+  pure $ Tuple graphId $ (wrap do
+    insertPane graphId
+
+    insertNode graphId oscillatorId
+    moveNode oscillatorNode (GraphSpacePoint2D { x : 450.0, y : 270.0 })
+    updateNodeText oscillatorNode "oscillator"
+
+    insertNode graphId delayId
+    moveNode delayNode (GraphSpacePoint2D { x : 450.0, y : 170.0 })
+    updateNodeText delayNode "delay"
+
+    insertNode graphId amplifierId
+    moveNode amplifierNode (GraphSpacePoint2D { x : 650.0, y : 270.0 })
+    updateNodeText amplifierNode "gain"
+
+    insertNode graphId outputId
+    moveNode outputNode (GraphSpacePoint2D { x : 800.0, y : 270.0 })
+    updateNodeText outputNode "output"
+
+    insertNode graphId filterId
+    moveNode filterNode (GraphSpacePoint2D { x : 550.0, y : 370.0 })
+    updateNodeText filterNode "filter"
+
+    insertEdge { source      : oscillatorId
+               , sourceGraph : graphId
+               , target      : delayId
+               , targetGraph : graphId
+               }
+    insertEdge { source      : delayId
+               , sourceGraph : graphId
+               , target      : amplifierId
+               , targetGraph : graphId
+               }
+    insertEdge { source      : amplifierId
+               , sourceGraph : graphId
+               , target      : outputId
+               , targetGraph : graphId
+               }
+    insertEdge { source      : amplifierId
+               , sourceGraph : graphId
+               , target      : filterId
+               , targetGraph : graphId
+               })

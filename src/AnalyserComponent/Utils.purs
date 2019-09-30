@@ -1,4 +1,4 @@
-module Utils where
+module AnalyserComponent.Utils where
 
 import Prelude
 

@@ -1,4 +1,4 @@
-module Workflow.Synth where
+module Synth where
 
 import Prelude
 
@@ -14,7 +14,7 @@ import Data.ArrayBuffer.Typed (empty)
 import Data.ArrayBuffer.Types (Uint8Array, ByteLength)
 import Data.Either (Either)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Lens', lens, traversed, Prism', Optic', prism', (^?), (.~))
+import Data.Lens (Lens', traversed, Prism', Optic', prism', (^?), (.~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
@@ -23,6 +23,7 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Profunctor.Choice (class Choice)
 import Data.Profunctor.Strong (class Strong)
+import Data.String as String
 import Data.Symbol (SProxy(..))
 import Data.UUID as UUID
 import Effect (Effect)
@@ -32,7 +33,8 @@ import Effect.Ref as Ref
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (defaultOptions, genericEncode, genericDecode)
 import Foreign.Object (Object)
-import Workflow.Core (NodeId, toForeignMap, fromForeignMap, parseUUIDEither, toExceptT)
+import Foreign.Utils (fromForeignMap, parseUUIDEither, toForeignMap)
+import Core (NodeId)
 
 updateValueRampTime :: WebAudio.Seconds
 updateValueRampTime = 0.1
@@ -106,18 +108,18 @@ defaultCompressorRelease = 0.25
 defaultCompressorPan :: Pan
 defaultCompressorPan = 0.0
 
-type Synth = { synthState :: SynthState
+type Synth = { synthState  :: SynthState
              , synthParams :: SynthParams
              }
 
-type SynthState = { audioContext :: WebAudio.AudioContext
+type SynthState = { audioContext    :: WebAudio.AudioContext
                   , synthNodeStates :: Map NodeId SynthNodeState
                   }
 
-type FilterState_ = { analyserNode :: WebAudio.AnalyserNode
-                    , lowpassFilterNode :: WebAudio.BiquadFilterNode
+type FilterState_ = { analyserNode       :: WebAudio.AnalyserNode
+                    , lowpassFilterNode  :: WebAudio.BiquadFilterNode
                     , highpassFilterNode :: WebAudio.BiquadFilterNode
-                    , analyserBuffer :: Uint8Array
+                    , analyserBuffer     :: Uint8Array
                     , drawLoopStopSignal :: Ref Boolean
                     }
 
@@ -130,10 +132,10 @@ data SynthNodeState
 
 instance showSynthNodeState :: Show SynthNodeState where
   show = case _ of
-    OscillatorState _ -> "Oscillator"
-    AmplifierState _ -> "Amplifier"
-    DelayState _ -> "Delay"
-    FilterState _ -> "Filter"
+    OscillatorState _  -> "Oscillator"
+    AmplifierState _   -> "Amplifier"
+    DelayState _       -> "Delay"
+    FilterState _      -> "Filter"
     DestinationState _ -> "Destination"
 
 inputPort :: SynthNodeState -> WebAudio.AudioNode
@@ -152,15 +154,9 @@ outputPort = case _ of
   FilterState filterState          -> WebAudio.BiquadFilter filterState.highpassFilterNode
   DestinationState destinationNode -> WebAudio.Destination destinationNode
 
-newtype SynthParams = SynthParams (Map NodeId SynthNodeParams)
+type SynthParams = Map NodeId SynthNodeParams
 
-derive instance newtypeSynthParams :: Newtype SynthParams _
-
-instance showSynthParams :: Show SynthParams where
-  show (SynthParams synthParams) = "SynthParams: " <> show synthParams
-
-type FilterParams_ = { analyserParams :: AnalyserParams
-                     , lowpassParams :: BiquadFilterParams
+type FilterParams_ = { lowpassParams  :: BiquadFilterParams
                      , highpassParams :: BiquadFilterParams
                      }
 
@@ -179,21 +175,18 @@ data SynthNodeParams
 
 instance showSynthNodeParams :: Show SynthNodeParams where
   show = case _ of
-    OscillatorParams freq -> "OscillatorParams " <> show freq
-    AmplifierParams gain -> "AmplifierParams " <> show gain
+    OscillatorParams freq     -> "OscillatorParams " <> show freq
+    AmplifierParams gain      -> "AmplifierParams " <> show gain
     DelayParams periodSeconds -> "DelayParams " <> show periodSeconds
     FilterParams filterParams -> "FilterParams " <> show filterParams
-    DestinationParams -> "DestinationParams"
+    DestinationParams         -> "DestinationParams"
 
-data BiquadFilterParams = BiquadFilterParams WebAudioBiquad.BiquadFilterType Cutoff QFactor Gain
-instance showBiquadFilterParams :: Show BiquadFilterParams where
-  show (BiquadFilterParams filterType cutoff q gain) =
-    "BiquadFilterParams " <> show filterType <> " " <> show cutoff <> " " <> show q <> " " <> show gain
-
-data AnalyserParams = AnalyserParams FrequencyBinCount MinDecibels MaxDecibels SmoothingTimeConstant
-instance showAnalyserParams :: Show AnalyserParams where
-  show (AnalyserParams freqBinCount minDecibels maxDecibels smoothingTimeConstant) =
-    "AnalyserParams " <> show freqBinCount <> " " <> show minDecibels <> " " <> show maxDecibels <> " " <> show smoothingTimeConstant
+type BiquadFilterParams =
+  { filterType :: WebAudioBiquad.BiquadFilterType
+  , cutoff :: Cutoff
+  , qFactor :: QFactor
+  , gain :: Gain
+  }
 
 data SynthNodeType
   = NodeTypeOscillator
@@ -206,32 +199,32 @@ derive instance eqSynthNodeType :: Eq SynthNodeType
 derive instance ordSynthNodeType :: Ord SynthNodeType
 instance showSynthNodeType :: Show SynthNodeType where
   show = case _ of
-    NodeTypeOscillator -> "Oscillator"
-    NodeTypeAmplifier -> "Amplifier"
-    NodeTypeDelay -> "Delay"
-    NodeTypeFilter -> "Filter"
+    NodeTypeOscillator  -> "Oscillator"
+    NodeTypeAmplifier   -> "Amplifier"
+    NodeTypeDelay       -> "Delay"
+    NodeTypeFilter      -> "Filter"
     NodeTypeDestination -> "Destination"
 
-type Freq = Number
-type Gain = Number
-type PeriodSeconds = Number
-type Cutoff = Number
-type QFactor = Number
-type FrequencyBinCount = ByteLength
+type Freq                  = Number
+type Gain                  = Number
+type PeriodSeconds         = Number
+type Cutoff                = Number
+type QFactor               = Number
+type FrequencyBinCount     = ByteLength
 type SmoothingTimeConstant = Number
-type MinDecibels = Number
-type MaxDecibels = Number
-type LoopStart = WebAudio.Seconds
-type LoopEnd = WebAudio.Seconds
-type LoopOn = Boolean
-type Normalize = Boolean
-type Threshold = Number
-type Knee = Number
-type Ratio = Number
-type Reduction = Number
-type Attack = Number
-type Release = Number
-type Pan = Number
+type MinDecibels           = Number
+type MaxDecibels           = Number
+type LoopStart             = WebAudio.Seconds
+type LoopEnd               = WebAudio.Seconds
+type LoopOn                = Boolean
+type Normalize             = Boolean
+type Threshold             = Number
+type Knee                  = Number
+type Ratio                 = Number
+type Reduction             = Number
+type Attack                = Number
+type Release               = Number
+type Pan                   = Number
 
 -- | Just the parameters which are directly updated via UI interactions
 data SynthParameter
@@ -245,10 +238,10 @@ derive instance eqSynthParameter :: Eq SynthParameter
 
 instance showSynthParameter :: Show SynthParameter where
   show = case _ of
-    OscillatorFreq -> "OscillatorFreq"
-    AmplifierGain -> "AmplifierGain"
-    DelayPeriod -> "DelayPeriod"
-    FilterLowpassCutoff -> "FilterLowpassCutoff"
+    OscillatorFreq       -> "OscillatorFreq"
+    AmplifierGain        -> "AmplifierGain"
+    DelayPeriod          -> "DelayPeriod"
+    FilterLowpassCutoff  -> "FilterLowpassCutoff"
     FilterHighpassCutoff -> "FilterHighpassCutoff"
 
 updateParam :: Synth -> NodeId -> SynthParameter -> WebAudio.Value -> Effect Synth
@@ -292,11 +285,8 @@ updateParam synth nodeId synthParameter newValue =
             setTargetValue newValue synth.synthState.audioContext highpassCutoffParam
             pure $ synth # _synthNodeParams nodeId <<< traversed <<< _highpassCutoff .~ newValue
 
-_SynthParams :: Lens' SynthParams (Map NodeId SynthNodeParams)
-_SynthParams = lens (\(SynthParams synthParams) -> synthParams) (\_ -> SynthParams)
-
 _synthNodeParams :: NodeId -> Lens' Synth (Maybe SynthNodeParams)
-_synthNodeParams nodeId = prop (SProxy :: SProxy "synthParams") <<< _SynthParams <<< at nodeId
+_synthNodeParams nodeId = prop (SProxy :: SProxy "synthParams") <<< at nodeId
 
 _oscNode :: Prism' SynthNodeState WebAudio.OscillatorNode
 _oscNode = prism'
@@ -358,10 +348,7 @@ _filterParams = prism'
                     _ -> Nothing)
 
 _biquadFilterCutoff :: Lens' BiquadFilterParams Cutoff
-_biquadFilterCutoff = lens
-                      (\(BiquadFilterParams filterType cutoff q gain) -> gain)
-                      (\(BiquadFilterParams filterType _ q gain) newCutoff ->
-                        BiquadFilterParams filterType newCutoff q gain)
+_biquadFilterCutoff = prop (SProxy :: SProxy "cutoff")
 
 _lowpassCutoff :: forall p. Choice p => Strong p =>
                   Optic' p SynthNodeParams Gain
@@ -376,7 +363,7 @@ _highpassCutoff :: forall p. Choice p => Strong p =>
 _highpassCutoff = _filterParams <<< prop (SProxy :: SProxy "highpassParams") <<< _biquadFilterCutoff
 
 parseSynthNodeType :: String -> Maybe SynthNodeType
-parseSynthNodeType = case _ of
+parseSynthNodeType nodeText = case String.trim nodeText of
   "oscillator" -> Just NodeTypeOscillator
   "gain"       -> Just NodeTypeAmplifier
   "delay"      -> Just NodeTypeDelay
@@ -396,47 +383,43 @@ parseSynthNodeType = case _ of
 freshSynthNodeParams :: SynthNodeType -> SynthNodeParams
 freshSynthNodeParams =
   let
-    biquadFilterParams = BiquadFilterParams defaultFilterType defaultFilterCutoff defaultFilterQFactor defaultFilterGain
-    analyserParams = AnalyserParams defaultFrequencyBinCount defaultMinDecibels defaultMaxDecibels defaultSmoothingTimeConstant
+    biquadFilterParams = { filterType : defaultFilterType
+                         , cutoff     : defaultFilterCutoff
+                         , qFactor    : defaultFilterQFactor
+                         , gain       : defaultFilterGain
+                         }
   in case _ of
     NodeTypeOscillator -> OscillatorParams defaultOscillatorFreq
     NodeTypeAmplifier -> AmplifierParams defaultAmplifierGain
     NodeTypeDelay -> DelayParams defaultDelayPeriod
-    NodeTypeFilter -> FilterParams { lowpassParams : biquadFilterParams
+    NodeTypeFilter -> FilterParams { lowpassParams  : biquadFilterParams
                                    , highpassParams : biquadFilterParams
-                                   , analyserParams : analyserParams
                                    }
     NodeTypeDestination -> DestinationParams
 
 newSynthNodeState :: SynthNodeParams -> WebAudio.AudioContext -> Effect SynthNodeState
 newSynthNodeState synthNodeType audioContext =
   let
-    newAnalyserState analyserParams =
-      let
-        AnalyserParams frequencyBinCount minDecibels maxDecibels smoothingTimeConstant = analyserParams
-      in do
-        log "creating analyser"
-        analyserNode <- WebAudio.createAnalyser audioContext
-        WebAudio.setSmoothingTimeConstant smoothingTimeConstant analyserNode
-        WebAudio.setMinDecibels minDecibels analyserNode
-        WebAudio.setMaxDecibels maxDecibels analyserNode
-        spectrumBuffer <- empty frequencyBinCount
-        drawLoopStopSignal <- Ref.new false
-        pure { analyserNode : analyserNode
-             , spectrumBuffer : spectrumBuffer
-             , drawLoopStopSignal : drawLoopStopSignal
-             }
+    newAnalyserState = do
+      log "creating analyser"
+      analyserNode <- WebAudio.createAnalyser audioContext
+      WebAudio.setSmoothingTimeConstant defaultSmoothingTimeConstant analyserNode
+      WebAudio.setMinDecibels defaultMinDecibels analyserNode
+      WebAudio.setMaxDecibels defaultMaxDecibels analyserNode
+      spectrumBuffer <- empty defaultFrequencyBinCount
+      drawLoopStopSignal <- Ref.new false
+      pure { analyserNode : analyserNode
+           , spectrumBuffer : spectrumBuffer
+           , drawLoopStopSignal : drawLoopStopSignal
+           }
 
-    newFilterAudioNodeState filterParams =
-      let
-        BiquadFilterParams filterType filterCutoff filterQFactor filterGain = filterParams
-      in do
-        filterAudioNode <- WebAudio.createBiquadFilter audioContext
-        WebAudioBiquad.setFilterType filterType filterAudioNode
-        setTargetValue filterCutoff  audioContext =<< WebAudioBiquad.filterFrequency filterAudioNode
-        setTargetValue filterQFactor audioContext =<< WebAudioBiquad.quality filterAudioNode
-        setTargetValue filterGain    audioContext =<< WebAudioBiquad.gain filterAudioNode
-        pure filterAudioNode
+    newFilterAudioNodeState filterAudioNodeParams = do
+      filterAudioNode <- WebAudio.createBiquadFilter audioContext
+      WebAudioBiquad.setFilterType filterAudioNodeParams.filterType filterAudioNode
+      setTargetValue filterAudioNodeParams.cutoff  audioContext =<< WebAudioBiquad.filterFrequency filterAudioNode
+      setTargetValue filterAudioNodeParams.qFactor audioContext =<< WebAudioBiquad.quality filterAudioNode
+      setTargetValue filterAudioNodeParams.gain    audioContext =<< WebAudioBiquad.gain filterAudioNode
+      pure filterAudioNode
 
   in case synthNodeType of
     OscillatorParams freq -> do
@@ -460,13 +443,13 @@ newSynthNodeState synthNodeType audioContext =
     FilterParams filterParams -> do
       lowpassFilter  <- newFilterAudioNodeState filterParams.lowpassParams
       highpassFilter <- newFilterAudioNodeState filterParams.highpassParams
-      analyserState <- newAnalyserState filterParams.analyserParams
+      analyserState <- newAnalyserState
       WebAudio.connect analyserState.analyserNode lowpassFilter
       WebAudio.connect lowpassFilter highpassFilter
-      pure $ FilterState { lowpassFilterNode : lowpassFilter
+      pure $ FilterState { lowpassFilterNode  : lowpassFilter
                          , highpassFilterNode : highpassFilter
-                         , analyserNode : analyserState.analyserNode
-                         , analyserBuffer : analyserState.spectrumBuffer
+                         , analyserNode       : analyserState.analyserNode
+                         , analyserBuffer     : analyserState.spectrumBuffer
                          , drawLoopStopSignal : analyserState.drawLoopStopSignal
                          }
 
@@ -492,8 +475,6 @@ setTargetValue value audioContext param = do
 ------
 -- Serialisation/deserialisation
 
-derive instance genericSynthParams :: Generic SynthParams _
-
 newtype ForeignSynthParams = ForeignSynthParams (Object SynthNodeParams)
 derive instance newtypeForeignSynthParams :: Newtype ForeignSynthParams _
 derive instance genericForeignSynthParams :: Generic ForeignSynthParams _
@@ -504,33 +485,16 @@ instance decodeForeignSynthParams :: Decode ForeignSynthParams where
 
 toForeignSynthParams :: SynthParams -> ForeignSynthParams
 toForeignSynthParams =
-  unwrap >>> toForeignMap identity UUID.toString >>> wrap
+  toForeignMap identity UUID.toString >>> wrap
 
 fromForeignSynthParams :: ForeignSynthParams -> Either String SynthParams
 fromForeignSynthParams =
-  unwrap >>> fromForeignMap pure parseUUIDEither >>> map wrap
-
-instance encodeSynthParams :: Encode SynthParams where
-  encode x = x # toForeignSynthParams >>> genericEncode defaultOptions
-instance decodeSynthParams :: Decode SynthParams where
-  decode x = x # genericDecode defaultOptions >>= fromForeignSynthParams >>> toExceptT
+  unwrap >>> fromForeignMap pure parseUUIDEither
 
 derive instance genericSynthNodeParams :: Generic SynthNodeParams _
 instance encodeSynthNodeParams :: Encode SynthNodeParams where
   encode x = x # genericEncode defaultOptions
 instance decodeSynthNodeParams :: Decode SynthNodeParams where
-  decode x = x # genericDecode defaultOptions
-
-derive instance genericBiquadFilterParams :: Generic BiquadFilterParams _
-instance encodeBiquadFilterParams :: Encode BiquadFilterParams where
-  encode x = x # genericEncode defaultOptions
-instance decodeBiquadFilterParams :: Decode BiquadFilterParams where
-  decode x = x # genericDecode defaultOptions
-
-derive instance genericAnalyserParams :: Generic AnalyserParams _
-instance encodeAnalyserParams :: Encode AnalyserParams where
-  encode x = x # genericEncode defaultOptions
-instance decodeAnalyserParams :: Decode AnalyserParams where
   decode x = x # genericDecode defaultOptions
 
 derive instance genericSynthParameter :: Generic SynthParameter _

@@ -3,34 +3,38 @@ module GraphComponent where
 import Prelude
 
 import AnalyserComponent as AnalyserComponent
-import AppState (AppState, AppStateCurrent(..), UninitializedAppState, AppOperation(..), DrawingEdge, DrawingEdgeId, GraphSpacePos(..), HoveredElementId(..), PageSpacePos(..), Shape, _drawingEdgePos, _drawingEdges, _graph, _graphNodePos, _synth, _hoveredElementId, _graphOrigin, _boundingRect, _zoom, appStateVersion, drawingEdgeKey, edgeIdStr, toGraphSpace, interpretUndoOp)
-import AppState.Foreign (appStateFromJSON, appStateToJSON)
+import AppOperation (AppOperation(..), appOperationVersion)
+import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText)
+import AppOperation.Interpreter (doAppOperation, interpretAppOperation, removeGraphData)
+import AppOperation.UIOp (moveGraphOrigin, rescalePane, rescaleWindow, removePane)
+import AppOperation.UndoOp (undo, redo)
+import AppState (DrawingEdge, DrawingEdgeId, HoveredElementId(..), UninitializedAppState, AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr)
+import AppState.Foreign (graphDataFromJSON, graphDataToJSON)
 import Audio.WebAudio.BaseAudioContext (newAudioContext, close) as WebAudio
 import Audio.WebAudio.Types (AudioContext) as WebAudio
-import Audio.WebAudio.Utils (createUint8Buffer)
+import CSS as CSS
 import ContentEditable.SVGComponent as SVGContentEditable
+import Control.Alt ((<|>))
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
+import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, graphTitle, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.Foldable (for_, foldl)
-import Data.Identity (Identity(..))
 import Data.Int (toNumber)
-import Data.Lens (preview, (.~), (?~), (^.))
-import Data.Lens.At (at)
+import Data.Lens ((%~), (.~), (^.), (^?))
 import Data.List as List
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Maybe (Maybe(..), isJust, fromMaybe)
 import Data.Newtype (unwrap)
-import Data.Set as Set
 import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.Tuple as Tuple
-import Data.Undoable (initUndoable, _current, _history, _undone)
-import Data.Undoable.UndoOp (dooOp, undoOp, redoOp)
+import Data.UUID (genUUID)
+import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console (log)
@@ -40,16 +44,22 @@ import Foreign as Foreign
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
 import Halogen.HTML as HH
+import Halogen.HTML.CSS as HCSS
+import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource as ES
 import Math as Math
-import Point2D (Point2D)
 import Run as Run
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
+import Synth (FilterState_, Synth, SynthNodeParams(..), SynthNodeState(..), SynthParameter(..), freshSynthNodeParams, parseSynthNodeType)
+import Synth.SynthOp (createSynthNode, deleteSynthNode, connectSynthNodes, updateSynthParam, interpretSynthOp)
+import UI.Constants (amplifierBoxSize, amplifierGainToControl, amplifierHaloOffset, amplifierTextBoxOffset, controlToAmplifierGain, defaultTextFieldShape, delayPeriodToGraphSpace, delayRectHaloOffset, delayRectHeight, delayTextBoxOffset, edgeTextBoxOffset, filterShape, filterTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, pageSpaceToDelayPeriod, zoomScaling)
+import UI.Panes (zoomAtPoint, paneContainingPoint)
+import UI.SvgDefs (svgDefs)
 import Web.Event.Event as WE
 import Web.Event.EventTarget as ET
 import Web.File.File as File
@@ -65,148 +75,69 @@ import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
-import Workflow.Core (Graph, Node, Edge, Focus(..), _pos, _nodeText, _edgeText, _focus, EdgeId, NodeId, _edgeId, _nodeId, _nodes, _source, _subgraph, _target)
-import Workflow.Graph (freshNode, freshEdge, allEdges, lookupChildren, lookupNode, lookupEdge, lookupParents)
-import Workflow.Graph.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge)
-import Workflow.Synth (FilterState_, Synth, SynthNodeParams(..), SynthNodeState(..), SynthParameter(..), SynthParams(..), defaultFrequencyBinCount, freshSynthNodeParams, parseSynthNodeType)
-import Workflow.Synth.SynthOp (createSynthNode, deleteSynthNode, updateSynthParam, interpretSynthOp)
-import Workflow.UIGraph (graphTitle)
-import Workflow.UIGraph.UIGraphOp (moveNodeOp, updateEdgeTextOp, updateNodeTextOp)
 
 
 foreign import loadFile :: Effect Unit
 foreign import saveJSON :: String -> String -> Effect Unit
 
 
-nodeRadius :: Number
-nodeRadius = 7.0
-
-groupNodeRadius :: Number
-groupNodeRadius = 12.0
-
-nodeBorderRadius :: Number
-nodeBorderRadius = 28.0
-
-haloRadius :: Number
-haloRadius = 40.0
-
-nodeTextBoxOffset :: Point2D
-nodeTextBoxOffset = { x : 20.0, y : - 10.0 }
-
-amplifierBoxSize :: Number
-amplifierBoxSize = 15.0
-
-amplifierTextBoxOffset :: Point2D
-amplifierTextBoxOffset = { x : - 0.0 - amplifierBoxSize
-                         , y : - 23.5 - amplifierBoxSize
-                         }
-
-amplifierHaloOffset :: Number
-amplifierHaloOffset = 17.5
-
-amplifierGainToControl :: Number -> Number
-amplifierGainToControl gain = Math.sqrt gain
-
-controlToAmplifierGain :: Number -> Number
-controlToAmplifierGain controlPos = Math.pow controlPos 2.0
-
-delayPeriodToPageSpace :: Number -> Number
-delayPeriodToPageSpace = (*) 1000.0
-
-pageSpaceToDelayPeriod :: Number -> Number
-pageSpaceToDelayPeriod pageSpacePos = pageSpacePos / 1000.0
-
-delayRectHeight :: Number
-delayRectHeight = 20.0
-
-delayRectHaloOffset :: Number
-delayRectHaloOffset = 19.0
-
-delayTextBoxOffset :: Point2D
-delayTextBoxOffset = { x : 0.0
-                     , y : -23.5  - delayRectHeight / 2.0
-                     }
-
-edgeTextBoxOffset :: Point2D
-edgeTextBoxOffset = { x : 10.0, y : - 20.0 }
-
-zoomScaling :: Number
-zoomScaling = 0.01
-
-defaultTextFieldShape :: Shape
-defaultTextFieldShape = { width : 100.0, height : 50.0 }
-
-maxTextFieldShape :: Shape
-maxTextFieldShape = { width : 700.0, height : 500.0 }
-
-filterShape :: Shape
-filterShape = { height : 100.0
-              , width : 600.0
-              }
-
-filterTextBoxOffset :: Point2D
-filterTextBoxOffset = { x : 0.0
-                      , y : -23.5
-                      }
-
-type Input = { boundingRect :: WHE.DOMRect
-             , graph :: Graph
-             , audioContext :: WebAudio.AudioContext
-             }
-
-initialState :: Input -> AppState
-initialState inputs = initUndoable
-  $ AppStateCurrent
-    { graph : inputs.graph
-    , drawingEdges : Map.empty
-    , hoveredElementId : Nothing
-    , boundingRect : inputs.boundingRect
-    , graphOrigin : PageSpacePos { x : 0.0, y : 0.0 }
-    , zoom : 1.0
-    , synth : { synthState : { audioContext : inputs.audioContext
-                             , synthNodeStates : Map.empty
-                             }
-              , synthParams : SynthParams Map.empty
-              }
-    }
-
 data Action
   = PreventDefault WE.Event Action
   | StopPropagation WE.Event Action
+  | EvalQuery (Query Unit)
   | Init
   | UpdateContentEditableText
-  | BackgroundDragStart PageSpacePos ME.MouseEvent
-  | BackgroundDragMove Drag.DragEvent PageSpacePos H.SubscriptionId
-  | NodeDragStart NodeId GraphSpacePos ME.MouseEvent
-  | NodeDragMove Drag.DragEvent NodeId GraphSpacePos H.SubscriptionId
-  | EdgeDrawStart DrawingEdgeId ME.MouseEvent
-  | EdgeDrawMove Drag.DragEvent DrawingEdgeId H.SubscriptionId
+  | BackgroundDragStart GraphId PageSpacePoint2D ME.MouseEvent
+  | BackgroundDragMove Drag.DragEvent GraphId PageSpacePoint2D H.SubscriptionId
+  | NodeDragStart GraphId NodeId GraphSpacePoint2D ME.MouseEvent
+  | NodeDragMove Drag.DragEvent GraphId NodeId GraphSpacePoint2D H.SubscriptionId
+  | EdgeDrawStart GraphView DrawingEdgeId ME.MouseEvent
+  | EdgeDrawMove Drag.DragEvent GraphId DrawingEdgeId H.SubscriptionId
   | NodeTextInput NodeId SVGContentEditable.Message
-  | EdgeTextInput EdgeId SVGContentEditable.Message
-  | AppCreateNode ME.MouseEvent
+  | EdgeTextInput GraphId EdgeId SVGContentEditable.Message
+  | AppCreateNode GraphView ME.MouseEvent
   | AppDeleteNode Node
-  | AppCreateEdge Node Node
-  | AppDeleteEdge Node Node
-  | FocusOn Focus
-  | DeleteFocus
+  | AppCreateEdge GraphId EdgeId
+  | AppDeleteEdge GraphId Edge
+  | FocusOn GraphId (Maybe Focus)
+  | DeleteFocus GraphId
   | Hover (Maybe HoveredElementId)
-  | Zoom WhE.WheelEvent
+  | Zoom GraphId WhE.WheelEvent
   | CenterGraphOriginAndZoom
   | FetchLocalFile WE.Event
   | LoadLocalFile FileReader.FileReader H.SubscriptionId WE.Event
   | SaveLocalFile
   | Keypress KE.KeyboardEvent
   | DoNothing
-  | GainDragStart NodeId Number ME.MouseEvent
-  | GainDragMove Drag.DragEvent NodeId Number H.SubscriptionId
-  | DelayDragStart NodeId Number ME.MouseEvent
-  | DelayDragMove Drag.DragEvent NodeId Number H.SubscriptionId
+  | GainDragStart GraphId NodeId Number ME.MouseEvent
+  | GainDragMove Drag.DragEvent GraphId NodeId Number H.SubscriptionId
+  | DelayDragStart GraphId NodeId Number ME.MouseEvent
+  | DelayDragMove Drag.DragEvent GraphId NodeId Number H.SubscriptionId
+
+type Input = { windowBoundingRect :: WHE.DOMRect
+             , audioContext       :: WebAudio.AudioContext
+             }
+
+initialState :: Input -> AppState
+initialState inputs =
+  { graphData             : emptyGraphData
+  , history               : Map.empty
+  , undone                : Map.empty
+  , windowBoundingRect    : inputs.windowBoundingRect
+  , synth : { synthState  : { audioContext    : inputs.audioContext
+                            , synthNodeStates : Map.empty
+                            }
+            , synthParams : Map.empty
+            }
+  , drawingEdges          : Map.empty
+  , hoveredElementId      : Nothing
+  , focusedPane           : Nothing
+  }
 
 data Query a = UpdateBoundingRect a
 
 data Message
-  = Focused Focus
-  | DrawEdge DrawingEdge
+  = Focused
   | MappingMode
 
 -- Slot type for parent components using a child GraphComponent
@@ -227,8 +158,8 @@ _edgeTextField = SProxy
 _analyser :: SProxy "analyser"
 _analyser = SProxy
 
-graph :: H.Component HH.HTML Query Input Message Aff
-graph =
+graphComponent :: H.Component HH.HTML Query Input Message Aff
+graphComponent =
   H.mkComponent
     { initialState : initialState
     , render : render
@@ -239,148 +170,16 @@ graph =
     }
   where
 
-  svgDefs :: H.ComponentHTML Action Slots Aff
-  svgDefs = SE.defs []
-            [ SE.marker
-              [ SA.id "drawing-arrow"
-              , SA.markerWidth $ show 10.0
-              , SA.markerHeight $ show 10.0
-              , SA.refX $ show 3.0
-              , SA.refY $ show 5.0
-              , SA.orient SVGT.AutoOrient
-              , SA.markerUnits SVGT.UserSpaceOnUse
-              ]
-              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
-                               , SVGT.Abs (SVGT.L 10.0 5.0)
-                               , SVGT.Abs (SVGT.L 0.0 10.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            , SE.marker
-              [ SA.id "arrow"
-              , SA.markerWidth $ show 10.0
-              , SA.markerHeight $ show 10.0
-              , SA.refX $ show 15.0
-              , SA.refY $ show 5.0
-              , SA.orient SVGT.AutoOrient
-              , SA.markerUnits SVGT.UserSpaceOnUse
-              ]
-              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
-                               , SVGT.Abs (SVGT.L 0.0 10.0)
-                               , SVGT.Abs (SVGT.L 8.0 5.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            , SE.marker
-              [ SA.id "arrow-to-synth-node"
-              , SA.markerWidth $ show 10.0
-              , SA.markerHeight $ show 10.0
-              , SA.refX $ show 57.0
-              , SA.refY $ show 5.0
-              , SA.orient SVGT.AutoOrient
-              , SA.markerUnits SVGT.UserSpaceOnUse
-              ]
-              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
-                               , SVGT.Abs (SVGT.L 0.0 10.0)
-                               , SVGT.Abs (SVGT.L 8.0 5.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            , SE.marker
-              [ SA.id "arrow-to-group"
-              , SA.markerWidth $ show 10.0
-              , SA.markerHeight $ show 10.0
-              , SA.refX $ show 19.0
-              , SA.refY $ show 5.0
-              , SA.orient SVGT.AutoOrient
-              , SA.markerUnits SVGT.UserSpaceOnUse
-              ]
-              [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
-                               , SVGT.Abs (SVGT.L 0.0 10.0)
-                               , SVGT.Abs (SVGT.L 8.0 5.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            , SE.pattern
-              [ SA.id "pattern-delay-fill"
-              , SA.height $ show 20.0
-              , SA.width $ show 20.0
-              , SA.x $ show $ - delayRectHeight / 2.0
-              , SA.y $ show $ - delayRectHeight / 2.0
-              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
-              ]
-              let
-                patternRect x y cssClass =
-                  SE.rect
-                  [ SA.class_ cssClass
-                  , SA.height $ show 10.0
-                  , SA.width $ show 10.0
-                  , SA.x $ show x
-                  , SA.y $ show y
-                  ]
-              in
-                [ patternRect 0.0 0.0 "pattern-delay-fill-rect1"
-                , patternRect 10.0 0.0 "pattern-delay-fill-rect2"
-                , patternRect 10.0 10.0 "pattern-delay-fill-rect1"
-                , patternRect 0.0 10.0 "pattern-delay-fill-rect2"
-                ]
-            , SE.pattern
-              [ SA.id "pattern-amplifier-below-unity"
-              , SA.height $ show 10.0
-              , SA.width $ show 10.0
-              , SA.x $ show $ - amplifierBoxSize / 3.0
-              , SA.y $ show $ - amplifierBoxSize / 3.0
-              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
-              ]
-              [ SE.rect
-                [ SA.height $ show 10.0
-                , SA.width $ show 10.0
-                , SA.class_ "pattern-amplifier-unity-background"
-                ]
-              , SE.path [ SA.class_ "amplifier-below-unity-triangle"
-                        , SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
-                               , SVGT.Abs (SVGT.L 5.0 10.0)
-                               , SVGT.Abs (SVGT.L 10.0 0.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            , SE.pattern
-              [ SA.id "pattern-amplifier-above-unity"
-              , SA.height $ show 10.0
-              , SA.width $ show 10.0
-              , SA.x $ show $ - amplifierBoxSize / 3.0
-              , SA.y $ show $ - amplifierBoxSize / 3.0
-              , SA.patternUnits SVGT.PatternUnitsUserSpaceOnUse
-              ]
-              [ SE.rect
-                [ SA.height $ show 10.0
-                , SA.width $ show 10.0
-                , SA.class_ "pattern-amplifier-unity-background"
-                ]
-              , SE.path [ SA.class_ "amplifier-above-unity-triangle"
-                        , SA.d [ SVGT.Abs (SVGT.M 0.0 10.0)
-                               , SVGT.Abs (SVGT.L 5.0 0.0)
-                               , SVGT.Abs (SVGT.L 10.0 10.0)
-                               , SVGT.Abs SVGT.Z
-                               ]
-                        ]
-              ]
-            ]
-
-  renderGraphNode :: AppState -> Node -> H.ComponentHTML Action Slots Aff
-  renderGraphNode state node =
+  renderGraphNode :: AppState -> GraphView -> Node -> Tuple String (H.ComponentHTML Action Slots Aff)
+  renderGraphNode state pane node =
     let
-      hoveredOverBorder = (state ^. _hoveredElementId) == (Just $ NodeBorderId $ node ^. _nodeId)
-      hoveredOverHalo = (state ^. _hoveredElementId) == (Just $ NodeHaloId $ node ^. _nodeId)
+      hoveredOverBorder = state.hoveredElementId == Just (NodeBorderId node.id)
+      hoveredOverHalo   = state.hoveredElementId == Just (NodeHaloId node.id)
       noDrawingEdgeFromNode =
-        Map.isEmpty (Map.filter (\drawingEdge -> drawingEdge.source == node ^. _nodeId) (state ^. _drawingEdges))
+        Map.isEmpty (Map.filter (\drawingEdge -> drawingEdge.source == node.id)
+                                (state ^. _drawingEdges))
       existsDrawingEdgeHoveredOverNode =
-        (0 < Map.size (Map.filter ((flip drawingEdgeWithinNodeHalo) node) (state ^. _drawingEdges)))
+        (0 < Map.size (Map.filter (\drawingEdge -> drawingEdgeWithinNodeHalo drawingEdge pane node) state.drawingEdges))
       drawingEdgeOverNode =
         (hoveredOverBorder || hoveredOverHalo)
         &&
@@ -390,15 +189,15 @@ graph =
       nodeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "node"
-        , if state ^. _graph <<< _focus == FocusNode (node ^. _nodeId)
+        , if pane.focus == Just (FocusNode node.id)
           then Just "focused"
           else Nothing
         ]
       nodeBorderClasses =
           joinWith " " $ Array.catMaybes
           [ Just "nodeBorder"
-          -- TODO: decide if grouping/ungrouping is useful for ologs
-          --, if (Set.member (node ^. _nodeId) (state ^. _graph <<< _highlighted))
+          -- TODO: use highlighting?
+          --, if (Set.member node.id state.graphData.highlighted)
           --  then Just "highlighted"
           --  else Nothing
           , if hoveredOverBorder
@@ -410,7 +209,7 @@ graph =
       haloClasses =
         joinWith " " $ Array.catMaybes
         [ Just "nodeHalo"
-        , if state ^. _graph <<< _focus == FocusNode (node ^. _nodeId)
+        , if pane.focus == Just (FocusNode node.id)
              &&
              (not hoveredOverBorder)
           then Just "focused"
@@ -428,14 +227,14 @@ graph =
           ]
           [ HH.slot
             _nodeTextField
-            (node ^. _nodeId)
+            node.id
             SVGContentEditable.svgContenteditable
             { shape : defaultTextFieldShape
-            , initialText : (node ^. _nodeText)
+            , initialText : node.text
             , maxShape : maxTextFieldShape
             , fitContentDynamic : true
             }
-            (Just <<< NodeTextInput (node ^. _nodeId))
+            (Just <<< NodeTextInput node.id)
           ]
         ]
       graphNodeHTML =
@@ -444,14 +243,14 @@ graph =
           [ SA.class_ haloClasses
           , SA.r $ show haloRadius
           , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                 $ EdgeDrawStart (node ^. _nodeId) e
-          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                                 $ EdgeDrawStart pane node.id e
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId node.id
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
         -- Node center
         , SE.circle
           [ SA.class_ nodeClasses
-          , SA.r $ show $ if (isJust (node ^. _subgraph))
+          , SA.r $ show $ if isJust node.subgraph
                           then groupNodeRadius
                           else nodeRadius
           ]
@@ -461,10 +260,10 @@ graph =
           , SA.r $ show nodeBorderRadius
           , HE.onMouseDown \e -> Just
                                  $ StopPropagation (ME.toEvent e)
-                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                                 $ NodeDragStart node.graphId node.id node.position e
           , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
                                    $ AppDeleteNode node
-          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId node.id
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
         ] <> textBoxHTML nodeTextBoxOffset
@@ -486,15 +285,15 @@ graph =
                       b = amplifierHaloOffset + amplifierBoxSize
                     in
                       SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
-                           , SVGT.Abs (SVGT.L b (-b))
-                           , SVGT.Abs (SVGT.L b b)
-                           , SVGT.Abs (SVGT.L (-b) b)
+                           , SVGT.Abs (SVGT.L   b  (-b))
+                           , SVGT.Abs (SVGT.L   b    b)
+                           , SVGT.Abs (SVGT.L (-b)   b)
                            , SVGT.Abs SVGT.Z
                            ]
                   , SA.class_ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                         $ EdgeDrawStart (node ^. _nodeId) e
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                                         $ EdgeDrawStart pane node.id e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId node.id
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         -- Draggable amplifier control
@@ -505,35 +304,35 @@ graph =
                       b = amplifierBoxSize
                       hornSize = 3.0 * amplifierBoxSize * (amplifierGainToControl gain)
                     in
-                      SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
-                           , SVGT.Abs (SVGT.L b (-b))
-                           , SVGT.Abs (SVGT.L (3.0 * b) (- hornSize))
-                           , SVGT.Abs (SVGT.L (3.0 * b) hornSize)
-                           , SVGT.Abs (SVGT.L b b)
-                           , SVGT.Abs (SVGT.L (-b) b)
+                      SA.d [ SVGT.Abs (SVGT.M (-b)      (-b))
+                           , SVGT.Abs (SVGT.L   b       (-b))
+                           , SVGT.Abs (SVGT.L (3.0 * b) (-hornSize))
+                           , SVGT.Abs (SVGT.L (3.0 * b)   hornSize)
+                           , SVGT.Abs (SVGT.L   b         b)
+                           , SVGT.Abs (SVGT.L (-b)        b)
                            , SVGT.Abs SVGT.Z
                            ]
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
-                                         $ GainDragStart (node ^. _nodeId) gain e
+                                         $ GainDragStart node.graphId node.id gain e
                   ]
         -- Node border, for grabbing
         , SE.path [ let
                        b = amplifierBoxSize
                     in
                        SA.d [ SVGT.Abs (SVGT.M (-b) (-b))
-                            , SVGT.Abs (SVGT.L b (-b))
-                            , SVGT.Abs (SVGT.L b b)
-                            , SVGT.Abs (SVGT.L (-b) b)
+                            , SVGT.Abs (SVGT.L   b  (-b))
+                            , SVGT.Abs (SVGT.L   b    b)
+                            , SVGT.Abs (SVGT.L (-b)   b)
                             , SVGT.Abs SVGT.Z
                             ]
                   , SA.class_ nodeBorderClasses
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
-                                         $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                                         $ NodeDragStart node.graphId node.id node.position e
                   , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
                                            $ AppDeleteNode node
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId node.id
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         ] <> textBoxHTML amplifierTextBoxOffset
@@ -550,42 +349,42 @@ graph =
       delayNodeHTML period =
         -- Node Halo, for creating edges from
         [ SE.rect [ SA.height $ show $ delayRectHeight + 2.0 * delayRectHaloOffset
-                  , SA.width $ show $ (delayPeriodToPageSpace period) + 2.0 * delayRectHaloOffset
+                  , SA.width $ show $ (delayPeriodToGraphSpace period) + 2.0 * delayRectHaloOffset
                   , SA.x $ show $ - delayRectHaloOffset
                   , SA.y $ show $ - delayRectHaloOffset - delayRectHeight / 2.0
                   , SA.class_ $ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                         $ EdgeDrawStart (node ^. _nodeId) e
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                                         $ EdgeDrawStart pane node.id e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node.id
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         -- Inner border shadow for delay period control
         , SE.rect [ SA.class_ $ nodeClasses <> " delay border-shadow"
                   , SA.height $ show $ delayRectHeight - 4.0
-                  , SA.width $ show $ (delayPeriodToPageSpace period) - 4.0
+                  , SA.width $ show $ (delayPeriodToGraphSpace period) - 4.0
                   , SA.x $ show 2.0
                   , SA.y $ show $ 2.0 - delayRectHeight / 2.0
                   ]
         -- Draggable delay period control
         , SE.rect [ SA.class_ $ nodeClasses <> " delay"
                   , SA.height $ show delayRectHeight
-                  , SA.width $ show $ delayPeriodToPageSpace period
+                  , SA.width $ show $ delayPeriodToGraphSpace period
                   , SA.y $ show $ - delayRectHeight / 2.0
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
-                                         $ DelayDragStart (node ^. _nodeId) period e
+                                         $ DelayDragStart node.graphId node.id period e
                   ]
         -- Node border, for grabbing
         , SE.rect [ SA.height $ show $ delayRectHeight / 2.0
-                  , SA.width $ show $ Math.min delayRectHeight (delayPeriodToPageSpace period)
+                  , SA.width $ show $ Math.min delayRectHeight (delayPeriodToGraphSpace period)
                   , SA.class_ $ nodeBorderClasses <> " delay"
                   , SA.y $ show $ - delayRectHeight / 2.0
                   , HE.onMouseDown \e -> Just
                                          $ StopPropagation (ME.toEvent e)
-                                         $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                                         $ NodeDragStart node.graphId node.id node.position e
                   , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
                                            $ AppDeleteNode node
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node.id
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         ] <> textBoxHTML delayTextBoxOffset
@@ -599,19 +398,17 @@ graph =
       ---   |../  \/ \[[/  \/]]|
       ---   --------------------
       ---
-      filterNodeHTML :: NodeId -> FilterState_ -> Number -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
-      filterNodeHTML nodeId filterState zoom lopassCutoff hipassCutoff =
+      filterNodeHTML :: Node -> FilterState_ -> Number -> Number -> Array (H.ComponentHTML Action Slots Aff)
+      filterNodeHTML node' filterState lopassCutoff hipassCutoff =
         -- Spectrum display
         [ HH.slot
           _analyser
-          (node ^. _nodeId)
+          node'.id
           AnalyserComponent.analyser
           { shape : filterShape
-          , zoom : zoom
           , analyserNode : filterState.analyserNode
           , spectrumBuffer : filterState.analyserBuffer
           , drawLoopStopSignal : filterState.drawLoopStopSignal
-          , zoomRef : Nothing
           }
           (const Nothing)
         -- Node Halo, for creating edges from
@@ -621,8 +418,8 @@ graph =
                   , SA.y $ show $ - delayRectHaloOffset
                   , SA.class_ $ haloClasses
                   , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                                         $ EdgeDrawStart (node ^. _nodeId) e
-                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node ^. _nodeId
+                                         $ EdgeDrawStart pane node'.id e
+                  , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId $ node'.id
                   , HE.onMouseLeave \_ -> Just $ Hover Nothing
                   ]
         -- Thin border
@@ -635,38 +432,62 @@ graph =
           , SA.width $ show filterShape.width
           , HE.onMouseDown \e -> Just
                                  $ StopPropagation (ME.toEvent e)
-                                 $ NodeDragStart (node ^. _nodeId) (GraphSpacePos (node ^. _pos)) e
+                                 $ NodeDragStart node'.graphId node'.id node'.position e
           , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-                                   $ AppDeleteNode node
-          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node ^. _nodeId
+                                   $ AppDeleteNode node'
+          , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId $ node'.id
           , HE.onMouseLeave \_ -> Just $ Hover Nothing
           ]
         ] <> textBoxHTML filterTextBoxOffset
-      nodeHTML = case Map.lookup (node ^. _nodeId) (unwrap (state ^. _synth).synthParams) of
+
+      whichNodeHTML = case Map.lookup node.id state.synth.synthParams of
         Nothing -> graphNodeHTML
         Just synthNodeParams -> case synthNodeParams of
           OscillatorParams freq -> graphNodeHTML
           AmplifierParams gain -> amplifierNodeHTML gain
           DelayParams delayPeriod -> delayNodeHTML delayPeriod
           FilterParams filterParams ->
-            case Map.lookup (node ^. _nodeId) (state ^. _synth).synthState.synthNodeStates of
+            case Map.lookup node.id state.synth.synthState.synthNodeStates of
               Nothing -> graphNodeHTML
               Just synthNodeState -> case synthNodeState of
                 FilterState filterState ->
-                  filterNodeHTML (node ^. _nodeId) filterState (state ^. _zoom) 0.0 0.0
+                  filterNodeHTML node filterState 0.0 0.0
                 _ -> graphNodeHTML
           _ -> graphNodeHTML
+      GraphSpacePoint2D nodePos = node.position
+      nodeHTML = SE.g
+                 [ SA.transform [ SVGT.Translate nodePos.x nodePos.y ] ]
+                 whichNodeHTML
     in
-      SE.g
-      [ SA.transform [ SVGT.Translate (node ^. _pos).x (node ^. _pos).y ] ]
-      nodeHTML
+      Tuple (show node.id) nodeHTML
 
-  renderEdge :: AppState -> Edge -> Maybe (Tuple (H.ComponentHTML Action Slots Aff) (Maybe (H.ComponentHTML Action Slots Aff)))
-  renderEdge state edge = do
-    sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
-    targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
+  renderGhostNode :: AppState -> GraphView -> Node -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
+  renderGhostNode state renderPane node =
+    case Map.lookup node.graphId state.graphData.panes of
+      Nothing -> Nothing
+      Just nativePane -> Just
+        let
+          graphNodeHTML =
+            SE.circle
+            [ SA.class_ "node ghost"
+            , SA.r $ show $ if isJust node.subgraph
+                            then groupNodeRadius
+                            else nodeRadius
+            ]
+          GraphSpacePoint2D nodePos = node.position # toPageSpace nativePane # toGraphSpace renderPane
+          nodeHTML = SE.g
+                     [ SA.transform [ SVGT.Translate nodePos.x nodePos.y ] ]
+                     [ graphNodeHTML ]
+        in
+          Tuple (show node.id <> "_ghost") nodeHTML
+
+  renderEdge :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
+  renderEdge state renderPane edge = do
+    targetNode <- Map.lookup edge.id.target state.graphData.nodes
+    GraphSpacePoint2D targetPos <- edgeTargetPosition state edge renderPane
+    GraphSpacePoint2D sourcePos <- edgeSourcePosition state edge renderPane
     let
-      focused = state ^. _graph <<< _focus == FocusEdge (edge ^. _edgeId) []
+      focused = state ^? _focus renderPane.graphId == (Just $ Just $ FocusEdge edge.id [])
       edgeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edge"
@@ -674,184 +495,190 @@ graph =
           then Just "focused"
           else Nothing
         ]
-      markerRef = if (isJust (targetNode ^. _subgraph))
+      markerRef = if (isJust targetNode.subgraph)
                   then "url(#arrow)"
                   else "url(#arrow-to-group)"
-      markerRef' = if isJust $ Map.lookup (edge ^. _target) (unwrap (state ^. _synth).synthParams)
+      markerRef' = if isJust $ Map.lookup edge.id.target state.synth.synthParams
                    then "url(#arrow-to-synth-node)"
                    else markerRef
-      sourcePos = case Map.lookup (edge ^. _source) (unwrap (state ^. _synth).synthParams) of
-                    Just (DelayParams delayPeriod) ->
-                      { x : (sourceNode ^. _pos).x
-                            + (delayPeriodToPageSpace delayPeriod)
-                      , y : (sourceNode ^. _pos).y
-                      }
-                    _  -> sourceNode ^. _pos
-      edgeMidPos =
-        { x : (sourcePos.x + (targetNode ^. _pos).x) / 2.0
-        , y : (sourcePos.y + (targetNode ^. _pos).y) / 2.0
-        }
-    if edge^._source == edge^._target
-    then Nothing
-    else Just $
-      Tuple
-      -- Edge
-      (SE.line
-       [ SA.class_ edgeClasses
-       , SA.x1 $ show sourcePos.x
-       , SA.y1 $ show sourcePos.y
-       , SA.x2 $ show (targetNode ^. _pos).x
-       , SA.y2 $ show (targetNode ^. _pos).y
-       , SA.markerEnd markerRef'
-       ]
-      )
-      (if not focused && ((edge ^. _edgeText) == "") then Nothing else Just $
-       -- Edge Textbox
-       SE.g
-       [ SA.transform [ SVGT.Translate
-                        (edgeMidPos.x + edgeTextBoxOffset.x)
-                        (edgeMidPos.y + edgeTextBoxOffset.y)
-                      ]
-       , HE.onMouseDown \e -> Just
-                              $ StopPropagation (ME.toEvent e)
-                              $ DoNothing
-       ]
-       [ HH.slot
-         _edgeTextField
-         (edge ^. _edgeId)
-         SVGContentEditable.svgContenteditable
-         { shape : defaultTextFieldShape
-         , initialText : (edge ^. _edgeText)
-         , maxShape : maxTextFieldShape
-         , fitContentDynamic : true
-         }
-         (Just <<< EdgeTextInput (edge ^. _edgeId))
-       ]
-      )
+    pure $ Tuple (show edge.id <> "_edge_" <> show renderPane.graphId) $
+      SE.line
+      [ SA.class_ edgeClasses
+      , SA.x1 $ show sourcePos.x
+      , SA.y1 $ show sourcePos.y
+      , SA.x2 $ show targetPos.x
+      , SA.y2 $ show targetPos.y
+      , SA.markerEnd markerRef'
+      ]
 
-  renderEdgeBorder :: AppState -> Edge -> Maybe (H.ComponentHTML Action Slots Aff)
-  renderEdgeBorder state edge = do
-    sourceNode <- Map.lookup (edge ^. _source) $ state ^. _graph <<< _nodes
-    targetNode <- Map.lookup (edge ^. _target) $ state ^. _graph <<< _nodes
+  renderEdgeTextField :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
+  renderEdgeTextField state renderPane edge = do
+    targetNode <- Map.lookup edge.id.target state.graphData.nodes
+    sourceNode <- Map.lookup edge.id.source state.graphData.nodes
+    GraphSpacePoint2D edgeMidPos <- edgeMidPosition state edge renderPane
+    let
+      focused = state ^? _focus renderPane.graphId == (Just $ Just $ FocusEdge edge.id [])
+    if not focused && (edge.text == "")
+    then Nothing
+    else Just $ Tuple (show edge.id <> "_textField_" <> show renderPane.graphId) $
+      SE.g
+      [ SA.transform [ SVGT.Translate
+                       (edgeMidPos.x + edgeTextBoxOffset.x)
+                       (edgeMidPos.y + edgeTextBoxOffset.y)
+                     ]
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ DoNothing
+      ]
+      [ HH.slot
+        _edgeTextField
+        edge.id
+        SVGContentEditable.svgContenteditable
+        { shape : defaultTextFieldShape
+        , initialText : edge.text
+        , maxShape : maxTextFieldShape
+        , fitContentDynamic : true
+        }
+        (Just <<< EdgeTextInput sourceNode.graphId edge.id)
+      ]
+
+  renderEdgeBorder :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
+  renderEdgeBorder state renderPane edge = do
+    targetNode <- Map.lookup edge.id.target state.graphData.nodes
+    GraphSpacePoint2D sourcePos <- edgeSourcePosition state edge renderPane
+    GraphSpacePoint2D targetPos <- edgeTargetPosition state edge renderPane
     let
       edgeBorderClasses =
         joinWith " " $ Array.catMaybes
         [ Just "edgeBorder"
-        , if (state ^. _hoveredElementId) == (Just $ EdgeBorderId $ edge ^. _edgeId)
+        , if state.hoveredElementId == (Just $ EdgeBorderId edge.id)
           then Just "hover"
           else Nothing
         ]
-      sourcePos = case Map.lookup (edge ^. _source) (unwrap (state ^. _synth).synthParams) of
-                    Just (DelayParams delayPeriod) ->
-                      { x : (sourceNode ^. _pos).x
-                            + (delayPeriodToPageSpace delayPeriod)
-                      , y : (sourceNode ^. _pos).y
-                      }
-                    _  -> sourceNode ^. _pos
-    pure $
+    pure $ Tuple (show edge.id <> "_border_" <> show renderPane.graphId) $
       SE.line
       [ SA.class_ edgeBorderClasses
       , SA.x1 $ show sourcePos.x
       , SA.y1 $ show sourcePos.y
-      , SA.x2 $ show (targetNode ^. _pos).x
-      , SA.y2 $ show (targetNode ^. _pos).y
+      , SA.x2 $ show targetPos.x
+      , SA.y2 $ show targetPos.y
       , SA.strokeLinecap SVGT.Butt
-      , HE.onClick \_ -> Just $ FocusOn $ FocusEdge (edge ^. _edgeId) []
-      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId $ edge ^. _edgeId
+      , HE.onClick \_ -> Just $ FocusOn renderPane.graphId $ Just $ FocusEdge edge.id []
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId edge.id
       , HE.onMouseLeave \_ -> Just $ Hover Nothing
       , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-                               $ AppDeleteEdge sourceNode targetNode
+                                    $ AppDeleteEdge renderPane.graphId edge
       ]
 
-  renderDrawingEdge :: AppState -> DrawingEdge -> Maybe (H.ComponentHTML Action Slots Aff)
-  renderDrawingEdge state drawingEdgeState = do
-    sourcePos <- preview (_graphNodePos drawingEdgeState.source) state
+  renderDrawingEdge :: AppState -> GraphView -> DrawingEdge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
+  renderDrawingEdge state renderPane drawingEdgeState = do
     let
-      GraphSpacePos sourceGraphPos = sourcePos
-      GraphSpacePos drawingEdgeGraphPos = drawingEdgeState.pos
-      drawingEdgeClasses =
-        joinWith " " $ Array.catMaybes
-        [ Just "edge" ]
-      sourcePos' = case Map.lookup drawingEdgeState.source (unwrap (state ^. _synth).synthParams) of
-                     Just (DelayParams delayPeriod) ->
-                       { x : sourceGraphPos.x
-                         + (delayPeriodToPageSpace delayPeriod)
-                       , y : sourceGraphPos.y
-                       }
-                     _  -> sourceGraphPos
-    pure $
+      GraphSpacePoint2D sourceGraphPos =
+        drawingEdgeState.sourcePosition
+        # toGraphSpace renderPane
+      GraphSpacePoint2D pointGraphPos =
+        drawingEdgeState.pointPosition
+        # toGraphSpace renderPane
+      isAcrossGraphs = drawingEdgeState.sourceGraph /= drawingEdgeState.targetGraph
+    pure $ Tuple (show drawingEdgeState.source <> "_drawingEdge_" <> show renderPane.graphId) $
       SE.line
-      [ SA.class_ drawingEdgeClasses
-      , SA.x1 $ show sourcePos'.x
-      , SA.y1 $ show sourcePos'.y
-      , SA.x2 $ show drawingEdgeGraphPos.x
-      , SA.y2 $ show drawingEdgeGraphPos.y
+      [ SA.class_ $ "edge" <> if isAcrossGraphs then " mappingEdge" else ""
+      , SA.x1 $ show sourceGraphPos.x
+      , SA.y1 $ show sourceGraphPos.y
+      , SA.x2 $ show pointGraphPos.x
+      , SA.y2 $ show pointGraphPos.y
       , SA.markerEnd "url(#drawing-arrow)"
+      ]
+
+  renderSingleGraph :: AppState -> GraphView -> GraphData -> H.ComponentHTML Action Slots Aff
+  renderSingleGraph state renderPane singleGraph =
+    let
+      nodes = singleGraph.nodes # Map.values # Array.fromFoldable
+
+      keyedNodes = nodes <#> renderGraphNode state renderPane
+
+      allNodesInOtherGraphs = state.graphData.nodes
+                              # Map.filter (\node -> node.graphId /= renderPane.graphId)
+                              # Map.values # Array.fromFoldable
+
+      ghostNodes = Array.catMaybes $ allNodesInOtherGraphs <#> renderGhostNode state renderPane
+
+      edges = Array.nub $ edgeArray singleGraph <> allEdgesBetweenGraphs state.graphData
+
+      keyedEdges = Array.mapMaybe (renderEdge state renderPane) edges
+
+      keyedEdgeTextFields = Array.mapMaybe (renderEdgeTextField state renderPane) edges
+
+      keyedEdgeBorders = Array.mapMaybe (renderEdgeBorder state renderPane) edges
+
+      drawingEdges = state.drawingEdges # Map.values # Array.fromFoldable
+
+      keyedDrawingEdges = Array.mapMaybe (renderDrawingEdge state renderPane) drawingEdges
+
+      zoom                    = renderPane.zoom
+      PageSpacePoint2D origin = renderPane.origin
+      boundingRect            = renderPane.boundingRect
+      focused                 = state.focusedPane == Just renderPane.graphId
+    in
+      HH.div
+      [ HCSS.style do
+          CSS.left    $ CSS.px boundingRect.left
+          CSS.top     $ CSS.px boundingRect.top
+          CSS.width   $ CSS.px boundingRect.width
+          CSS.height  $ CSS.px boundingRect.height
+      , HP.classes $ [ HH.ClassName "pane" ] <> if focused then [ HH.ClassName "focused" ] else []
+      ]
+      [ SE.svg
+        [ SA.viewBox
+          -- scale then shift
+          ( - origin.x * zoom )
+          ( - origin.y * zoom )
+          ( boundingRect.width  * zoom )
+          ( boundingRect.height * zoom )
+        , HE.onMouseDown \e -> Just
+                               $ StopPropagation (ME.toEvent e)
+                               $ BackgroundDragStart renderPane.graphId (PageSpacePoint2D origin) e
+        , HE.onDoubleClick \e -> Just
+                                 $ StopPropagation (ME.toEvent e)
+                                 $ AppCreateNode renderPane e
+        , HE.onWheel $ Just <<< Zoom renderPane.graphId
+        ]
+        [ svgDefs
+        , SK.g
+          []
+          (ghostNodes
+           <>keyedEdges
+           <> keyedEdgeBorders
+           <> keyedDrawingEdges
+           <> keyedNodes
+           <> keyedEdgeTextFields)
+        ]
       ]
 
   render :: AppState -> H.ComponentHTML Action Slots Aff
   render state =
     let
-      keyedNodes = map
-                   (\node ->
-                     Tuple (show (node ^. _nodeId)) $ renderGraphNode state node
-                   )
-                   $ Array.fromFoldable $ Map.values $ state ^. _graph <<< _nodes
-      Tuple keyedEdges maybeKeyedEdgeTextFields =
-        Array.unzip $ Array.catMaybes
-        $ (Array.fromFoldable $ allEdges (state^._graph)) <#> \edge -> do
-            Tuple edgeHTML maybeEdgeTextFieldHTML <- renderEdge state edge
-            pure $ Tuple (Tuple (edgeIdStr edge) edgeHTML)
-                         $ maybeEdgeTextFieldHTML <#> \edgeTextFieldHTML ->
-                             (Tuple (edgeTextFieldIdStr edge) edgeTextFieldHTML)
-      keyedEdgeTextFields = Array.catMaybes maybeKeyedEdgeTextFields
-      keyedEdgeBorders = Array.mapMaybe
-                     (\edge -> do
-                         edgeHTML <- renderEdgeBorder state edge
-                         pure $ Tuple ((edgeIdStr edge) <> "_border") edgeHTML
-                     )
-                     $ Array.fromFoldable $ allEdges $ state ^. _graph
-      keyedDrawingEdges = Array.mapMaybe
-                     (\drawingEdgeState -> do
-                         drawingEdgeHTML <- renderDrawingEdge state drawingEdgeState
-                         pure $ Tuple (drawingEdgeKey drawingEdgeState.source) drawingEdgeHTML
-                     )
-                     $ Array.fromFoldable $ Map.values (state ^. _drawingEdges)
-      PageSpacePos graphOrigin = (state ^. _graphOrigin)
+      graphs = separateGraphs state.graphData
+      renderedGraphs =
+        graphs
+        # Map.toUnfoldable
+        <#> (\(Tuple graphId singleGraph) -> do
+               pane <- Map.lookup graphId singleGraph.panes
+               pure $ Tuple (show graphId) $ renderSingleGraph state pane singleGraph)
+        # Array.catMaybes
     in
-      HH.div
-      [ HP.ref (H.RefLabel "svg") ]
-      [ SE.svg
-        [ SA.viewBox
-          -- scale then shift
-          ( - graphOrigin.x * (state ^. _zoom) )
-          ( - graphOrigin.y * (state ^. _zoom) )
-          ( (state ^. _boundingRect).width * (state ^. _zoom) )
-          ( (state ^. _boundingRect).height * (state ^. _zoom) )
-        , HE.onMouseDown \e -> Just
-                               $ StopPropagation (ME.toEvent e)
-                               $ BackgroundDragStart (state ^. _graphOrigin) e
-        , HE.onDoubleClick \e -> Just
-                                 $ StopPropagation (ME.toEvent e)
-                                 $ AppCreateNode e
-        , HE.onWheel $ Just <<< Zoom
-        ]
-        [ svgDefs
-        , SK.g
-          []
-          (
-           keyedEdgeBorders
-           <> keyedEdges
-           <> keyedDrawingEdges
-           <> keyedNodes
-           <> keyedEdgeTextFields
-          )
-        ]
-      , HH.input
-        [ HP.type_ InputFile
-        , HE.onChange $ Just <<< FetchLocalFile
-        ]
+      HK.div
+      [ HP.ref (H.RefLabel "panes")
+      , HP.classes [ HH.ClassName "panes" ]
       ]
+      (renderedGraphs
+       <> [ Tuple "input" $
+                  HH.input
+                  [ HP.type_ InputFile
+                  , HE.onChange $ Just <<< FetchLocalFile
+                  ]
+          ]
+      )
 
   handleAction :: Action -> H.HalogenM AppState Action Slots Message Aff Unit
   handleAction = case _ of
@@ -863,220 +690,245 @@ graph =
       H.liftEffect $ WE.stopPropagation e
       handleAction next
 
+    EvalQuery query -> do
+      _ <- handleQuery query
+      pure unit
+
     Init -> do
-      _ <- handleQuery $ UpdateBoundingRect \_ -> unit
+      -- Initialize bounding rectangle
+      _ <- handleQuery $ UpdateBoundingRect (const unit)
+      state_ <- H.get
+      H.liftEffect $ log $ "new window rect: " <> show state_.windowBoundingRect
+      -- Subscribe to updates in bounding rectangle
+      window <- H.liftEffect $ WH.window
+      _ <- H.subscribe $ ES.eventListenerEventSource
+                         (WE.EventType "resize")
+                         (WHW.toEventTarget window)
+                         \event -> Just $ EvalQuery $ UpdateBoundingRect unit
       -- Add keyboard event listener to body
       document <- H.liftEffect $ WHW.document =<< WH.window
       _ <- H.subscribe $ ES.eventListenerEventSource KET.keydown (HTMLDocument.toEventTarget document) (map Keypress <<< KE.fromEvent)
-      -- Initialize synth state
-      state <- H.get
-      uninitializedState <- H.liftEffect $ toUninitializedAppState state
-      reinitializedState <- H.liftEffect $ initializeSynthState uninitializedState
-      H.put reinitializedState
+      -- Load demo graph into pane
+      Tuple graphId demoGraphOp <- H.liftEffect demo
+      bareState <- H.get
+      let initState = interpretAppOperation $ AppOperation do
+            (unwrap demoGraphOp)
+            rescalePane graphId bareState.windowBoundingRect
+      initialisedState <- H.liftEffect $ initState bareState
+      H.put $ initialisedState # _{ history = Map.singleton graphId []
+                                  , undone  = Map.singleton graphId []
+                                  }
+      state' <- H.get
+      H.liftEffect $ log $ "pane bounding rects: " <> (show $ (_.boundingRect >>> show) <$> Map.values state'.graphData.panes)
 
     UpdateContentEditableText -> do
       state <- H.get
-      for_ (state ^. _graph <<< _nodes) \node -> do
-        H.query _nodeTextField (node ^. _nodeId) $ H.tell $ SVGContentEditable.SetText $ node ^. _nodeText
-      for_ (allEdges (state ^. _graph)) \edge -> do
-        H.query _edgeTextField (edge ^. _edgeId) $ H.tell $ SVGContentEditable.SetText $ edge ^. _edgeText
+      for_ state.graphData.nodes \node -> do
+        H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText $ node.text
+      for_ (edgeArray state.graphData) \edge -> do
+        H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText $ edge.text
 
     NodeTextInput nodeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
-      case lookupNode (state ^. _graph) nodeId of
+      case Map.lookup nodeId state.graphData.nodes of
         Nothing -> pure unit
         Just node -> do
-          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateNodeTextOp node text
+          modifyM $ doAppOperation node.graphId $ AppOperation $ updateNodeText node text
+          handleAction $ FocusOn node.graphId $ Just $ FocusNode node.id
 
-    EdgeTextInput edgeId (SVGContentEditable.TextUpdate text) -> do
+    EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
-      case lookupEdge (state ^. _graph) edgeId of
+      case Map.lookup edgeId.source state.graphData.edges.sourceTarget >>= Map.lookup edgeId.target of
         Nothing -> pure unit
         Just edge -> do
-          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateEdgeTextOp edge text
+          modifyM $ doAppOperation graphId $ AppOperation $ updateEdgeText edge text
+          handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
 
-    BackgroundDragStart initialGraphOrigin mouseEvent -> do
-      H.modify_ $ _graph <<< _focus .~ NoFocus
+    BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
+      handleAction $ FocusOn graphId Nothing
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-          \e -> BackgroundDragMove e initialGraphOrigin subscriptionId
+          \e -> BackgroundDragMove e graphId initialGraphOrigin subscriptionId
 
-    BackgroundDragMove (Drag.Move _ dragData) (PageSpacePos initialGraphOrigin) _ -> do
+    BackgroundDragMove (Drag.Move _ dragData) graphId (PageSpacePoint2D initialGraphOrigin) _ -> do
       state <- H.get
-      let newGraphOrigin = PageSpacePos { x : initialGraphOrigin.x + dragData.offsetX
-                                        , y : initialGraphOrigin.y + dragData.offsetY
-                                        }
-      H.modify_ $ _graphOrigin .~ newGraphOrigin
+      let newGraphOrigin =
+            PageSpacePoint2D
+              { x : initialGraphOrigin.x + dragData.offsetX
+              , y : initialGraphOrigin.y + dragData.offsetY
+              }
+      modifyM $ doAppOperation graphId $ AppOperation
+        $ moveGraphOrigin graphId newGraphOrigin
 
-    BackgroundDragMove (Drag.Done _) _ subscriptionId ->
+
+    BackgroundDragMove (Drag.Done _) _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
-    NodeDragStart nodeId initialNodePos mouseEvent -> do
+    NodeDragStart graphId nodeId initialNodePos mouseEvent -> do
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-          \e -> NodeDragMove e nodeId initialNodePos subscriptionId
-      H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
+          \e -> NodeDragMove e graphId nodeId initialNodePos subscriptionId
+      handleAction $ FocusOn graphId $ Just $ FocusNode nodeId
 
-    NodeDragMove (Drag.Move _ dragData) nodeId (GraphSpacePos initialNodePos) _ -> do
+    NodeDragMove (Drag.Move _ dragData) graphId nodeId (GraphSpacePoint2D initialNodePos) _ -> do
       state <- H.get
-      let
-        dragOffsetGraphSpace = { x : dragData.offsetX * (state ^. _zoom)
-                               , y : dragData.offsetY * (state ^. _zoom)
-                               }
-        newNodePos = { x : initialNodePos.x + dragOffsetGraphSpace.x
-                     , y : initialNodePos.y + dragOffsetGraphSpace.y
-                     }
-      case lookupNode (state ^. _graph) nodeId of
+      case Map.lookup graphId state.graphData.panes of
         Nothing -> pure unit
-        Just node -> do
-          H.liftEffect $ log $ "new pos: " <> show newNodePos
-          H.liftEffect $ log $ "node pos: " <> show (node ^. _pos)
-          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ moveNodeOp node newNodePos
+        Just pane -> do
+          let
+            dragOffsetGraphSpace = { x : dragData.offsetX * pane.zoom
+                                   , y : dragData.offsetY * pane.zoom
+                                   }
+            newNodePos =
+              GraphSpacePoint2D
+                { x : initialNodePos.x + dragOffsetGraphSpace.x
+                , y : initialNodePos.y + dragOffsetGraphSpace.y
+                }
+          case Map.lookup nodeId state.graphData.nodes of
+            Nothing -> pure unit
+            Just node -> do
+              H.liftEffect $ log $ "new pos: " <> show newNodePos
+              H.liftEffect $ log $ "node pos: " <> show node.position
+              modifyM $ doAppOperation node.graphId $ AppOperation $ moveNode node newNodePos
 
-    NodeDragMove (Drag.Done _) _ _ subscriptionId ->
+    NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
-    EdgeDrawStart drawingEdgeId mouseEvent -> do
+    EdgeDrawStart pane drawingEdgeId mouseEvent -> do
+      state <- H.get
+      case Map.lookup drawingEdgeId state.graphData.nodes of
+        Nothing -> pure unit
+        Just source -> do
+          let
+            mousePosition = mouseEventPosition mouseEvent
+            sourcePosition = source.position # toPageSpace pane
+          H.modify_ $ (_drawingEdges %~ Map.insert drawingEdgeId { sourcePosition : sourcePosition
+                                                                 , source         : drawingEdgeId
+                                                                 , sourceGraph    : pane.graphId
+                                                                 , pointPosition  : mousePosition
+                                                                 , targetGraph    : pane.graphId
+                                                                 })
+          handleAction $ FocusOn pane.graphId $ Just $ FocusNode drawingEdgeId
+          H.subscribe' \subscriptionId ->
+            Drag.dragEventSource mouseEvent $ \e -> EdgeDrawMove e pane.graphId drawingEdgeId subscriptionId
+
+    -- | Check which pane the point of the drawing edge is in and update
+    -- | the drawingEdgeState so it can be drawn properly in both panes
+    EdgeDrawMove (Drag.Move _ dragData) graphId drawingEdgeId _ -> do
       state <- H.get
       let
-        mouseGraphPos = mouseEventPosition mouseEvent
-                        # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
-        drawingEdgeSourceId = drawingEdgeId
-      H.modify_ $ (_drawingEdges <<< at drawingEdgeId ?~ { pos : mouseGraphPos
-                                                         , source : drawingEdgeSourceId
-                                                         })
-                >>> (_graph <<< _focus .~ FocusNode drawingEdgeId)
-      H.subscribe' \subscriptionId ->
-        Drag.dragEventSource mouseEvent $ \e -> EdgeDrawMove e drawingEdgeId subscriptionId
+        panes = Array.fromFoldable $ Map.values state.graphData.panes
+        edgePageTargetPosition = PageSpacePoint2D { x : dragData.x, y : dragData.y }
+      case paneContainingPoint panes edgePageTargetPosition <|> Map.lookup graphId state.graphData.panes of
+        Nothing -> pure unit
+        Just targetPane -> do
+          H.modify_ $ (_drawingEdgePosition drawingEdgeId .~ edgePageTargetPosition)
+                      >>> (_drawingEdgeTargetGraph drawingEdgeId .~ targetPane.graphId)
 
-    EdgeDrawMove (Drag.Move _ dragData) drawingEdgeId _ -> do
-      state <- H.get
-      let dragGraphPos = PageSpacePos { x : dragData.x, y : dragData.y }
-                         # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
-      H.modify_ $ _drawingEdgePos drawingEdgeId .~ dragGraphPos
-
-    EdgeDrawMove (Drag.Done _) drawingEdgeId subscriptionId -> do
+    EdgeDrawMove (Drag.Done _) graphId drawingEdgeId subscriptionId -> do
       -- Create a new edge if the edge is drawn within the halo of another node
       state <- H.get
       let
-        maybeNewEdgeTarget = do
-          drawingEdgeState <- Map.lookup drawingEdgeId $ state ^. _drawingEdges
-          Map.values (state ^. _graph <<< _nodes)
-           # (List.filter (drawingEdgeWithinNodeHalo drawingEdgeState))
-           # List.head
-        drawingEdgeSourceId = drawingEdgeId
-      case maybeNewEdgeTarget of
-        Just newEdgeTarget ->
-          case Tuple (lookupNode (state ^. _graph) drawingEdgeSourceId)
-                     (lookupNode (state ^. _graph) (newEdgeTarget ^. _nodeId)) of
-            Tuple (Just source) (Just target) ->
-              handleAction $ AppCreateEdge source target
-            _ -> pure unit
-        _ -> pure unit
+        maybeNewEdgeId = do
+          drawingEdgeState <- Map.lookup drawingEdgeId state.drawingEdges
+          targetPane <- Map.lookup drawingEdgeState.targetGraph state.graphData.panes
+          drawingEdgeTarget <-
+            Map.values state.graphData.nodes
+              # List.filter (\node -> node.graphId == drawingEdgeState.targetGraph)
+              # List.filter (drawingEdgeWithinNodeHalo drawingEdgeState targetPane)
+              # List.head
+          pure { source      : drawingEdgeState.source
+               , sourceGraph : drawingEdgeState.sourceGraph
+               , target      : drawingEdgeTarget.id
+               , targetGraph : drawingEdgeTarget.graphId
+               }
+      case maybeNewEdgeId of
+        Nothing -> pure unit
+        Just newEdgeId -> do
+          handleAction $ AppCreateEdge graphId newEdgeId
       -- Remove the drawing edge
-      H.modify_ $ _drawingEdges <<< at drawingEdgeId .~ Nothing
+      H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
       H.unsubscribe subscriptionId
 
-    AppCreateNode mouseEvent -> do
-      newNode <- H.liftEffect freshNode
+    AppCreateNode pane mouseEvent -> do
+      newNodeId <- H.liftEffect genUUID
       state <- H.get
       let
-        GraphSpacePos newPos = mouseEventPosition mouseEvent
-                               # toGraphSpace (state ^. _boundingRect) (state ^. _graphOrigin) (state ^. _zoom)
-        newNode' = newNode # _pos .~ newPos
-                           # _nodeText .~ "new node hey"
-      modifyM $ interpretUndoOp $ dooOp $ AppOperation $ insertNode newNode' $ state ^. _graph
-      handleAction $ FocusOn (FocusNode $ newNode' ^. _nodeId)
+        newNode = freshNode pane.graphId newNodeId
+        newNodePosition = mouseEventPosition mouseEvent
+        newNodeGraphSpacePos =
+          newNodePosition
+          # toGraphSpace pane
+      modifyM $ doAppOperation pane.graphId $ AppOperation
+        $   insertNode pane.graphId newNodeId
+        >>= (const $ moveNode newNode newNodeGraphSpacePos)
+      handleAction $ FocusOn pane.graphId $ Just $ FocusNode newNodeId
 
     AppDeleteNode node -> do
       state <- H.get
-      case Set.findMin ((lookupParents (state ^. _graph) node) <> (lookupChildren (state ^. _graph) node)) of
-        Just neighbor -> handleAction $ FocusOn (FocusNode (neighbor ^. _nodeId))
-        Nothing -> pure unit
-      state' <- H.get
-      modifyM $ interpretUndoOp $ dooOp $ AppOperation $ deleteNode node $ state' ^. _graph
-
-    AppCreateEdge source target ->
-      let
-        edgeId = { source : source ^. _nodeId
-                 , target : target ^. _nodeId
-                 }
-        edge = freshEdge edgeId
-      in do
-        modifyM $ interpretUndoOp $ dooOp $ AppOperation $ insertEdge edge
-        handleAction $ FocusOn (FocusEdge edgeId [])
-
-    AppDeleteEdge source target ->
-      let
-        edgeId = { source : source ^. _nodeId
-                 , target : target ^. _nodeId
-                 }
-      in do
-        state <- H.get
-        case lookupEdge (state ^. _graph) edgeId of
+      let allEdges = allEdgesTouchingNode node.id state.graphData
+      case Array.head allEdges.incoming of
+        Just incomingEdge -> handleAction $ FocusOn node.graphId $ Just $ FocusNode incomingEdge.id.source
+        Nothing -> case Array.head allEdges.outgoing of
+          Just outgoingEdge -> handleAction $ FocusOn node.graphId $ Just $ FocusNode outgoingEdge.id.target
           Nothing -> pure unit
-          Just edge -> do
-            modifyM $ interpretUndoOp $ dooOp $ AppOperation $ deleteEdge edge
-            handleAction $ FocusOn (FocusNode (source ^. _nodeId))
+      state' <- H.get
+      modifyM $ doAppOperation node.graphId $ AppOperation $ deleteNode state'.graphData node
 
-    FocusOn newFocus -> do
-      H.modify_ $ _graph <<< _focus .~ newFocus
+    AppCreateEdge graphId edgeId -> do
+      modifyM $ doAppOperation graphId $ AppOperation $ insertEdge edgeId
+      handleAction $ FocusOn edgeId.sourceGraph $ Just $ FocusEdge edgeId []
 
-    DeleteFocus -> do
+    AppDeleteEdge graphId edge -> do
+      modifyM $ doAppOperation graphId $ AppOperation $ deleteEdge edge
+      handleAction $ FocusOn edge.id.sourceGraph $ Just $ FocusNode edge.id.source
+
+    FocusOn graphId newFocus -> do
+      H.modify_ $
+        (_focus graphId .~ newFocus)
+        >>> _{ focusedPane = Just graphId }
+
+    DeleteFocus graphId -> do
       state <- H.get
-      case state ^. _graph <<< _focus of
-        NoFocus -> pure unit
-        FocusNode nodeId -> case lookupNode (state ^. _graph) nodeId of
+      case Map.lookup graphId state.graphData.panes >>= _.focus of
+        Nothing -> pure unit
+        Just (FocusNode nodeId) -> case Map.lookup nodeId state.graphData.nodes of
           Nothing -> pure unit
           Just node ->
             handleAction $ AppDeleteNode node
-        FocusEdge edgeId _ ->
-          case Tuple (lookupNode (state ^. _graph) edgeId.source)
-                     (lookupNode (state ^. _graph) edgeId.target) of
-            Tuple (Just source) (Just target) ->
-              handleAction $ AppDeleteEdge source target
-            _ -> pure unit
+        Just (FocusEdge edgeId _) ->
+          case Map.lookup edgeId.source state.graphData.edges.sourceTarget
+               >>= Map.lookup edgeId.target of
+            Nothing -> pure unit
+            Just edge -> handleAction $ AppDeleteEdge graphId edge
 
     Hover maybeElementId -> do
-      H.modify_ $ _hoveredElementId .~ maybeElementId
+      H.modify_ $ _{ hoveredElementId = maybeElementId }
 
-    -- | Zoom in/out holding the mouse position invariant in graph space
-    -- |
-    -- | The mapping from page space to graph space is given by:
-    -- |     graphSpacePos = (pageSpacePos - graphOrigin) * zoom
-    -- | where a larger value for zoom means that more of graph space is visible.
-    -- |
-    -- | To find the new graph origin that holds the mouse position
-    -- | in graph space constant, let:
-    -- |     p = mousePagePos
-    -- |     prevMousePosGraphSpace = (p - oldGraphOrigin) * oldZoom     (1)
-    -- |     newMousePosGraphSpace = (p - newGraphOrigin) * newZoom      (2)
-    -- | and let:
-    -- |     newMousePosGraphSpace = prevMousePosGraphSpace              (3)
-    -- | by substituting (1) and (2) into (3) and rearranging for newGraphOrigin:
-    -- |     newGraphOrigin = p - ((p - oldGraphOrigin) * (oldZoom / newZoom))
-    -- |
-    -- | If newZoom --> inf, newGraphOrigin --> mousePos, as expected.
-    Zoom wheelEvent -> do
+    -- | Zoom in/out holding the mouse position invariant
+    Zoom graphId wheelEvent -> do
       state <- H.get
-      let
-        scaledZoom = (WhE.deltaY wheelEvent) * zoomScaling
-        PageSpacePos mousePagePos = mouseEventPosition $ WhE.toMouseEvent wheelEvent
-        PageSpacePos graphOrigin = state ^. _graphOrigin
-        newZoom = Math.exp (scaledZoom + (Math.log (state ^. _zoom)))
-        -- keep graph-space mouse pos invariant
-        newGraphOriginDim mousePos oldGraphOrigin =
-          mousePos - ((mousePos - oldGraphOrigin) * ((state ^. _zoom) / newZoom))
-        newGraphOrigin = PageSpacePos
-                         { x : newGraphOriginDim mousePagePos.x graphOrigin.x
-                         , y : newGraphOriginDim mousePagePos.y graphOrigin.y
-                         }
-      H.modify_ $ (_zoom .~ newZoom)
-                >>> (_graphOrigin .~ newGraphOrigin)
+      case Map.lookup graphId state.graphData.panes of
+        Nothing -> pure unit
+        Just pane ->
+          let
+            scaledZoom = (WhE.deltaY wheelEvent) * zoomScaling
+            newZoom = (Math.exp scaledZoom) * pane.zoom
+          in
+            modifyM
+            $ doAppOperation pane.graphId
+            $ zoomAtPoint
+                newZoom
+                (mouseEventPosition $ WhE.toMouseEvent wheelEvent)
+                pane
 
     CenterGraphOriginAndZoom -> do
-      H.modify_ $ (_graphOrigin .~ PageSpacePos { x : 0.0, y : 0.0 })
-                  >>> (_zoom .~ 1.0)
+      state <- H.get
+      case state.focusedPane of
+        Nothing -> pure unit
+        Just graphId ->
+          H.modify_ $     (_graphData <<< _pane graphId <<< _origin .~ PageSpacePoint2D { x : 0.0, y : 0.0 })
+                      >>> (_graphData <<< _pane graphId <<< _zoom .~ 1.0)
 
     FetchLocalFile changeEvent -> unit <$ runMaybeT do
       target <- MaybeT $ pure $ WE.target changeEvent
@@ -1093,177 +945,258 @@ graph =
           pure mempty
 
     LoadLocalFile fileReader subscriptionId event -> do
+      state <- H.get
       exceptTJSON <- H.liftEffect $ FileReader.result fileReader
-      let Identity eitherJSON = runExceptT $ Foreign.readString exceptTJSON
-      case (eitherJSON
-            # lmap (show <<< map renderForeignError))
-           >>= appStateFromJSON of
-        Left errors -> H.liftEffect $ log errors
-        Right appStateWithMeta -> do
-          state <- H.get
-          H.liftEffect $ WebAudio.close (state ^. _synth).synthState.audioContext
-          newAppState <- H.liftEffect $ initializeSynthState appStateWithMeta.uninitializedAppState
-          H.put newAppState
+      case
+        lmap (show <<< map renderForeignError)
+        $ unwrap $ runExceptT do
+            json <- Foreign.readString exceptTJSON
+            graphDataFromJSON state json
+      of
+        Left errors ->
+          H.liftEffect $ log $ "Failed to parse JSON: " <> errors
+        Right deserialisedGraphData -> do
+          H.liftEffect $ log $ "Loading saved graph encoded with AppOperation version "
+                               <> deserialisedGraphData.metadata.version
+          --reducedAppState <- H.liftEffect $ removeGraphData graphId state
+          reducedAppState <- H.get
+          newAppState <- H.liftEffect $ interpretAppOperation deserialisedGraphData.appStateOp reducedAppState
+          H.put $ newAppState
+                    { history = Map.insert deserialisedGraphData.graphId deserialisedGraphData.history newAppState.history
+                    , undone  = Map.insert deserialisedGraphData.graphId deserialisedGraphData.undone  newAppState.undone
+                    }
           -- Keep text fields in sync
           handleAction $ UpdateContentEditableText
+          state' <- H.get
+          H.liftEffect $ log $ "put app state.graphData : " <> show state'.graphData
       H.unsubscribe subscriptionId
 
     SaveLocalFile -> do
       state <- H.get
       timestamp <- H.liftEffect now
-      let
-        stateJSON = appStateToJSON state { version : appStateVersion
-                                         , timestamp : timestamp
-                                         }
-        title = fromMaybe "untitled" $ (graphTitle (state ^. _graph))
-      H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
+      case do
+        graphId <- state.focusedPane
+        let metadata = { version : appOperationVersion , timestamp : timestamp }
+        graphDataToJSON graphId state metadata
+      of
+        Nothing -> pure unit
+        Just stateJSON ->
+          let
+            title = fromMaybe "untitled" $ graphTitle state.graphData
+          in
+            H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
 
     Keypress keyboardEvent -> do
       H.liftEffect $ log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
+        -- Kill audio
         " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ WebAudio.close (state ^. _synth).synthState.audioContext
+          H.liftEffect $ WebAudio.close state.synth.synthState.audioContext
           H.liftEffect $ log "Closed audio context"
+
+        -- Refresh synth nodes
         "1" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          for_ (state ^. _graph <<< _nodes) \node ->
-            case parseSynthNodeType (node ^. _nodeText) of
+          for_ state.graphData.nodes \node ->
+            case parseSynthNodeType node.text of
               Nothing -> pure unit
               Just synthNodeType ->
-                modifyM $ interpretUndoOp $ dooOp $ AppOperation $ createSynthNode node $ freshSynthNodeParams synthNodeType
+                modifyM $ doAppOperation node.graphId $ AppOperation
+                  $ createSynthNode node.id $ freshSynthNodeParams synthNodeType
+          for_ (edgeArray state.graphData) \edge ->
+            case Map.lookup edge.id.source state.graphData.nodes of
+              Nothing -> pure unit
+              Just source ->
+                modifyM $ doAppOperation source.graphId $ AppOperation
+                  $ connectSynthNodes edge.id
+
+        -- Undo
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ log $ "Undoable history: " <> show (state ^. _history)
-          modifyM $ interpretUndoOp undoOp
+          case state.focusedPane of
+            Nothing -> pure unit
+            Just graphId -> do
+              modifyM $ doAppOperation graphId $ AppOperation $ undo graphId
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
+
+        -- Redo
         "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
-          H.liftEffect $ log $ "Undoable undone: " <> show (state ^. _undone)
-          modifyM $ interpretUndoOp redoOp
+          case state.focusedPane of
+            Nothing -> pure unit
+            Just graphId -> do
+              modifyM $ doAppOperation graphId $ AppOperation $ redo graphId
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
+
+        -- Load saved graph from local JSON file
         "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ loadFile
+
+        -- Save current graph to local JSON file
         "s" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           -- Save app state as a local json file
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           handleAction $ SaveLocalFile
+
+        -- Return to graph origin and reset zoom
         "o" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           handleAction CenterGraphOriginAndZoom
-        "Delete" ->
-          handleAction $ DeleteFocus
-        "Escape" ->
-          handleAction $ FocusOn NoFocus
+
+        -- Delete node/edge currently in focus
+        "Delete" -> do
+          state <- H.get
+          case state.focusedPane of
+            Nothing -> pure unit
+            Just graphId -> handleAction $ DeleteFocus graphId
+
+        -- Unfocus
+        "Escape" -> do
+          state <- H.get
+          for_ (Map.keys state.graphData.panes) \graphId ->
+            handleAction $ FocusOn graphId Nothing
+          handleAction $ UpdateContentEditableText
+
+        -- reMove pane
         "m" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.raise MappingMode
-        -- TODO: decide if grouping/ungrouping is useful for ologs
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          state <- H.get
+          case state.focusedPane of
+            Nothing -> pure unit
+            Just graphId -> do
+              -- TODO: remove graph data in removePane when monadic ops are removed
+              modifyM $ removeGraphData graphId
+              modifyM $ interpretAppOperation $ AppOperation $ removePane graphId
+
+        -- TODO: highlighting?
+        ---- Highlight currently focused node/edge
         --"s" -> H.modify_ $ _graph %~ toggleHighlightFocus
-        --" " -> H.modify_ $ _graph %~ toggleGroupExpand
+
         _ -> pure unit
 
     DoNothing ->
       pure unit
 
-    GainDragStart nodeId initialGain mouseEvent -> do
+    GainDragStart graphId nodeId initialGain mouseEvent -> do
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-        \e -> GainDragMove e nodeId initialGain subscriptionId
-      H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
+        \e -> GainDragMove e graphId nodeId initialGain subscriptionId
+      handleAction $ FocusOn graphId $ Just $ FocusNode nodeId
 
-    GainDragMove (Drag.Move _ dragData) nodeId initialGain _ -> do
+    GainDragMove (Drag.Move _ dragData) graphId nodeId initialGain _ -> do
       state <- H.get
-      let
-        gainOffsetPageSpace = - dragData.offsetY * (state ^. _zoom)
-        initialGainPageSpace = amplifierBoxSize * (amplifierGainToControl initialGain)
-        newGainPageSpace = Math.max 0.0 (initialGainPageSpace + gainOffsetPageSpace)
-        newGain = Math.max 0.0 $ controlToAmplifierGain (newGainPageSpace / amplifierBoxSize)
-      case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
-                 (lookupNode (state ^. _graph) nodeId) of
-        Tuple (Just (AmplifierParams oldGain)) (Just node) -> do
-          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateSynthParam node AmplifierGain oldGain newGain
-        _ -> pure unit
+      case Map.lookup graphId state.graphData.panes of
+        Nothing -> pure unit
+        Just pane ->
+          let
+            gainOffsetPageSpace = - dragData.offsetY * pane.zoom
+            initialGainPageSpace = amplifierBoxSize * (amplifierGainToControl initialGain)
+            newGainPageSpace = Math.max 0.0 (initialGainPageSpace + gainOffsetPageSpace)
+            newGain = Math.max 0.0 $ controlToAmplifierGain (newGainPageSpace / amplifierBoxSize)
+          in
+            case Tuple (Map.lookup nodeId state.synth.synthParams)
+                       (Map.lookup nodeId state.graphData.nodes) of
+              Tuple (Just (AmplifierParams oldGain)) (Just node) -> do
+                modifyM $ doAppOperation graphId $ AppOperation
+                  $ updateSynthParam node.id AmplifierGain oldGain newGain
+              _ -> pure unit
 
-    GainDragMove (Drag.Done _) _ _ subscriptionId ->
+    GainDragMove (Drag.Done _) _ _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
-    DelayDragStart nodeId initialPeriod mouseEvent -> do
+    DelayDragStart graphId nodeId initialPeriod mouseEvent -> do
       H.subscribe' \subscriptionId ->
         Drag.dragEventSource mouseEvent
-          \e -> DelayDragMove e nodeId initialPeriod subscriptionId
-      H.modify_ $ _graph <<< _focus .~ FocusNode nodeId
+          \e -> DelayDragMove e graphId nodeId initialPeriod subscriptionId
+      handleAction $ FocusOn graphId $ Just $ FocusNode nodeId
 
-    DelayDragMove (Drag.Move _ dragData) nodeId initialPeriod _ -> do
+    DelayDragMove (Drag.Move _ dragData) graphId nodeId initialPeriod _ -> do
       state <- H.get
-      let
-        periodOffsetPageSpace = dragData.offsetX * (state ^. _zoom)
-        initialPeriodPageSpace = delayPeriodToPageSpace initialPeriod
-        newPeriod = Math.max 0.0 $ pageSpaceToDelayPeriod (periodOffsetPageSpace + initialPeriodPageSpace)
-      case Tuple (Map.lookup nodeId (unwrap (state ^. _synth).synthParams))
-                 (lookupNode (state ^. _graph) nodeId) of
-        Tuple (Just (DelayParams oldPeriod)) (Just node) -> do
-          modifyM $ interpretUndoOp $ dooOp $ AppOperation $ updateSynthParam node DelayPeriod oldPeriod newPeriod
-        _ -> pure unit
+      case Map.lookup graphId state.graphData.panes of
+        Nothing -> pure unit
+        Just pane ->
+          let
+            periodOffsetPageSpace = dragData.offsetX * pane.zoom
+            initialPeriodPageSpace = delayPeriodToGraphSpace initialPeriod
+            newPeriod = Math.max 0.0 $ pageSpaceToDelayPeriod (periodOffsetPageSpace + initialPeriodPageSpace)
+          in
+            case Tuple (Map.lookup nodeId state.synth.synthParams)
+                       (Map.lookup nodeId state.graphData.nodes) of
+              Tuple (Just (DelayParams oldPeriod)) (Just node) -> do
+                modifyM $ doAppOperation graphId $ AppOperation
+                  $ updateSynthParam node.id DelayPeriod oldPeriod newPeriod
+              _ -> pure unit
 
-    DelayDragMove (Drag.Done _) _ _ subscriptionId ->
+    DelayDragMove (Drag.Done _) _ _ _ subscriptionId ->
       H.unsubscribe subscriptionId
 
   handleQuery :: forall a. Query a -> H.HalogenM AppState Action Slots Message Aff (Maybe a)
   handleQuery = case _ of
-    UpdateBoundingRect a -> map (const a) <$> runMaybeT do
-      svgElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "svg")
-      svgRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect svgElement
-      lift $ H.modify_ $ _boundingRect .~ svgRect
-      lift $ H.liftEffect $ log "updating bounding rect"
+    UpdateBoundingRect a -> do
+      map (const a) <$> runMaybeT do
+        panesElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "panes")
+        panesRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect panesElement
+        state <- H.get
+        lift $ H.liftEffect $ log $ "updating bounding rect to: " <> show panesRect <> "from: " <> show state.windowBoundingRect
+        lift $ modifyM $ interpretAppOperation $ AppOperation
+          $ rescaleWindow panesRect
+        lift $ H.liftEffect $ log $ "new pane bounding rects: " <> (show $ (_.boundingRect >>> show) <$> Map.values state.graphData.panes)
 
 
-mouseEventPosition :: ME.MouseEvent -> PageSpacePos
-mouseEventPosition e = PageSpacePos { x : toNumber $ ME.pageX e
-                                    , y : toNumber $ ME.pageY e
-                                    }
+------
+-- Utilities
 
-euclideanDistance :: GraphSpacePos -> GraphSpacePos -> Number
-euclideanDistance (GraphSpacePos pos1) (GraphSpacePos pos2) =
+mouseEventPosition :: ME.MouseEvent -> PageSpacePoint2D
+mouseEventPosition e = PageSpacePoint2D { x : toNumber $ ME.pageX e
+                                        , y : toNumber $ ME.pageY e
+                                        }
+
+euclideanDistance :: GraphSpacePoint2D -> GraphSpacePoint2D -> Number
+euclideanDistance (GraphSpacePoint2D pos1) (GraphSpacePoint2D pos2) =
   Math.sqrt
   $ (Math.pow (pos1.x - pos2.x) 2.0)
   + (Math.pow (pos1.y - pos2.y) 2.0)
 
-drawingEdgeWithinNodeHalo :: DrawingEdge -> Node -> Boolean
-drawingEdgeWithinNodeHalo drawingEdgeState' node =
-  haloRadius > euclideanDistance (GraphSpacePos (node ^. _pos)) drawingEdgeState'.pos
+drawingEdgeWithinNodeHalo :: DrawingEdge -> GraphView -> Node -> Boolean
+drawingEdgeWithinNodeHalo drawingEdgeState pane node =
+  let
+    pointPositionGraphSpace = drawingEdgeState.pointPosition # toGraphSpace pane
+  in
+    haloRadius > euclideanDistance node.position pointPositionGraphSpace
 
 tearDownSynthState :: AppState -> Effect Synth
 tearDownSynthState appState =
   let
-    teardownOps = Array.catMaybes $ Array.fromFoldable $ (appState ^. _graph <<< _nodes) <#> \node ->
-      case Map.lookup (node ^. _nodeId) (unwrap (appState ^. _synth).synthParams) of
+    teardownOps = Array.catMaybes $ Array.fromFoldable $ appState.graphData.nodes <#> \node ->
+      case Map.lookup node.id appState.synth.synthParams of
         Nothing -> Nothing
-        Just synthNodeParams -> Just $ deleteSynthNode node synthNodeParams
+        Just synthNodeParams -> Just $ deleteSynthNode node.id synthNodeParams
     deleteNodeFuncs = (Tuple.fst <<< Run.extract <<< interpretSynthOp) <$> teardownOps
   in
-    foldl bind (pure (appState ^. _synth)) deleteNodeFuncs
+    foldl bind (pure appState.synth) deleteNodeFuncs
 
 initializeSynthNodes :: UninitializedAppState -> Synth -> Effect Synth
 initializeSynthNodes uninitializedAppState uninitializedSynth =
   let
-    synthParams = unwrap uninitializedSynth.synthParams
-    graph' = (uninitializedAppState ^. _current).graph
-    initializeOps = Array.catMaybes $ Array.fromFoldable $ (graph' ^. _nodes) <#> \node ->
-      case Map.lookup (node ^. _nodeId) synthParams of
+    synthParams = uninitializedSynth.synthParams
+    graphData' = uninitializedAppState.graphData
+    initializeOps = Array.catMaybes $ Array.fromFoldable $ graphData'.nodes <#> \node ->
+      case Map.lookup node.id synthParams of
         Nothing -> Nothing
-        Just synthNodeParams -> Just $ createSynthNode node synthNodeParams
+        Just synthNodeParams -> Just $ createSynthNode node.id synthNodeParams
     createNodeFuncs = (Tuple.fst <<< Run.extract <<< interpretSynthOp) <$> initializeOps
   in
     foldl bind (pure uninitializedSynth) createNodeFuncs
@@ -1273,33 +1206,16 @@ initializeSynthState uninitializedAppState = do
   audioContext <- WebAudio.newAudioContext
   let
     bareSynthState = { audioContext : audioContext, synthNodeStates : Map.empty }
-    uninitializedSynth = { synthParams : (uninitializedAppState ^. _current).synthParams
+    uninitializedSynth = { synthParams : uninitializedAppState.synth
                          , synthState : bareSynthState
                          }
   synth <- initializeSynthNodes uninitializedAppState uninitializedSynth
-  analyserBuffer <- createUint8Buffer defaultFrequencyBinCount
-  pure $ uninitializedAppState
-         # _current .~ AppStateCurrent
-                       { graph : (uninitializedAppState ^. _current).graph
-                       , drawingEdges : (uninitializedAppState ^. _current).drawingEdges
-                       , hoveredElementId : (uninitializedAppState ^. _current).hoveredElementId
-                       , boundingRect : (uninitializedAppState ^. _current).boundingRect
-                       , graphOrigin : (uninitializedAppState ^. _current).graphOrigin
-                       , zoom : (uninitializedAppState ^. _current).zoom
-                       , synth : synth
-                       }
+  pure $ uninitializedAppState { synth = synth }
 
 toUninitializedAppState :: AppState -> Effect UninitializedAppState
 toUninitializedAppState state = do
-  WebAudio.close (state ^. _synth).synthState.audioContext
-  pure $ state # _current .~ { graph : state ^. _graph
-                             , drawingEdges : state ^. _drawingEdges
-                             , hoveredElementId : state ^. _hoveredElementId
-                             , boundingRect : state ^. _boundingRect
-                             , graphOrigin : state ^. _graphOrigin
-                             , zoom : state ^. _zoom
-                             , synthParams : (state ^. _synth).synthParams
-                             }
+  WebAudio.close state.synth.synthState.audioContext
+  pure $ state { synth = state.synth.synthParams }
 
 modifyM :: (AppState -> Effect AppState) -> H.HalogenM AppState Action Slots Message Aff Unit
 modifyM op = do
@@ -1309,3 +1225,35 @@ modifyM op = do
 
 edgeTextFieldIdStr :: Edge -> String
 edgeTextFieldIdStr edge = edgeIdStr edge <> "textField"
+
+edgeSourcePosition :: AppState -> Edge -> GraphView -> Maybe GraphSpacePoint2D
+edgeSourcePosition state edge renderPane = do
+  sourceNode <- Map.lookup edge.id.source state.graphData.nodes
+  sourcePane <- Map.lookup edge.id.sourceGraph state.graphData.panes
+  let GraphSpacePoint2D sourcePos = sourceNode.position # toPageSpace sourcePane # toGraphSpace renderPane
+  pure case Map.lookup edge.id.source state.synth.synthParams of
+    -- Special case for delay nodes
+    -- TODO: remove special case when synth code is removed
+    Just (DelayParams delayPeriod) ->
+      GraphSpacePoint2D
+        { x : sourcePos.x
+              + (delayPeriodToGraphSpace delayPeriod)
+        , y : sourcePos.y
+        }
+    _  -> GraphSpacePoint2D sourcePos
+
+edgeTargetPosition :: AppState -> Edge -> GraphView -> Maybe GraphSpacePoint2D
+edgeTargetPosition state edge renderPane = do
+  targetNode <- Map.lookup edge.id.target state.graphData.nodes
+  targetPane <- Map.lookup edge.id.targetGraph state.graphData.panes
+  pure $ targetNode.position # toPageSpace targetPane # toGraphSpace renderPane
+
+edgeMidPosition :: AppState -> Edge -> GraphView -> Maybe GraphSpacePoint2D
+edgeMidPosition state edge renderPane = do
+  targetNode <- Map.lookup edge.id.target state.graphData.nodes
+  GraphSpacePoint2D sourcePos <- edgeSourcePosition state edge renderPane
+  GraphSpacePoint2D targetPos <- edgeTargetPosition state edge renderPane
+  pure $ GraphSpacePoint2D
+           { x : (sourcePos.x + targetPos.x) / 2.0
+           , y : (sourcePos.y + targetPos.y) / 2.0
+           }

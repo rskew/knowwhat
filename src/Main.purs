@@ -5,16 +5,15 @@ import Prelude
 import Audio.WebAudio.BaseAudioContext (newAudioContext)
 import Audio.WebAudio.Utils (createUint8Buffer)
 import Data.Int (toNumber)
-import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Class.Console (log)
-import GraphPaneComponent as GP
+import GraphComponent as G
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
+import Synth (defaultFrequencyBinCount)
 import Web.HTML (window)
 import Web.HTML.Window (innerWidth, innerHeight)
-import Workflow.Synth (defaultFrequencyBinCount)
 
 main :: Effect Unit
 main =
@@ -24,14 +23,18 @@ main =
   windowWidth <- H.liftEffect $ innerWidth w
   windowHeight <- H.liftEffect $ innerHeight w
   H.liftEffect $ log $ "Window size: " <> show windowWidth <> " " <> show windowHeight
-  let windowShape = { width : toNumber windowWidth
-                    , height : toNumber windowHeight
-                    }
-  demoGraph <- H.liftEffect demo
+  let
+    initialWindowBoundingRect =
+      { left : 0.0
+      , width : toNumber windowWidth
+      , right : toNumber windowWidth
+      , top : 0.0
+      , height : toNumber windowHeight
+      , bottom : toNumber windowHeight
+      }
   audioContext <- H.liftEffect newAudioContext
   analyserBuffer <- H.liftEffect $ createUint8Buffer defaultFrequencyBinCount
-  runUI GP.paneComponent { windowShape : windowShape
-                         , demoGraph : demoGraph
+  runUI G.graphComponent { windowBoundingRect : initialWindowBoundingRect
                          , audioContext : audioContext
                          }
                          body

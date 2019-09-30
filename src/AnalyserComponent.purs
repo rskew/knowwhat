@@ -2,6 +2,7 @@ module AnalyserComponent where
 
 import Prelude
 
+import AnalyserComponent.Utils (animationFrameLoop)
 import AppState (Shape)
 import Audio.WebAudio.AnalyserNode (getByteFrequencyData) as WebAudio
 import Audio.WebAudio.Types (AnalyserNode) as WebAudio
@@ -25,20 +26,16 @@ import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
 import Svg.Attributes as SA
 import Svg.Elements as SE
-import Utils (animationFrameLoop)
 import Web.DOM.Element as Element
 import Web.DOM.Node as DN
 import Web.DOM.NodeList as NL
 import Web.DOM.DOMTokenList as DTL
 import Web.HTML.HTMLElement as HTMLElement
-import Workflow.Synth (defaultFrequencyBinCount)
+import Synth (defaultFrequencyBinCount)
 
 
 analyserRefLabel :: H.RefLabel
 analyserRefLabel = H.RefLabel "analyser"
-
-initialZoom :: Number
-initialZoom = 1.0
 
 spectrumClass :: String
 spectrumClass = "spectrum-polylines"
@@ -47,8 +44,6 @@ type State = { analyserNode :: WebAudio.AnalyserNode
              , spectrumBuffer :: Uint8Array
              , drawLoopStopSignal :: Ref Boolean
              , shape :: Shape
-             , zoom :: Number
-             , zoomRef :: Maybe (Ref Number)
              }
 
 type Input = State

@@ -12,3 +12,6 @@
 
 # NPM
 /node_modules/
+
+# Emacs
+TAGS

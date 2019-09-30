@@ -24,15 +24,24 @@ input {
     display: none;
 }
 
-.pane {
-    display: flex;
-    flex-direction: row;
+.panes {
     height: 100%;
     width: 100%;
+    background-color: var(--text-field-border-color);
+    display: block;
+}
+
+.pane {
+    background-color: white;
+    position: absolute;
+    border: 2px solid white;
+}
+
+.pane.focused {
+    border: 2px solid #fc0;
 }
 
 .paneDivider {
-    width: 20px;
     background-color: var(--text-field-border-color);
     height: 100%;
 }
@@ -71,6 +80,10 @@ foreignObject {
 
 .node {
     fill: var(--node-color);
+}
+
+.node.ghost {
+    fill: var(--text-field-border-color);
 }
 
 .node.delay {
@@ -174,6 +187,11 @@ foreignObject {
 .edge {
     stroke: var(--edge-color);
     stroke-width: 1.5px;
+}
+
+.edge.mappingEdge {
+    stroke: #28f;;
+    stroke-width: 4.5px;
 }
 
 .edge.invalid {
