@@ -1,17 +1,14 @@
-.#*
-TAGS
-.cache/*
-dist/*
-node_modules/*
-package.json
-package-lock.json
+# Parcel
+/.cache/
+/dist/
 
-/bower_components/
-/node_modules/
-/.pulp-cache/
-/output/
+# Spago
+/.spago/
+
+# Purescript
 /generated-docs/
-/.psc*
-/.purs*
-/.psa*
-.spago
+/output/
+/.psc-ide-port
+
+# NPM
+/node_modules/
