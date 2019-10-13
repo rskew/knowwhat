@@ -4,7 +4,7 @@ import Prelude
 
 import AppOperation (AppOperation(..), appOperationVersion)
 import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText)
-import AppOperation.Interpreter (doAppOperation, interpretAppOperation, removeGraphData)
+import AppOperation.Interpreter (doAppOperation, interpretAppOperation)
 import AppOperation.UIOp (moveGraphOrigin, rescalePane, rescaleWindow, removePane)
 import AppOperation.UndoOp (undo, redo)
 import AppState (DrawingEdge, DrawingEdgeId, HoveredElementId(..), AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr)
@@ -177,7 +177,7 @@ graphComponent =
       nodeBorderClasses =
           joinWith " " $ Array.catMaybes
           [ Just "nodeBorder"
-          -- TODO: use highlighting?
+          -- TODO: use highlighting
           --, if (Set.member node.id state.graphData.highlighted)
           --  then Just "highlighted"
           --  else Nothing
@@ -488,8 +488,6 @@ graphComponent =
     Init -> do
       -- Initialize bounding rectangle
       _ <- handleQuery $ UpdateBoundingRect (const unit)
-      state_ <- H.get
-      H.liftEffect $ log $ "new window rect: " <> show state_.windowBoundingRect
       -- Subscribe to updates in bounding rectangle
       window <- H.liftEffect $ WH.window
       _ <- H.subscribe $ ES.eventListenerEventSource
@@ -510,8 +508,6 @@ graphComponent =
       H.put $ initialisedState # _{ history = Map.singleton graphId []
                                   , undone  = Map.singleton graphId []
                                   }
-      state' <- H.get
-      H.liftEffect $ log $ "pane bounding rects: " <> (show $ (_.boundingRect >>> show) <$> Map.values state'.graphData.panes)
 
     UpdateContentEditableText -> do
       state <- H.get
@@ -579,8 +575,6 @@ graphComponent =
           case Map.lookup nodeId state.graphData.nodes of
             Nothing -> pure unit
             Just node -> do
-              H.liftEffect $ log $ "new pos: " <> show newNodePos
-              H.liftEffect $ log $ "node pos: " <> show node.position
               modifyM $ doAppOperation node.graphId $ AppOperation $ moveNode node newNodePos
 
     NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
@@ -759,8 +753,6 @@ graphComponent =
                     }
           -- Keep text fields in sync
           handleAction $ UpdateContentEditableText
-          state' <- H.get
-          H.liftEffect $ log $ "put app state.graphData : " <> show state'.graphData
       H.unsubscribe subscriptionId
 
     SaveLocalFile -> do
@@ -846,11 +838,9 @@ graphComponent =
           case state.focusedPane of
             Nothing -> pure unit
             Just graphId -> do
-              -- TODO: remove graph data in removePane when monadic ops are removed
-              H.modify_ $ removeGraphData graphId
               H.modify_ $ interpretAppOperation $ AppOperation $ removePane graphId
 
-        -- TODO: highlighting?
+        -- TODO: highlighting
         ---- Highlight currently focused node/edge
         --"s" -> H.modify_ $ _graph %~ toggleHighlightFocus
 
@@ -865,11 +855,8 @@ graphComponent =
       map (const a) <$> runMaybeT do
         panesElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "panes")
         panesRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect panesElement
-        state <- H.get
-        lift $ H.liftEffect $ log $ "updating bounding rect to: " <> show panesRect <> "from: " <> show state.windowBoundingRect
         lift $ H.modify_ $ interpretAppOperation $ AppOperation
           $ rescaleWindow panesRect
-        lift $ H.liftEffect $ log $ "new pane bounding rects: " <> (show $ (_.boundingRect >>> show) <$> Map.values state.graphData.panes)
 
 
 ------

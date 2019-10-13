@@ -36,11 +36,6 @@ insertPaneImpl graphId appState =
     # _graphData <<< _panes <<< at graphId ?~ newPane
     # arrangePanes
 
-removePaneImpl :: GraphId -> AppState -> AppState
-removePaneImpl graphId appState =
-  -- TODO: implement remove graph data when monadic ops are removed
-  arrangePanes appState
-
 arrangePanes :: AppState -> AppState
 arrangePanes appState =
   let
@@ -87,18 +82,18 @@ rescaleWindowImpl newWindowBoundingRect appState =
 -- | Zoom in/out holding the focus point invariant in page space and graph space
 -- |
 -- | The mapping from page space to graph space is given by:
--- |     graphSpacePoint2D = (pageSpacePoint2D - origin) * zoom
+-- |     graphSpacePoint2D = (pageSpacePoint2D - paneTopLeft - origin) * zoom
 -- | where a larger value for zoom means that more of graph space is visible.
 -- |
 -- | To find the new graph origin that holds the mouse position
 -- | in graph space constant, let:
 -- |     p = focusPointPageSpace
--- |     prevFocusPointGraphSpace = (p - oldGraphOrigin) * oldZoom     (1)
--- |      newFocusPointGraphSpace = (p - newGraphOrigin) * newZoom     (2)
+-- |     prevFocusPointGraphSpace = (p - paneTopLeft - oldGraphOrigin) * oldZoom     (1)
+-- |      newFocusPointGraphSpace = (p - paneTopLeft - newGraphOrigin) * newZoom     (2)
 -- | and let:
 -- |      newFocusPointGraphSpace = prevFocusPointGraphSpace           (3)
 -- | by substituting (1) and (2) into (3) and rearranging:
--- |     newGraphOrigin = p - ((p - oldGraphOrigin) * (oldZoom / newZoom))
+-- |     newGraphOrigin = p - paneTopLeft - ((p - paneTopLeft - oldGraphOrigin) * (oldZoom / newZoom))
 -- |
 -- | If newZoom --> inf, newGraphOrigin --> focusPoint, as expected.
 zoomAtPoint :: Number -> PageSpacePoint2D -> GraphView -> AppOperation Unit
@@ -107,8 +102,8 @@ zoomAtPoint newZoom pageSpacePoint pane =
     PageSpacePoint2D point = pageSpacePoint
     PageSpacePoint2D origin = pane.origin
     newGraphOrigin = PageSpacePoint2D
-                       { x : point.x - ((point.x - origin.x) * (pane.zoom / newZoom))
-                       , y : point.y - ((point.y - origin.y) * (pane.zoom / newZoom))
+                       { x : point.x - pane.boundingRect.left - ((point.x - pane.boundingRect.left - origin.x) * (pane.zoom / newZoom))
+                       , y : point.y - pane.boundingRect.top  - ((point.y - pane.boundingRect.top  - origin.y) * (pane.zoom / newZoom))
                        }
   in AppOperation do
     moveGraphOrigin pane.graphId newGraphOrigin

@@ -4,11 +4,10 @@ import Prelude
 
 import AppOperation (AppOperation(..))
 import AppOperation.GraphOp (_graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, interpretGraphOp, invertGraphOp)
-import AppOperation.UIOp (encodeGraphViewsAsUIOp)
-import AppOperation.UIOp.Interpreter (interpretUIOp)
+import AppOperation.UIOp (UIOpF(..), _uiOp, UIOP)
 import AppOperation.UndoOp (UndoOpF(..), _undoOp, UNDOOP)
 import AppState (AppState, _graphData)
-import Core (GraphId, GraphData, selectGraphData, _panes)
+import Core (GraphId, selectGraphData, _panes, _pane, _origin, _zoom)
 import Data.Array (cons, uncons)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -20,9 +19,9 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap, unwrap)
 import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
-import Effect.Console as Console
 import Run (Run, Step(..))
 import Run as Run
+import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl, rescaleWindowImpl)
 
 
 -- | Interpret the operation and push it onto the history stack
@@ -36,10 +35,6 @@ doAppOperation graphId op =
           Just graphHistory -> graphHistory
         newHistory = filteredHistoryUpdate op history
       in do
-        -- TODO: clean up console logs
-        Console.log ""
-        Console.log $ "New history: " <> show (show <$> newHistory)
-        Console.log ""
         pure $ appState { history = Map.insert graphId newHistory appState.history }
   in
     interpretAppOperation op >>> historyUpdater
@@ -160,13 +155,36 @@ interpretUndoOp =
 
 
 ------
--- Encoding AppState for serialisation/deserialisation
+-- UIOp
 
-encodeGraphDataAsAppOperation :: GraphData -> AppOperation Unit
-encodeGraphDataAsAppOperation graphData =
-  AppOperation do
-    encodeGraphDataAsGraphOp graphData
-    encodeGraphViewsAsUIOp graphData.panes
+handleUIOp :: forall a. UIOpF a -> Tuple (AppState -> AppState) a
+handleUIOp = case _ of
+  MoveGraphOrigin graphId newGraphOrigin next ->
+    Tuple (_graphData <<< _pane graphId <<< _origin .~ newGraphOrigin) next
+
+  UpdateZoom graphId newZoom next ->
+    Tuple (_graphData <<< _pane graphId <<< _zoom .~ newZoom) next
+
+  InsertPane graphId next ->
+    Tuple (insertPaneImpl graphId) next
+
+  RemovePane graphId next ->
+    Tuple (removePaneImpl graphId) next
+
+  RescalePane graphId rect next ->
+    Tuple (rescalePaneImpl graphId rect) next
+
+  RescaleWindow rect next ->
+    Tuple (rescaleWindowImpl rect) next
+
+interpretUIOp :: forall r a.
+                 Run (uiOp :: UIOP | r) a -> Run r (Tuple (AppState -> AppState) a)
+interpretUIOp =
+  Run.runAccumPure
+  (\accumulator ->
+    Run.on _uiOp (Loop <<< lmap ((>>>) accumulator) <<< handleUIOp) Done)
+  Tuple
+  identity
 
 removeGraphData :: GraphId -> AppState -> AppState
 removeGraphData graphId appState =
@@ -184,3 +202,9 @@ removeGraphData graphId appState =
                   , undone  = Map.delete graphId appState'.undone
                   }
           # _graphData <<< _panes <<< at graphId .~ Nothing
+
+removePaneImpl :: GraphId -> AppState -> AppState
+removePaneImpl graphId =
+  removeGraphData graphId
+  >>>
+  arrangePanes

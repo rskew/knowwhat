@@ -2,10 +2,11 @@ module AppOperation where
 
 import Prelude
 
-import AppOperation.GraphOp (GraphOpF, _graphOp, GRAPHOP, showGraphOp, toForeignGraphOpF)
-import AppOperation.UIOp (UIOpF, _uiOp, UIOP, showUIOp, toForeignUIOpF)
+import AppOperation.GraphOp (GRAPHOP, GraphOpF, _graphOp, encodeGraphDataAsGraphOp, showGraphOp, toForeignGraphOpF)
+import AppOperation.UIOp (UIOP, UIOpF, _uiOp, encodeGraphViewsAsUIOp, showUIOp, toForeignUIOpF)
 import AppOperation.UndoOp (UndoOpF, _undoOp, UNDOOP, showUndoOp, toForeignUndoOpF)
 import Control.Alt ((<|>))
+import Core (GraphData)
 import Data.Bifunctor (lmap)
 import Data.Newtype (class Newtype, wrap)
 import Data.Traversable (traverse, foldl)
@@ -81,3 +82,9 @@ decodeAppOperation foreignOpArray =
     decodedOperations <- traverse tryDecode arrayForeign
     pure $ wrap
       $ foldl bind (pure unit) $ map const decodedOperations
+
+encodeGraphDataAsAppOperation :: GraphData -> AppOperation Unit
+encodeGraphDataAsAppOperation graphData =
+  AppOperation do
+    encodeGraphDataAsGraphOp graphData
+    encodeGraphViewsAsUIOp graphData.panes

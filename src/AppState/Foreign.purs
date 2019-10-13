@@ -2,8 +2,7 @@ module AppState.Foreign where
 
 import Prelude
 
-import AppOperation (AppOperation)
-import AppOperation.Interpreter (encodeGraphDataAsAppOperation)
+import AppOperation (AppOperation, encodeGraphDataAsAppOperation)
 import AppState (AppState)
 import Core (GraphId, GraphData)
 import Data.DateTime.Instant (Instant, instant, unInstant)
@@ -52,12 +51,12 @@ graphDataToJSON :: GraphId -> GraphData -> Array (AppOperation Unit) -> Array (A
 graphDataToJSON graphId graphData history undone metadata =
   let
     serialisableGraphData =
-        ({ appStateOp : encodeGraphDataAsAppOperation graphData
-         , metadata   : toForeignMetadata metadata
-         , graphId    : UUID.toString graphId
-         , history    : history
-         , undone     : undone
-         } :: SerialisedGraphData)
+      ({ appStateOp : encodeGraphDataAsAppOperation graphData
+       , metadata : toForeignMetadata metadata
+       , graphId  : UUID.toString graphId
+       , history  : history
+       , undone   : undone
+       } :: SerialisedGraphData)
   in
     encodeJSON serialisableGraphData
 
