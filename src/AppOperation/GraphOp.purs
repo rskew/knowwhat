@@ -133,7 +133,7 @@ interpretGraphOp =
   Run.runAccumPure
   (\accumulator ->
     Run.on _graphOp (Loop <<< lmap ((>>>) accumulator) <<< handleGraphOp) Done)
-  (\accumulator a -> Tuple accumulator a)
+  Tuple
   identity
 
 showGraphOp :: forall a. GraphOpF a -> Tuple String a

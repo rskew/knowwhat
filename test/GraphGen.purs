@@ -1,33 +1,28 @@
 module GraphGen where
 
+import Prelude
+
 import AppOperation.GraphOp (encodeNodeAsGraphOp, interpretGraphOp)
 import Core (Edge, GraphData, GraphId, GraphSpacePoint2D(..), Node, batchInsertEdges, emptyGraphData, freshEdge, freshNode)
-import Prelude (bind, comparing, pure, ($), (<$>), (<<<), (<>))
-import Test.QuickCheck (class Arbitrary, arbitrary)
-import Test.QuickCheck.Gen
-
 import Data.Array as Array
 import Data.Foldable (foldr, length)
 import Data.List.Lazy (replicateM)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.NonEmpty (NonEmpty(..))
-import Data.String.CodePoints (fromCodePointArray, codePointFromChar)
 import Data.Tuple (Tuple(..), fst)
+import Data.UUID as UUID
+import Effect.Unsafe (unsafePerformEffect)
 import Run as Run
-import Unsafe.Coerce (unsafeCoerce)
+import Test.QuickCheck (class Arbitrary, arbitrary)
+import Test.QuickCheck.Gen (Gen, chooseInt, arrayOf, elements)
 
 nodeGen :: GraphId -> Gen Node
 nodeGen graphId = do
-  --idStr <- genAsciiString
-  --text  <- genAsciiString
-  idChar <- arbitrary :: Gen Char
-  let beginIdStr = fromCodePointArray [ codePointFromChar idChar ]
-  idStr <- (arbitrary :: Gen String)
+  let id = unsafePerformEffect UUID.genUUID
   text  <- (arbitrary :: Gen String)
   x     <- (arbitrary :: Gen Number)
   y     <- (arbitrary :: Gen Number)
-  let id = unsafeCoerce $ beginIdStr <> idStr
   pure $ (freshNode graphId id) { text = text, position = GraphSpacePoint2D { x : x, y : y } }
 
 -- | Generate a bunch of edges for a particular graph
@@ -50,11 +45,10 @@ data TestGraph = TestGraph GraphId GraphData (Array Node) (Array Edge)
 
 graphGen :: Gen TestGraph
 graphGen = do
-  let graphId = unsafeCoerce "graphId"
+  let graphId = unsafePerformEffect UUID.genUUID
 
   -- Generate a bunch of nodes, add them to graph
-  -- Make sure ids are unique since we're just using random strings
-  nodes <- Array.nubBy (comparing _.id) <$> (arrayOf $ nodeGen graphId)
+  nodes <- arrayOf $ nodeGen graphId
   node <- nodeGen graphId
 
   let graphData = foldr (fst <<< Run.extract <<< interpretGraphOp <<< encodeNodeAsGraphOp) emptyGraphData nodes

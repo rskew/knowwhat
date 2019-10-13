@@ -14,57 +14,24 @@ import Data.Tuple (Tuple(..))
 demo :: Effect (Tuple GraphId (AppOperation Unit))
 demo = do
   graphId <- genUUID
-  oscillatorId <- genUUID
-  delayId <- genUUID
-  amplifierId <- genUUID
-  outputId <- genUUID
-  filterId <- genUUID
+  helloId <- genUUID
+  smileId <- genUUID
   let
-    oscillatorNode = freshNode graphId oscillatorId
-    delayNode      = freshNode graphId delayId
-    amplifierNode  = freshNode graphId amplifierId
-    outputNode     = freshNode graphId outputId
-    filterNode     = freshNode graphId filterId
+    helloNode = freshNode graphId helloId
+    smileNode = freshNode graphId smileId
   pure $ Tuple graphId $ (wrap do
     insertPane graphId
 
-    insertNode graphId oscillatorId
-    moveNode oscillatorNode (GraphSpacePoint2D { x : 450.0, y : 270.0 })
-    updateNodeText oscillatorNode "oscillator"
+    insertNode graphId helloId
+    moveNode helloNode (GraphSpacePoint2D { x : 450.0, y : 270.0 })
+    updateNodeText helloNode "hello"
 
-    insertNode graphId delayId
-    moveNode delayNode (GraphSpacePoint2D { x : 450.0, y : 170.0 })
-    updateNodeText delayNode "delay"
+    insertNode graphId smileId
+    moveNode smileNode (GraphSpacePoint2D { x : 450.0, y : 170.0 })
+    updateNodeText smileNode ":D"
 
-    insertNode graphId amplifierId
-    moveNode amplifierNode (GraphSpacePoint2D { x : 650.0, y : 270.0 })
-    updateNodeText amplifierNode "gain"
-
-    insertNode graphId outputId
-    moveNode outputNode (GraphSpacePoint2D { x : 800.0, y : 270.0 })
-    updateNodeText outputNode "output"
-
-    insertNode graphId filterId
-    moveNode filterNode (GraphSpacePoint2D { x : 550.0, y : 370.0 })
-    updateNodeText filterNode "filter"
-
-    insertEdge { source      : oscillatorId
+    insertEdge { source      : helloId
                , sourceGraph : graphId
-               , target      : delayId
-               , targetGraph : graphId
-               }
-    insertEdge { source      : delayId
-               , sourceGraph : graphId
-               , target      : amplifierId
-               , targetGraph : graphId
-               }
-    insertEdge { source      : amplifierId
-               , sourceGraph : graphId
-               , target      : outputId
-               , targetGraph : graphId
-               }
-    insertEdge { source      : amplifierId
-               , sourceGraph : graphId
-               , target      : filterId
+               , target      : smileId
                , targetGraph : graphId
                })

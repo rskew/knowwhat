@@ -3,7 +3,6 @@ module AppState where
 import Prelude
 
 import AppOperation (AppOperation)
-import Audio.WebAudio.Types (AudioContext) as WebAudio
 import Core (GraphData, Edge, GraphId, NodeId, EdgeId, PageSpacePoint2D, GraphSpacePoint2D(..), Focus, GraphView, Point2D, emptyGraphData)
 import Data.Lens (Lens', Traversal', lens, traversed)
 import Data.Lens.At (at)
@@ -12,7 +11,6 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Symbol (SProxy(..))
-import Synth (SynthParams, Synth)
 import Web.HTML.HTMLElement as WHE
 
 
@@ -26,23 +24,17 @@ type AppState =
   { graphData          :: GraphData
   , history            :: Map GraphId (Array (AppOperation Unit))
   , undone             :: Map GraphId (Array (AppOperation Unit))
-  , synth              :: Synth
   , windowBoundingRect :: WHE.DOMRect
   , drawingEdges       :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId   :: Maybe HoveredElementId
   , focusedPane        :: Maybe GraphId
   }
 
-emptyAppState :: WebAudio.AudioContext -> AppState
-emptyAppState audioContext =
+emptyAppState :: AppState
+emptyAppState =
   { graphData          : emptyGraphData
   , history            : Map.empty
   , undone             : Map.empty
-  , synth              : { synthParams : Map.empty
-                         , synthState  : { audioContext    : audioContext
-                                         , synthNodeStates : Map.empty
-                                         }
-                         }
   , windowBoundingRect : { height : 0.0, width : 0.0, left : 0.0, right : 0.0, top : 0.0, bottom : 0.0 }
   , drawingEdges       : Map.empty
   , hoveredElementId   : Nothing
@@ -95,17 +87,6 @@ instance showHoveredElementId :: Show HoveredElementId where
      NodeBorderId nodeId -> "NodeBorderId " <> show nodeId
      EdgeBorderId edgeId -> "EdgeBorderId " <> show edgeId
 
-type UninitializedAppState =
-  { graphData          :: GraphData
-  , history            :: Map GraphId (Array (AppOperation Unit))
-  , undone             :: Map GraphId (Array (AppOperation Unit))
-  , synth              :: SynthParams
-  , windowBoundingRect :: WHE.DOMRect
-  , drawingEdges       :: Map DrawingEdgeId DrawingEdge
-  , hoveredElementId   :: Maybe HoveredElementId
-  , focusedPane        :: Maybe GraphId
-  }
-
 ------
 -- Lenses
 
@@ -131,9 +112,6 @@ _drawingEdgePosition drawingEdgeId =
 _drawingEdgeTargetGraph :: DrawingEdgeId -> Traversal' AppState GraphId
 _drawingEdgeTargetGraph drawingEdgeId =
   _drawingEdges <<< at drawingEdgeId <<< traversed <<< prop (SProxy :: SProxy "targetGraph")
-
-_synth :: Lens' AppState Synth
-_synth = prop (SProxy :: SProxy "synth")
 
 _graphData :: Lens' AppState GraphData
 _graphData = prop (SProxy :: SProxy "graphData")

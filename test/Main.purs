@@ -2,16 +2,23 @@ module Test.Main where
 
 import Prelude
 
-import AppOperation.GraphOp (encodeNodeAsGraphOp, interpretGraphOp, invertGraphOp)
+import AppOperation (AppOperation(..))
+import AppOperation.GraphOp (encodeGraphDataAsGraphOp, encodeNodeAsGraphOp, interpretGraphOp, invertGraphOp)
+import AppOperation.Interpreter (interpretAppOperation)
+import AppState (emptyAppState)
+import Control.Monad.Except.Trans (runExceptT)
 import Core (emptyGraphData, insertNodeImpl, moveNodeImpl, updateNodeTextImpl)
-import Test.QuickCheck (Result(..), (===), quickCheck')
-
 import Data.Array as Array
+import Data.Either (Either(..))
+import Data.Identity (Identity(..))
 import Data.Maybe (Maybe(..))
 import Data.Tuple (fst)
 import Effect (Effect)
-import Run as Run
+import Foreign as Foreign
+import Foreign.Class (encode, decode)
 import GraphGen (TestGraph(..))
+import Run as Run
+import Test.QuickCheck (Result(..), (===), quickCheck')
 
 
 ------
@@ -52,20 +59,19 @@ prop_InsertRemoveNodeB (TestGraph graphId graphData extraNodes _) =
       ===
       graphData
 
--- TODO: uncomment when synth code is removed
---prop_EncodeDecode :: TestGraph -> Result
---prop_EncodeDecode (TestGraph graphId graphData _ _) =
---  let
---    baseAppOp = map (const unit) $ AppOperation $ encodeGraphDataAsGraphOp graphData
---  in
---    case runExceptT $ decode $ encode baseAppOp
---      Identity (Left err) -> Failed $ show $ Foreign.renderForeignError <$> err
---      Identity (Right (decodedAppOperation :: AppOperation Unit)) ->
---        let
---          roundtripAppState = interpretAppOperation decodedAppOperation emptyAppState
---          baseAppState      = interpretAppOperation baseAppOp emptyAppState
---        in
---          roundtripAppState === baseAppState
+prop_EncodeDecode :: TestGraph -> Result
+prop_EncodeDecode (TestGraph graphId graphData _ _) =
+  let
+    baseAppOp = map (const unit) $ AppOperation $ encodeGraphDataAsGraphOp graphData
+  in
+    case runExceptT $ decode $ encode baseAppOp of
+      Identity (Left err) -> Failed $ show $ Foreign.renderForeignError <$> err
+      Identity (Right (decodedAppOperation :: AppOperation Unit)) ->
+        let
+          roundtripAppState = interpretAppOperation decodedAppOperation emptyAppState
+          baseAppState      = interpretAppOperation baseAppOp emptyAppState
+        in
+          roundtripAppState === baseAppState
 
 prop_fail :: TestGraph -> Result
 prop_fail (TestGraph graphId graphData extraNodes extraEdges) =
@@ -73,9 +79,9 @@ prop_fail (TestGraph graphId graphData extraNodes extraEdges) =
 
 main :: Effect Unit
 main = do
-  quickCheck' 1_000 prop_InsertNode
-  quickCheck' 1_000 prop_InsertRemoveNodeA
-  quickCheck' 1_000 prop_InsertRemoveNodeB
+  let n = 100
+  quickCheck' n prop_InsertNode
+  quickCheck' n prop_InsertRemoveNodeA
+  quickCheck' n prop_InsertRemoveNodeB
 
-  -- TODO: uncomment when synth code is removed
-  --quickCheck $ prop_EncodeDecode
+  quickCheck' n prop_EncodeDecode

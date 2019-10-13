@@ -5,11 +5,9 @@ import Prelude
 import AppOperation (AppOperation)
 import AppOperation.Interpreter (encodeGraphDataAsAppOperation)
 import AppState (AppState)
-import Core (GraphId)
+import Core (GraphId, GraphData)
 import Data.DateTime.Instant (Instant, instant, unInstant)
 import Data.Either (note)
-import Data.Map as Map
-import Data.Maybe (Maybe)
 import Data.Time.Duration (Milliseconds(..))
 import Data.UUID as UUID
 import Foreign as Foreign
@@ -50,18 +48,18 @@ toForeignMetadata metadata =
   in
     metadata { timestamp = millis }
 
-graphDataToJSON :: GraphId -> AppState -> Metadata -> Maybe String
-graphDataToJSON graphId appState metadata = do
-  history <- Map.lookup graphId appState.history
-  undone  <- Map.lookup graphId appState.undone
-  let serialisableGraphData =
-        ({ appStateOp : encodeGraphDataAsAppOperation appState.graphData appState.synth.synthParams
+graphDataToJSON :: GraphId -> GraphData -> Array (AppOperation Unit) -> Array (AppOperation Unit) -> Metadata -> String
+graphDataToJSON graphId graphData history undone metadata =
+  let
+    serialisableGraphData =
+        ({ appStateOp : encodeGraphDataAsAppOperation graphData
          , metadata   : toForeignMetadata metadata
          , graphId    : UUID.toString graphId
          , history    : history
          , undone     : undone
          } :: SerialisedGraphData)
-  pure $ encodeJSON serialisableGraphData
+  in
+    encodeJSON serialisableGraphData
 
 fromForeignMetadata :: ForeignMetadata -> Foreign.F Metadata
 fromForeignMetadata foreignMeta = toExceptT do

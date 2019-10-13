@@ -14,21 +14,18 @@ import Foreign as Foreign
 import Foreign.Class (class Encode, class Decode, decode)
 import Run (Run, Step(..))
 import Run as Run
-import Synth.SynthOp (SynthOpF, _synthOp, SYNTHOP, showSynthOp, toForeignSynthOpF)
 
 
 appOperationVersion :: String
 appOperationVersion = "0.0.0.0.0.1"
 
 ------
--- AppOperation DSL for actions that change the graph state and
--- associated state (e.g. synth state) directly
+-- AppOperation DSL
 
 type AppOperationRow =
   ( graphOp :: GRAPHOP
   , uiOp    :: UIOP
   , undoOp  :: UNDOOP
-  , synthOp :: SYNTHOP
   )
 
 newtype AppOperation a = AppOperation (Run AppOperationRow a)
@@ -42,7 +39,6 @@ instance showAppOperation :: Show (AppOperation a) where
     Run.extract (op # Run.runAccumPure
       (\accumulator -> Run.match
         { graphOp : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showGraphOp
-        , synthOp : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showSynthOp
         , uiOp    : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showUIOp
         , undoOp  : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showUndoOp
         })
@@ -66,8 +62,7 @@ encodeAppOperation (AppOperation op) =
   Run.extract $
   (op # Run.runAccumPure
     (\accumulator -> Run.match
-      { synthOp : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignSynthOpF
-      , graphOp : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignGraphOpF
+      { graphOp : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignGraphOpF
       , uiOp    : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignUIOpF
       , undoOp  : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignUndoOpF
       })
@@ -79,9 +74,8 @@ decodeAppOperation foreignOpArray =
   let
     decodeUIOp    = map (Run.lift _uiOp)    <<< (decode :: Foreign -> Foreign.F (UIOpF Unit))
     decodeUndoOp  = map (Run.lift _undoOp)  <<< (decode :: Foreign -> Foreign.F (UndoOpF Unit))
-    decodeSynthOp = map (Run.lift _synthOp) <<< (decode :: Foreign -> Foreign.F (SynthOpF Unit))
     decodeGraphOp = map (Run.lift _graphOp) <<< (decode :: Foreign -> Foreign.F (GraphOpF Unit))
-    tryDecode op  = decodeSynthOp op <|> decodeUIOp op <|> decodeUndoOp op <|> decodeGraphOp op
+    tryDecode op  = decodeUIOp op <|> decodeUndoOp op <|> decodeGraphOp op
   in do
     arrayForeign <- Foreign.readArray foreignOpArray
     decodedOperations <- traverse tryDecode arrayForeign

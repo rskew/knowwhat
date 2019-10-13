@@ -3,33 +3,26 @@ module AppOperation.Interpreter where
 import Prelude
 
 import AppOperation (AppOperation(..))
-import AppOperation.GraphOp (GRAPHOP, _graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, handleGraphOp, invertGraphOp)
+import AppOperation.GraphOp (_graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, interpretGraphOp, invertGraphOp)
 import AppOperation.UIOp (encodeGraphViewsAsUIOp)
 import AppOperation.UIOp.Interpreter (interpretUIOp)
 import AppOperation.UndoOp (UndoOpF(..), _undoOp, UNDOOP)
-import AppState (AppState, _graphData, _synth)
+import AppState (AppState, _graphData)
 import Core (GraphId, GraphData, selectGraphData, _panes)
 import Data.Array (cons, uncons)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Lens (Lens', over, (^.), (.~))
+import Data.Lens ((.~), (%~))
 import Data.Lens.At (at)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap, unwrap)
-import Data.NonEmpty (NonEmpty(..))
-import Data.NonEmpty as NonEmpty
-import Data.Symbol (SProxy, class IsSymbol)
-import Data.Traversable (foldl)
-import Data.Tuple (Tuple(..), fst, snd)
+import Data.Tuple (Tuple(..), fst)
 import Effect (Effect)
 import Effect.Console as Console
-import Prim.Row (class Cons)
-import Run (Run, FProxy, Step(..))
+import Run (Run, Step(..))
 import Run as Run
-import Synth (SynthParams)
-import Synth.SynthOp (encodeSynthParamsAsSynthOp, handleGraphOpAsSynthUpdate, interpretSynthOp)
 
 
 -- | Interpret the operation and push it onto the history stack
@@ -49,50 +42,30 @@ doAppOperation graphId op =
         Console.log ""
         pure $ appState { history = Map.insert graphId newHistory appState.history }
   in
-    interpretAppOperation op >=> historyUpdater
+    interpretAppOperation op >>> historyUpdater
 
 interpretAppOperation :: forall a.
-                         AppOperation a -> (AppState -> Effect AppState )
-interpretAppOperation (AppOperation synthUIUndoGraphOp) =
+                         AppOperation a -> (AppState -> AppState)
+interpretAppOperation (AppOperation uiUndoGraphOp) =
   let
-    uiUndoGraphOp =
-      interpretSynthOp synthUIUndoGraphOp
-      -- Discard the leaf of the original op
-      # map fst
-      -- lift the synth update function to an AppState update function
-      # map (overM _synth)
-
     undoGraphOp =
       interpretUIOp uiUndoGraphOp
-      # map (\(Tuple uiUpdate synthUpdate) ->
-               synthUpdate >=> (uiUpdate >>> pure))
+      -- Discard the leaf of the original op
+      # map fst
 
     graphOp =
       interpretUndoOp undoGraphOp
-      # map (\(Tuple undoUpdate synthUIUpdate) ->
-               synthUIUpdate >=> undoUpdate)
+      # map (\(Tuple undoUpdate uIUpdate) ->
+               uIUpdate >>> undoUpdate)
 
     noOp =
-      interpretGraphOpAsGraphAndSynthUpdate graphOp
-      # map \(Tuple graphSynthUpdate synthUIUndoUpdate) ->
-              synthUIUndoUpdate >=> graphSynthUpdate
+      interpretGraphOp graphOp
+      # map \(Tuple graphUpdate uIUndoUpdate) ->
+              uIUndoUpdate >>> (_graphData %~ graphUpdate)
   in
     noOp
     -- All sublangs have now been interpreted so we can grab the accumulated result
     # Run.extract
-
-interpretGraphOpAsGraphAndSynthUpdate :: forall r a.
-                                         Run (graphOp :: GRAPHOP | r) a
-                                         -> Run r (Tuple (AppState -> Effect AppState ) a)
-interpretGraphOpAsGraphAndSynthUpdate =
-  interpretOpMulti
-  _graphOp
-  (NonEmpty
-    (handleGraphOpAsSynthUpdate >>> lmap (overM _synth))
-    [ handleGraphOp >>> lmap (over _graphData >>> compose pure) ])
-  (>=>)
-  pure
-
 
 filteredHistoryUpdate :: AppOperation Unit
                            -> Array (AppOperation Unit)
@@ -139,109 +112,75 @@ collapseAppOperation (AppOperation newOp) (AppOperation historyHeadOp) =
 ------
 -- UndoOp
 
-handleUndoOp :: forall a. UndoOpF a -> Tuple (AppState -> Effect AppState) a
+handleUndoOp :: forall a. UndoOpF a -> Tuple (AppState -> AppState) a
 handleUndoOp = case _ of
   Undo graphId next ->
     Tuple (\appState -> case uncons =<< Map.lookup graphId appState.history of
-            Nothing -> pure appState
+            Nothing -> appState
             Just unconsHistory ->
               let
-                undoOp      = unconsHistory.head # unwrap >>> invertGraphOp >>> wrap
-                newHistory  = unconsHistory.tail
-                newUndone   = case Map.lookup graphId appState.undone of
+                undoOp     = unconsHistory.head # unwrap >>> invertGraphOp >>> wrap
+                newHistory = unconsHistory.tail
+                newUndone  = case Map.lookup graphId appState.undone of
                   Nothing -> [ unconsHistory.head ]
                   Just undone -> cons unconsHistory.head undone
-              in do
-                undoneState <- appState # interpretAppOperation undoOp
-                pure $ undoneState
-                         { history   = Map.insert graphId newHistory appState.history
-                         , undone    = Map.insert graphId newUndone  appState.undone
-                         }
+              in
+                appState
+                # interpretAppOperation undoOp
+                # _{ history = Map.insert graphId newHistory appState.history
+                   , undone  = Map.insert graphId newUndone  appState.undone
+                   }
           )
           next
 
   Redo graphId next ->
     Tuple (\appState -> case uncons =<< Map.lookup graphId appState.undone of
-              Nothing -> pure appState
+              Nothing -> appState
               Just unconsUndone ->
                 let
-                  redoOp      = unconsUndone.head
-                  newUndone   = unconsUndone.tail
-                in do
-                  redoneState <- appState # interpretAppOperation redoOp
-                  pure $ redoneState
-                           { history   = Map.update (Just <<< cons unconsUndone.head) graphId appState.history
-                           , undone    = Map.insert graphId newUndone appState.undone
-                           }
+                  redoOp    = unconsUndone.head
+                  newUndone = unconsUndone.tail
+                in
+                  appState
+                  # interpretAppOperation redoOp
+                  # _{ history = Map.update (Just <<< cons unconsUndone.head) graphId appState.history
+                     , undone  = Map.insert graphId newUndone appState.undone
+                     }
           )
           next
 
 interpretUndoOp :: forall r a.
-                   Run (undoOp :: UNDOOP | r) a -> Run r (Tuple (AppState -> Effect AppState) a)
+                   Run (undoOp :: UNDOOP | r) a -> Run r (Tuple (AppState -> AppState) a)
 interpretUndoOp =
   Run.runAccumPure
   (\accumulator ->
-    Run.on _undoOp (Loop <<< lmap (\updater -> accumulator >>= const updater) <<< handleUndoOp) Done)
+    Run.on _undoOp (Loop <<< lmap (\updater -> accumulator >>> updater) <<< handleUndoOp) Done)
   Tuple
-  pure
+  identity
 
 
 ------
 -- Encoding AppState for serialisation/deserialisation
 
-encodeGraphDataAsAppOperation :: GraphData -> SynthParams -> AppOperation Unit
-encodeGraphDataAsAppOperation graphData synthParams =
+encodeGraphDataAsAppOperation :: GraphData -> AppOperation Unit
+encodeGraphDataAsAppOperation graphData =
   AppOperation do
     encodeGraphDataAsGraphOp graphData
     encodeGraphViewsAsUIOp graphData.panes
-    encodeSynthParamsAsSynthOp synthParams
 
-removeGraphData :: GraphId -> AppState -> Effect AppState
+removeGraphData :: GraphId -> AppState -> AppState
 removeGraphData graphId appState =
   case selectGraphData graphId appState.graphData of
-    Nothing -> pure appState
-    Just graphToRemove -> do
-      let remover = encodeGraphDataAsGraphOp graphToRemove
-                    # invertGraphOp
-                    # wrap
-                    # interpretAppOperation
-      appState' <- remover appState
-      pure $ appState' { history = Map.delete graphId appState'.history
-                       , undone  = Map.delete graphId appState'.undone
-                       }
-             # _graphData <<< _panes <<< at graphId .~ Nothing
-
-
-------
--- Utilities
-
-overM :: forall s a' m. Monad m => Lens' s a' -> (a' -> m a') -> s -> m s
-overM lens_ f val = do
-  newSubVal <- f $ val ^. lens_
-  pure $ (val # (lens_ .~ newSubVal))
-
-interpretOpMulti :: forall sym f a b r r'.
-                    Cons sym (FProxy f) r' r
-                    => IsSymbol sym
-                    => SProxy sym
-                    -> NonEmpty Array (f (Run r a) -> Tuple b (Run r a))
-                    -> (b -> b -> b)
-                    -> b
-                    -> Run r a
-                    -> Run r' (Tuple b a)
-interpretOpMulti sym handlers joiner =
-  Run.runAccumPure
-  (\accumulator ->
-    Run.on
-    sym
-    (\symOp ->
+    Nothing -> appState
+    Just graphToRemove ->
       let
-        appliedHandlers = handlers <#> \handler -> handler symOp
-        handlerFuncs = fst <$> appliedHandlers
-        next = snd $ NonEmpty.head appliedHandlers
-        handlerAccumulator = foldl joiner (NonEmpty.head handlerFuncs) (NonEmpty.tail handlerFuncs)
-        combinedHandler = joiner accumulator handlerAccumulator
+        remover = encodeGraphDataAsGraphOp graphToRemove
+                  # invertGraphOp
+                  # wrap
+                  # interpretAppOperation
+        appState' = remover appState
       in
-       Loop $ Tuple combinedHandler next)
-    Done)
-  (\accumulator a -> Tuple accumulator a)
+        appState' { history = Map.delete graphId appState'.history
+                  , undone  = Map.delete graphId appState'.undone
+                  }
+          # _graphData <<< _panes <<< at graphId .~ Nothing

@@ -22,7 +22,6 @@ You can edit this file as you like.
     , "strings"
     , "uuid"
     , "web-uievents"
-    , "webaudio"
     ]
 , packages =
     ./packages.dhall
