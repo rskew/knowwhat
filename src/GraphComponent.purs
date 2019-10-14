@@ -764,14 +764,13 @@ graphComponent =
         history <- Map.lookup graphId state.history
         undone  <- Map.lookup graphId state.undone
         let metadata = { version : appOperationVersion , timestamp : timestamp }
-        pure $ graphDataToJSON graphId focusedGraphData history undone metadata
+        let title = fromMaybe "untitled" $ graphTitle focusedGraphData
+        pure $ Tuple (graphDataToJSON graphId focusedGraphData history undone metadata)
+                     title
       of
         Nothing -> pure unit
-        Just stateJSON ->
-          let
-            title = fromMaybe "untitled" $ graphTitle state.graphData
-          in
-            H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
+        Just (Tuple stateJSON title) ->
+          H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
 
     Keypress keyboardEvent -> do
       H.liftEffect $ log $ show $ KE.key keyboardEvent

@@ -5,7 +5,8 @@ You can edit this file as you like.
 { name =
     "halogen-svg"
 , dependencies =
-    [ "canvas"
+    [ "affjax"
+    , "canvas"
     , "console"
     , "effect"
     , "foreign-generic"
@@ -14,6 +15,7 @@ You can edit this file as you like.
     , "halogen-contenteditable"
     , "halogen-css"
     , "halogen-svg"
+    , "httpure"
     , "prelude"
     , "profunctor-lenses"
     , "psci-support"
