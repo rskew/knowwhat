@@ -2,6 +2,9 @@ module AppOperation.Interpreter where
 
 import Prelude
 
+import Affjax as AX
+import Affjax.RequestBody as RequestBody
+import Affjax.ResponseFormat as ResponseFormat
 import AppConfig (operationPostURL)
 import AppOperation (AppOperation(..))
 import AppOperation.GraphOp (_graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, interpretGraphOp, invertGraphOp)
@@ -27,10 +30,6 @@ import Run (Run, Step(..))
 import Run as Run
 import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl, rescaleWindowImpl)
 
-import Affjax as AX
-import Affjax.ResponseFormat as ResponseFormat
-import Affjax.RequestBody as RequestBody
-
 -- | Interpret the operation and push it onto the history stack
 doAppOperation :: GraphId -> AppOperation Unit -> AppState -> Effect AppState
 doAppOperation graphId op appState =
@@ -44,9 +43,9 @@ doAppOperation graphId op appState =
       res <- AX.post ResponseFormat.string operationPostURL (RequestBody.string $ encodeJSON op)
       case res.body of
         Left err -> Console.log $ "POST /operation response failed to decode: " <> AX.printResponseFormatError err
-        Right response -> Console.log $ "POST /operation response: " <> response
-    pure $ interpretAppOperation op appState
-           # _{ history = Map.insert graphId newHistory appState.history }
+        Right response -> Console.log "Operation POSTed to server successfully"
+    pure $ appState { history = Map.insert graphId newHistory appState.history }
+           # interpretAppOperation op
 
 interpretAppOperation :: forall a.
                          AppOperation a -> (AppState -> AppState)

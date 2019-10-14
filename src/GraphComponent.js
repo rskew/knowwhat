@@ -4,7 +4,7 @@ var FileSaver = require("file-saver");
 // Save/loading graph
 
 // saveJSON :: String -> String -> Effect Unit
-var saveJSON = function(jsonStr) {
+exports.saveJSON = function(jsonStr) {
   return function(fname) {
     return function() {
       var blob = new Blob([jsonStr], {
@@ -16,7 +16,7 @@ var saveJSON = function(jsonStr) {
 };
 
 // loadFile :: Effect Unit
-var loadFile = function() {
+exports.loadFile = function() {
   simulateClickOn(document.querySelector("input[type=file]"));
 };
 
@@ -28,7 +28,3 @@ var simulateClickOn = function(element) {
   });
   element.dispatchEvent(clickEvent);
 };
-
-//exports.saveJSON = saveJSON;
-exports.loadFile = loadFile;
-exports.saveJSON = saveJSON;

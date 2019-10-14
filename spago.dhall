@@ -16,6 +16,7 @@ You can edit this file as you like.
     , "halogen-css"
     , "halogen-svg"
     , "httpure"
+    , "node-sqlite3"
     , "prelude"
     , "profunctor-lenses"
     , "psci-support"

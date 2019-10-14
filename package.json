@@ -20,6 +20,7 @@
   "homepage": "https://github.com/rskew/workflow#README",
   "dependencies": {
     "file-saver": "^2.0.2",
+    "sqlite3": "^4.1.0",
     "uuid": "^3.3.3",
     "uuid-validate": "0.0.3"
   },
