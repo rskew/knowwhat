@@ -3,7 +3,7 @@ module GraphComponent where
 import Prelude
 
 import AppOperation (AppOperation(..), appOperationVersion)
-import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText)
+import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText, updateTitle)
 import AppOperation.Interpreter (doAppOperation, interpretAppOperation)
 import AppOperation.UIOp (moveGraphOrigin, rescalePane, rescaleWindow, removePane)
 import AppOperation.UndoOp (undo, redo)
@@ -14,7 +14,7 @@ import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
-import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, graphTitle, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs, selectGraphData)
+import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs, selectGraphData)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -33,7 +33,7 @@ import Data.UUID (genUUID)
 import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Aff (Aff)
-import Effect.Console (log)
+import Effect.Console as Console
 import Effect.Now (now)
 import Foreign (renderForeignError)
 import Foreign as Foreign
@@ -50,7 +50,7 @@ import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
-import UI.Constants (defaultTextFieldShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, zoomScaling)
+import UI.Constants (defaultTextFieldShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, zoomScaling, defaultTitleShape, maxTitleShape)
 import UI.Panes (zoomAtPoint, paneContainingPoint)
 import UI.SvgDefs (svgDefs)
 import Web.Event.Event as WE
@@ -88,6 +88,7 @@ data Action
   | EdgeDrawMove Drag.DragEvent GraphId DrawingEdgeId H.SubscriptionId
   | NodeTextInput NodeId SVGContentEditable.Message
   | EdgeTextInput GraphId EdgeId SVGContentEditable.Message
+  | TitleTextInput GraphId SVGContentEditable.Message
   | AppCreateNode GraphView ME.MouseEvent
   | AppDeleteNode Node
   | AppCreateEdge GraphId EdgeId
@@ -126,8 +127,9 @@ data Message
 type Slot = H.Slot Query Message
 
 type Slots =
-  ( nodeTextField :: SVGContentEditable.Slot NodeId
-  , edgeTextField :: SVGContentEditable.Slot EdgeId
+  ( nodeTextField  :: SVGContentEditable.Slot NodeId
+  , edgeTextField  :: SVGContentEditable.Slot EdgeId
+  , titleTextField :: SVGContentEditable.Slot GraphId
   )
 
 _nodeTextField :: SProxy "nodeTextField"
@@ -136,8 +138,8 @@ _nodeTextField = SProxy
 _edgeTextField :: SProxy "edgeTextField"
 _edgeTextField = SProxy
 
-_analyser :: SProxy "analyser"
-_analyser = SProxy
+_titleTextField :: SProxy "titleTextField"
+_titleTextField = SProxy
 
 graphComponent :: H.Component HH.HTML Query Input Message Aff
 graphComponent =
@@ -381,6 +383,27 @@ graphComponent =
       , SA.markerEnd "url(#drawing-arrow)"
       ]
 
+  renderTitle :: GraphId -> String -> Tuple String (H.ComponentHTML Action Slots Aff)
+  renderTitle graphId title =
+    Tuple (show graphId <> "_title") $
+      SE.g
+      [ SA.class_ "title"
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ DoNothing
+      ]
+      [ HH.slot
+        _titleTextField
+        graphId
+        SVGContentEditable.svgContenteditable
+        { shape : defaultTitleShape
+        , initialText : title
+        , maxShape : maxTitleShape
+        , fitContentDynamic : true
+        }
+        (Just <<< TitleTextInput graphId)
+      ]
+
   renderSingleGraph :: AppState -> GraphView -> GraphData -> H.ComponentHTML Action Slots Aff
   renderSingleGraph state renderPane singleGraph =
     let
@@ -405,6 +428,10 @@ graphComponent =
       drawingEdges = state.drawingEdges # Map.values # Array.fromFoldable
 
       keyedDrawingEdges = Array.mapMaybe (renderDrawingEdge state renderPane) drawingEdges
+
+      keyedTitle = case Map.lookup renderPane.graphId singleGraph.titles of
+        Nothing -> []
+        Just title -> [ renderTitle renderPane.graphId title ]
 
       zoom                    = renderPane.zoom
       PageSpacePoint2D origin = renderPane.origin
@@ -438,11 +465,13 @@ graphComponent =
         , SK.g
           []
           (ghostNodes
-           <>keyedEdges
+           <> keyedEdges
            <> keyedEdgeBorders
            <> keyedDrawingEdges
            <> keyedNodes
-           <> keyedEdgeTextFields)
+           <> keyedEdgeTextFields
+           <> keyedTitle
+          )
         ]
       ]
 
@@ -512,9 +541,14 @@ graphComponent =
     UpdateContentEditableText -> do
       state <- H.get
       for_ state.graphData.nodes \node -> do
-        H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText $ node.text
+        H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText node.text
       for_ (edgeArray state.graphData) \edge -> do
-        H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText $ edge.text
+        H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText edge.text
+      let
+        titles :: Array (Tuple GraphId String)
+        titles = Map.toUnfoldable state.graphData.titles
+      for_ titles \(Tuple graphId title) -> do
+        H.query _titleTextField graphId $ H.tell $ SVGContentEditable.SetText title
 
     NodeTextInput nodeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
@@ -531,6 +565,13 @@ graphComponent =
         Just edge -> do
           modifyM $ doAppOperation graphId $ AppOperation $ updateEdgeText edge text
           handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
+
+    TitleTextInput graphId (SVGContentEditable.TextUpdate newTitle) -> do
+      state <- H.get
+      case Map.lookup graphId state.graphData.titles of
+        Nothing -> pure unit
+        Just oldTitle -> do
+          modifyM $ doAppOperation graphId $ AppOperation $ updateTitle graphId oldTitle newTitle
 
     BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
       handleAction $ FocusOn graphId Nothing
@@ -740,9 +781,9 @@ graphComponent =
             graphDataFromJSON state json
       of
         Left errors ->
-          H.liftEffect $ log $ "Failed to parse JSON: " <> errors
+          H.liftEffect $ Console.log $ "Failed to parse JSON: " <> errors
         Right deserialisedGraphData -> do
-          H.liftEffect $ log $ "Loading saved graph encoded with AppOperation version "
+          H.liftEffect $ Console.log $ "Loading saved graph encoded with AppOperation version "
                                <> deserialisedGraphData.metadata.version
           --reducedAppState <- H.liftEffect $ removeGraphData graphId state
           reducedAppState <- H.get
@@ -764,7 +805,7 @@ graphComponent =
         history <- Map.lookup graphId state.history
         undone  <- Map.lookup graphId state.undone
         let metadata = { version : appOperationVersion , timestamp : timestamp }
-        let title = fromMaybe "untitled" $ graphTitle focusedGraphData
+        let title = fromMaybe "untitled" $ Map.lookup graphId state.graphData.titles
         pure $ Tuple (graphDataToJSON graphId focusedGraphData history undone metadata)
                      title
       of
@@ -773,7 +814,7 @@ graphComponent =
           H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
 
     Keypress keyboardEvent -> do
-      H.liftEffect $ log $ show $ KE.key keyboardEvent
+      H.liftEffect $ Console.log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
         -- Undo
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do

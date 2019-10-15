@@ -1,7 +1,7 @@
 module DemoGraph where
 
 import AppOperation (AppOperation)
-import AppOperation.GraphOp (insertNode, insertEdge, moveNode, updateNodeText)
+import AppOperation.GraphOp (insertNode, insertEdge, moveNode, updateNodeText, updateTitle)
 import AppOperation.UIOp (insertPane)
 import Prelude
 import Effect (Effect)
@@ -34,4 +34,7 @@ demo = do
                , sourceGraph : graphId
                , target      : smileId
                , targetGraph : graphId
-               })
+               }
+
+    updateTitle graphId "" "graph time woot"
+  )

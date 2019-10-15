@@ -41,11 +41,6 @@ input {
     border: 2px solid #fc0;
 }
 
-.paneDivider {
-    background-color: var(--text-field-border-color);
-    height: 100%;
-}
-
 svg {
     z-index: -1;
     height: 100%;
@@ -59,7 +54,6 @@ svg {
 
 .text-field {
     border: 1px solid var(--text-field-border-color);
-    width: auto;
     min-width: 5%;
     min-width: 20px;
     max-width: 100%;
@@ -76,6 +70,10 @@ svg {
 
 foreignObject {
     overflow: visible;
+}
+
+.title {
+    font-size: 30px;
 }
 
 .node {

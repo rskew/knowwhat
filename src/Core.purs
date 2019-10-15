@@ -9,12 +9,9 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', Traversal', traversed, (.~), (?~), (%~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
-import Data.String (Pattern(..))
-import Data.String as String
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.UUID (UUID)
@@ -160,20 +157,22 @@ emptyPane graphId =
 
 -- | GraphData can hold data for multiple graphs with edges between them
 type GraphData =
-  { nodes :: Map NodeId Node
-  , edges :: { sourceTarget :: Map NodeId (Map NodeId Edge)
-             , targetSource :: Map NodeId (Map NodeId Edge)
-             }
-  , panes :: Map GraphId GraphView
+  { nodes  :: Map NodeId Node
+  , edges  :: { sourceTarget :: Map NodeId (Map NodeId Edge)
+              , targetSource :: Map NodeId (Map NodeId Edge)
+              }
+  , panes  :: Map GraphId GraphView
+  , titles :: Map GraphId String
   }
 
 emptyGraphData :: GraphData
 emptyGraphData =
-  { nodes : Map.empty
-  , edges : { sourceTarget : Map.empty
-            , targetSource : Map.empty
-            }
-  , panes : Map.empty
+  { nodes  : Map.empty
+  , edges  : { sourceTarget : Map.empty
+             , targetSource : Map.empty
+             }
+  , panes  : Map.empty
+  , titles : Map.empty
   }
 
 
@@ -206,6 +205,9 @@ _origin = prop (SProxy :: SProxy "origin")
 
 _boundingRect :: Lens' GraphView WHE.DOMRect
 _boundingRect = prop (SProxy :: SProxy "boundingRect")
+
+_title :: GraphId -> Lens' GraphData (Maybe String)
+_title graphId = prop (SProxy :: SProxy "titles") <<< at graphId
 
 
 ------
@@ -267,6 +269,9 @@ updateNodeTextImpl nodeId newText = _nodeText nodeId .~ newText
 updateEdgeTextImpl :: EdgeId -> String -> GraphData -> GraphData
 updateEdgeTextImpl edgeId newText = updateEdgeData _{ text = newText } edgeId
 
+updateTitleImpl :: GraphId -> String -> GraphData -> GraphData
+updateTitleImpl graphId newTitle = _title graphId ?~ newTitle
+
 
 ------
 -- Utilities
@@ -321,30 +326,8 @@ selectGraphData graphId graphData =
                    (emptyGraphData { nodes = singleGraphNodes })
                    singleGraphEdges
   in do
-    pane <- Map.lookup graphId graphData.panes
-    pure $ newGraphData { panes = Map.singleton graphId pane }
-
-mergeGraphData :: GraphData -> GraphData -> GraphData
-mergeGraphData graphDataA graphDataB =
-  let
-    edgesA = edgeArray graphDataA
-    edgesB = edgeArray graphDataB
-    mergedWithoutEdges =
-      emptyGraphData
-        { nodes = Map.union graphDataA.nodes graphDataB.nodes
-        , panes = Map.union graphDataA.panes graphDataB.panes
-        }
-  in
-    batchInsertEdges mergedWithoutEdges $ edgesA <> edgesB
-
-graphTitle :: GraphData -> Maybe String
-graphTitle graphData =
-  List.head titles >>= String.stripPrefix titlePattern
-  where
-    titlePattern = (Pattern "Title: ")
-    titles = List.filter (String.contains titlePattern) nodesText
-    nodesText =
-      graphData.nodes
-      # Map.values
-      <#> _.text
-      <#> String.trim
+    pane  <- Map.lookup graphId graphData.panes
+    title <- Map.lookup graphId graphData.titles
+    pure $ newGraphData { panes  = Map.singleton graphId pane
+                        , titles = Map.singleton graphId title
+                        }
