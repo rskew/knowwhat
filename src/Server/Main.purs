@@ -3,13 +3,11 @@ module Server.Main where
 import Prelude
 
 import AppOperation (AppOperation)
-import Control.Monad.Except.Trans (runExceptT)
+import Control.Monad.Except (runExcept)
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Newtype (unwrap)
 import Effect (Effect)
-import Effect.Aff (Aff, launchAff)
-import Effect.Aff.Compat (EffectFnAff, fromEffectFnAff)
+import Effect.Aff (launchAff, try)
 import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
 import Foreign (renderForeignError)
@@ -17,54 +15,54 @@ import Foreign as Foreign
 import Foreign.Generic (decodeJSON)
 import HTTPure as HTTPure
 import Node.FS.Aff as FS
-import Server.Schema as Schema
+import Server.Config (config)
+import Server.GraphDB (startDB)
+import Server.GraphDB.Interpreter (interpretAppOperation)
 import SQLite3 (DBConnection)
-import SQLite3 as SQLite
 
-
-foreign import _enableForeignKey :: DBConnection -> EffectFnAff Unit
-
-enableForeignKey :: DBConnection -> Aff Unit
-enableForeignKey = fromEffectFnAff <<< _enableForeignKey
-
-dbFile :: SQLite.FilePath
-dbFile = "../server/testdb.sqlite"
 
 main :: Effect Unit
 main = unit <$ launchAff do
-  db <- startDB dbFile
+  db <- startDB config.dbFile
   liftEffect $ startServer db
 
-startDB :: String -> Aff DBConnection
-startDB dbFileName = do
-  db <- SQLite.newDB dbFileName
-  enableForeignKey db
-  _ <- SQLite.queryDB db Schema.graphsTableSchema []
-  _ <- SQLite.queryDB db Schema.nodesTableSchema []
-  _ <- SQLite.queryDB db Schema.edgesTableSchema []
-  pure db
-
 startServer :: DBConnection -> HTTPure.ServerM
-startServer dbConn =
-  HTTPure.serve 8080 router $ Console.log "Server now up on port 8080"
+startServer db =
+  HTTPure.serve config.port router $ Console.log ("Server now up on port " <> show config.port)
   where
+    -- Serve graph drawing app
     router { method: HTTPure.Get, path } =
       case path of
         [] -> serveFile "index.html"
         [ fileName ] -> serveFile fileName
         _ -> HTTPure.notFound
-    router { path: ["operation"], body, method: HTTPure.Post } = do
+    -- Receive operations from graph drawing app
+    router { path: ["operation"], body, method: HTTPure.Post } =
       case
         lmap (show <<< map renderForeignError)
-        $ unwrap $ runExceptT $ (decodeJSON body :: Foreign.F (AppOperation Unit))
+        $ runExcept $ (decodeJSON body :: Foreign.F (AppOperation Unit))
       of
-        Left errors -> Console.log $ "received operation but could not decode: " <> errors
-        Right operation -> Console.log $ "received operation: " <> show operation
-      HTTPure.ok ""
-    router _ = HTTPure.ok ":D"
+        Left errors -> do
+          Console.log $ "received operation but could not decode: " <> errors
+          HTTPure.badRequest body
+        Right operation -> do
+          Console.log $ "received operation: " <> show operation
+          result <- try $ interpretAppOperation db operation
+          case result of
+            Left error -> do
+              Console.log "Failed to interpret operation"
+              HTTPure.badRequest body
+            Right _ ->
+              HTTPure.ok ":D"
+    router _ = HTTPure.notFound
 
 serveFile :: String -> HTTPure.ResponseM
 serveFile fileName = do
-  Console.log $ "serving file: " <> fileName
-  file <- FS.readFile fileName
-  HTTPure.ok file
+  result <- try $ FS.readFile fileName
+  case result of
+    Left err -> do
+      Console.log $ "file not found: " <> fileName
+      HTTPure.notFound
+    Right file -> do
+      Console.log $ "serving file: " <> fileName
+      HTTPure.ok file
