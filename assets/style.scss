@@ -76,6 +76,10 @@ foreignObject {
     font-size: 30px;
 }
 
+.invalidIndicator {
+    fill: #f00a;
+}
+
 .node {
     fill: var(--node-color);
 }

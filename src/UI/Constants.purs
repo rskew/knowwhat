@@ -39,3 +39,9 @@ defaultTitleShape = { width : 200.0, height : 100.0 }
 
 maxTitleShape :: Shape
 maxTitleShape = { width : 1500.0, height: 500.0 }
+
+invalidIndicatorOffset :: Point2D
+invalidIndicatorOffset = { x : 2.0, y : 2.0 }
+
+invalidIndicatorSize :: Number
+invalidIndicatorSize = 10.0

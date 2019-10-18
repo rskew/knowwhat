@@ -2,32 +2,38 @@ module Server.GraphDB.Interpreter where
 
 import Prelude
 
-import AppOperation (AppOperation)
-import AppOperation.GraphOp (GraphOpF(..))
+import AppOperation (AppOperation(..))
+import AppOperation.GraphOp (GraphOpF(..), setTitleValidity)
 import AppOperation.UIOp (UIOpF(..))
 import AppOperation.UndoOp (UndoOpF(..))
 import Core (freshNode, freshEdge)
+import Data.Either (Either(..))
 import Data.Newtype (unwrap)
 import Effect.Aff (Aff)
+import Effect.Class (liftEffect)
+import Effect.Class.Console as Console
+import Foreign.Generic (encodeJSON)
 import Run as Run
 import SQLite3 (DBConnection)
 import Server.Query (deleteNode, insertGraph, insertNode, moveNode, updateGraphTitle, updateNodeText, insertEdge, deleteEdge, updateEdgeText)
+import Node.Websocket.Connection (sendMessage)
+import Node.Websocket.Types (WSConnection, TextFrame(..))
 
-interpretAppOperation :: DBConnection -> AppOperation Unit -> Aff Unit
-interpretAppOperation db =
+interpretAppOperation :: forall a. DBConnection -> WSConnection -> AppOperation a -> Aff a
+interpretAppOperation db wsConn =
   unwrap >>>
   Run.interpret
     (Run.match
-      { graphOp : handleGraphOp db
+      { graphOp : handleGraphOp db wsConn
       , uiOp    : handleUIOp db
       , undoOp  : handleUndoOp db
       })
 
-handleGraphOp :: forall a. DBConnection -> GraphOpF a -> Aff a
-handleGraphOp db = case _ of
+handleGraphOp :: forall a. DBConnection -> WSConnection -> GraphOpF a -> Aff a
+handleGraphOp db wsConn = case _ of
   NewGraph graphId title next -> do
-      _ <- insertGraph graphId title db
-      pure next
+    _ <- insertGraph graphId title db
+    pure next
 
   InsertNode graphId nodeId next -> do
     _ <- insertNode (freshNode graphId nodeId) db
@@ -58,7 +64,29 @@ handleGraphOp db = case _ of
     pure next
 
   UpdateTitle graphId _ to next -> do
-    _ <- updateGraphTitle graphId to db
+    result <- updateGraphTitle graphId to db
+    case result of
+      Left error ->
+        let
+          responseOp = AppOperation $ setTitleValidity graphId false
+        in do
+          Console.log "Failed to update title"
+          liftEffect $ sendMessage wsConn $ Left
+            $ TextFrame { type : "utf8"
+                        , utf8Data : encodeJSON responseOp
+                        }
+          pure next
+      Right _ ->
+        let
+          responseOp = AppOperation $ setTitleValidity graphId true
+        in do
+          liftEffect $ sendMessage wsConn $ Left
+            $ TextFrame { type : "utf8"
+                        , utf8Data : encodeJSON responseOp
+                        }
+          pure next
+
+  SetTitleValidity graphId newValidity next -> do
     pure next
 
 handleUIOp :: forall a. DBConnection -> UIOpF a -> Aff a

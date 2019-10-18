@@ -2,7 +2,7 @@ module AppOperation.GraphOp where
 
 import Prelude
 
-import Core (Edge, EdgeId, GraphData, GraphId, GraphSpacePoint2D, Node, NodeId, allEdgesTouchingNode, deleteEdgeImpl, deleteNodeImpl, insertEdgeImpl, insertNodeImpl, moveNodeImpl, updateEdgeTextImpl, updateNodeTextImpl, edgeArray, updateTitleImpl)
+import Core (Edge, EdgeId, GraphData, GraphId, GraphSpacePoint2D, Node, NodeId, allEdgesTouchingNode, deleteEdgeImpl, deleteNodeImpl, insertEdgeImpl, insertNodeImpl, moveNodeImpl, updateEdgeTextImpl, updateNodeTextImpl, edgeArray, updateTitleImpl, setTitleValidityImpl)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either)
@@ -28,16 +28,17 @@ import Run as Run
 -- GraphOp DSL for making UI interactions undoable and streamable
 
 data GraphOpF next
---  Op name     |  target graph | target node/edge | pre-op state       | post-op state      | next
-  = NewGraph       GraphId                                                String               next
-  | InsertNode     GraphId        NodeId                                                       next
-  | DeleteNode     GraphId        NodeId                                                       next
-  | InsertEdge                    EdgeId                                                       next
-  | DeleteEdge                    EdgeId                                                       next
-  | MoveNode                      NodeId             GraphSpacePoint2D    GraphSpacePoint2D    next
-  | UpdateNodeText                NodeId             String               String               next
-  | UpdateEdgeText                EdgeId             String               String               next
-  | UpdateTitle    GraphId                           String               String               next
+--  Op name        | target graph | target node/edge | pre-op state       | post-op state      | next
+  = NewGraph         GraphId                                                String               next
+  | InsertNode       GraphId        NodeId                                                       next
+  | DeleteNode       GraphId        NodeId                                                       next
+  | InsertEdge                      EdgeId                                                       next
+  | DeleteEdge                      EdgeId                                                       next
+  | MoveNode                        NodeId             GraphSpacePoint2D    GraphSpacePoint2D    next
+  | UpdateNodeText                  NodeId             String               String               next
+  | UpdateEdgeText                  EdgeId             String               String               next
+  | UpdateTitle      GraphId                           String               String               next
+  | SetTitleValidity GraphId                                                Boolean              next
 
 derive instance functorGraphOpF :: Functor GraphOpF
 
@@ -49,15 +50,16 @@ _graphOp = SProxy
 
 invertGraphOpF :: forall a. GraphOpF a -> Tuple (GraphOpF Unit) a
 invertGraphOpF = case _ of
-  NewGraph       graphId        title   next -> Tuple (NewGraph       graphId        title   unit) next
-  InsertNode     graphId nodeId         next -> Tuple (DeleteNode     graphId nodeId         unit) next
-  DeleteNode     graphId nodeId         next -> Tuple (InsertNode     graphId nodeId         unit) next
-  InsertEdge             edgeId         next -> Tuple (DeleteEdge             edgeId         unit) next
-  DeleteEdge             edgeId         next -> Tuple (InsertEdge             edgeId         unit) next
-  MoveNode               nodeId from to next -> Tuple (MoveNode               nodeId to from unit) next
-  UpdateNodeText         nodeId from to next -> Tuple (UpdateNodeText         nodeId to from unit) next
-  UpdateEdgeText         nogeId from to next -> Tuple (UpdateEdgeText         nogeId to from unit) next
-  UpdateTitle    graphId        from to next -> Tuple (UpdateTitle    graphId        to from unit) next
+  NewGraph         graphId        title    next -> Tuple (NewGraph         graphId        title    unit) next
+  InsertNode       graphId nodeId          next -> Tuple (DeleteNode       graphId nodeId          unit) next
+  DeleteNode       graphId nodeId          next -> Tuple (InsertNode       graphId nodeId          unit) next
+  InsertEdge               edgeId          next -> Tuple (DeleteEdge               edgeId          unit) next
+  DeleteEdge               edgeId          next -> Tuple (InsertEdge               edgeId          unit) next
+  MoveNode                 nodeId from to  next -> Tuple (MoveNode                 nodeId to from  unit) next
+  UpdateNodeText           nodeId from to  next -> Tuple (UpdateNodeText           nodeId to from  unit) next
+  UpdateEdgeText           nodeId from to  next -> Tuple (UpdateEdgeText           nodeId to from  unit) next
+  UpdateTitle      graphId        from to  next -> Tuple (UpdateTitle      graphId        to from  unit) next
+  SetTitleValidity graphId        validity next -> Tuple (SetTitleValidity graphId        validity unit) next
 
 runInvert :: forall r a.
              Run (graphOp :: GRAPHOP | r) a
@@ -135,15 +137,16 @@ collapseGraphOpF nextOp prevOp =
 
 handleGraphOp :: forall a. GraphOpF a -> Tuple (GraphData -> GraphData) a
 handleGraphOp = case _ of
-  NewGraph   graphId title  next     -> Tuple (updateTitleImpl graphId title)   next
-  InsertNode graphId nodeId next     -> Tuple (insertNodeImpl graphId nodeId)   next
-  DeleteNode graphId nodeId next     -> Tuple (deleteNodeImpl nodeId)           next
-  InsertEdge edgeId next             -> Tuple (insertEdgeImpl edgeId)           next
-  DeleteEdge edgeId next             -> Tuple (deleteEdgeImpl edgeId)           next
-  MoveNode nodeId from to next       -> Tuple (moveNodeImpl nodeId to)          next
-  UpdateNodeText nodeId from to next -> Tuple (updateNodeTextImpl nodeId to)    next
-  UpdateEdgeText edgeId from to next -> Tuple (updateEdgeTextImpl edgeId to)    next
-  UpdateTitle graphId   from to next -> Tuple (updateTitleImpl graphId to)      next
+  NewGraph         graphId        title    next -> Tuple (updateTitleImpl      graphId        title)    next
+  InsertNode       graphId nodeId          next -> Tuple (insertNodeImpl       graphId nodeId)          next
+  DeleteNode       graphId nodeId          next -> Tuple (deleteNodeImpl               nodeId)          next
+  InsertEdge               edgeId          next -> Tuple (insertEdgeImpl               edgeId)          next
+  DeleteEdge               edgeId          next -> Tuple (deleteEdgeImpl               edgeId)          next
+  MoveNode                 nodeId from to  next -> Tuple (moveNodeImpl                 nodeId to)       next
+  UpdateNodeText           nodeId from to  next -> Tuple (updateNodeTextImpl           nodeId to)       next
+  UpdateEdgeText           edgeId from to  next -> Tuple (updateEdgeTextImpl           edgeId to)       next
+  UpdateTitle      graphId        from to  next -> Tuple (updateTitleImpl      graphId        to)       next
+  SetTitleValidity graphId        validity next -> Tuple (setTitleValidityImpl graphId        validity) next
 
 interpretGraphOp :: forall r a.
                     Run (graphOp :: GRAPHOP | r) a -> Run r (Tuple (GraphData -> GraphData) a)
@@ -174,6 +177,8 @@ showGraphOp = case _ of
     Tuple ("UpdateEdgeText node: " <> show edgeId <> " from: " <> from <> " to: " <> to) next
   UpdateTitle graphId from to next ->
     Tuple ("UpdateTitle graph: " <> show graphId <> " from " <> from <> " to: " <> to) next
+  SetTitleValidity graphId validity next ->
+    Tuple ("SetTitleValidity graph: " <> show graphId <> " to: " <> show validity) next
 
 interpretShowGraphOp :: forall r a. Run (graphOp :: GRAPHOP | r) a -> Run r String
 interpretShowGraphOp op =
@@ -228,6 +233,10 @@ updateTitle :: forall r. GraphId -> String -> String -> Run (graphOp :: GRAPHOP 
 updateTitle graphId oldTitle newTitle =
   Run.lift _graphOp $ UpdateTitle graphId oldTitle newTitle unit
 
+setTitleValidity :: forall r. GraphId -> Boolean -> Run (graphOp :: GRAPHOP | r) Unit
+setTitleValidity graphId validity =
+  Run.lift _graphOp $ SetTitleValidity graphId validity unit
+
 encodeNodeAsGraphOp :: forall r. Node -> Run (graphOp :: GRAPHOP | r) Unit
 encodeNodeAsGraphOp node = do
   insertNode node.graphId node.id
@@ -244,7 +253,7 @@ encodeGraphDataAsGraphOp graphData =
   let
     nodeOps = (const <<< encodeNodeAsGraphOp) <$> (Array.fromFoldable $ Map.values graphData.nodes)
     edgeOps = (const <<< encodeEdgeAsGraphOp) <$> edgeArray graphData
-    titleOps = (\(Tuple graphId title) -> const $ updateTitle graphId "" title) <$> (Map.toUnfoldable graphData.titles)
+    titleOps = (\(Tuple graphId title) -> const $ updateTitle graphId "" title.titleText) <$> (Map.toUnfoldable graphData.titles)
   in
     foldl bind (pure unit) $ nodeOps <> edgeOps <> titleOps
 
@@ -256,15 +265,16 @@ instance decodeGraphOpF :: Decode (GraphOpF Unit) where
   decode x = x # genericDecode defaultOptions >>= toExceptT <<< fromForeignGraphOpF
 
 data ForeignGraphOpF
-  = ForeignNewGraph        String        String
-  | ForeignInsertNode      String String
-  | ForeignDeleteNode      String String
-  | ForeignInsertEdge             String
-  | ForeignDeleteEdge             String
-  | ForeignMoveNode               String GraphSpacePoint2D GraphSpacePoint2D
-  | ForeignUpdateNodeText         String String            String
-  | ForeignUpdateEdgeText         String String            String
-  | ForeignUpdateTitle     String        String            String
+  = ForeignNewGraph         String        String
+  | ForeignInsertNode       String String
+  | ForeignDeleteNode       String String
+  | ForeignInsertEdge              String
+  | ForeignDeleteEdge              String
+  | ForeignMoveNode                String GraphSpacePoint2D GraphSpacePoint2D
+  | ForeignUpdateNodeText          String String            String
+  | ForeignUpdateEdgeText          String String            String
+  | ForeignUpdateTitle      String        String            String
+  | ForeignSetTitleValidity String                          Boolean
 
 derive instance genericForeignGraphOpF :: Generic ForeignGraphOpF _
 
@@ -277,23 +287,25 @@ instance decodeForeignGraphOpF :: Decode ForeignGraphOpF where
 toForeignGraphOpF :: forall a. GraphOpF a -> Tuple Foreign a
 toForeignGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
   NewGraph graphId title next ->
-    Tuple (ForeignNewGraph    (UUID.toString graphId)                         title)   next
+    Tuple (ForeignNewGraph         (UUID.toString graphId)                         title)    next
   InsertNode graphId nodeId next ->
-    Tuple (ForeignInsertNode  (UUID.toString graphId) (UUID.toString  nodeId))         next
+    Tuple (ForeignInsertNode       (UUID.toString graphId) (UUID.toString  nodeId))          next
   DeleteNode graphId nodeId next ->
-    Tuple (ForeignDeleteNode  (UUID.toString graphId) (UUID.toString  nodeId))         next
+    Tuple (ForeignDeleteNode       (UUID.toString graphId) (UUID.toString  nodeId))          next
   InsertEdge edgeId next ->
-    Tuple (ForeignInsertEdge                          (edgeIdToString edgeId))         next
+    Tuple (ForeignInsertEdge                               (edgeIdToString edgeId))          next
   DeleteEdge edgeId next ->
-    Tuple (ForeignDeleteEdge                          (edgeIdToString edgeId))         next
+    Tuple (ForeignDeleteEdge                               (edgeIdToString edgeId))          next
   MoveNode nodeId from to next ->
-    Tuple (ForeignMoveNode                            (UUID.toString  nodeId) from to) next
+    Tuple (ForeignMoveNode                                 (UUID.toString  nodeId) from to)  next
   UpdateNodeText nodeId from to next ->
-    Tuple (ForeignUpdateNodeText                      (UUID.toString  nodeId) from to) next
+    Tuple (ForeignUpdateNodeText                           (UUID.toString  nodeId) from to)  next
   UpdateEdgeText edgeId from to next ->
-    Tuple (ForeignUpdateEdgeText                      (edgeIdToString edgeId) from to) next
+    Tuple (ForeignUpdateEdgeText                           (edgeIdToString edgeId) from to)  next
   UpdateTitle graphId from to next ->
-    Tuple (ForeignUpdateTitle (UUID.toString graphId)                         from to) next
+    Tuple (ForeignUpdateTitle      (UUID.toString graphId)                         from to)  next
+  SetTitleValidity graphId validity next ->
+    Tuple (ForeignSetTitleValidity (UUID.toString graphId)                         validity) next
 
 fromForeignGraphOpF :: ForeignGraphOpF -> Either String (GraphOpF Unit)
 fromForeignGraphOpF = case _ of
@@ -326,6 +338,9 @@ fromForeignGraphOpF = case _ of
   ForeignUpdateTitle graphIdStr from to -> do
     graphId <- parseUUIDEither graphIdStr
     pure $ UpdateTitle graphId from to unit
+  ForeignSetTitleValidity graphIdStr validity -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ SetTitleValidity graphId validity unit
 
 newtype ForeignGraphOp = ForeignGraphOp (Run (graphOp :: GRAPHOP) Unit)
 

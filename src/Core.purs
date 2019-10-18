@@ -155,6 +155,11 @@ emptyPane graphId =
                    }
   }
 
+type GraphTitle = { titleText :: String, isValid :: Boolean }
+
+freshTitle :: GraphTitle
+freshTitle = { titleText : "", isValid : true }
+
 -- | GraphData can hold data for multiple graphs with edges between them
 type GraphData =
   { nodes  :: Map NodeId Node
@@ -162,7 +167,7 @@ type GraphData =
               , targetSource :: Map NodeId (Map NodeId Edge)
               }
   , panes  :: Map GraphId GraphView
-  , titles :: Map GraphId String
+  , titles :: Map GraphId GraphTitle
   }
 
 emptyGraphData :: GraphData
@@ -206,7 +211,7 @@ _origin = prop (SProxy :: SProxy "origin")
 _boundingRect :: Lens' GraphView WHE.DOMRect
 _boundingRect = prop (SProxy :: SProxy "boundingRect")
 
-_title :: GraphId -> Lens' GraphData (Maybe String)
+_title :: GraphId -> Lens' GraphData (Maybe GraphTitle)
 _title graphId = prop (SProxy :: SProxy "titles") <<< at graphId
 
 
@@ -270,7 +275,17 @@ updateEdgeTextImpl :: EdgeId -> String -> GraphData -> GraphData
 updateEdgeTextImpl edgeId newText = updateEdgeData _{ text = newText } edgeId
 
 updateTitleImpl :: GraphId -> String -> GraphData -> GraphData
-updateTitleImpl graphId newTitle = _title graphId ?~ newTitle
+updateTitleImpl graphId newTitleText graphData =
+  let
+    oldTitle = case Map.lookup graphId graphData.titles of
+      Nothing -> freshTitle
+      Just oldTitle' -> oldTitle'
+  in
+    graphData # _title graphId ?~ oldTitle { titleText = newTitleText }
+
+setTitleValidityImpl :: GraphId -> Boolean -> GraphData -> GraphData
+setTitleValidityImpl graphId newValidity =
+  _title graphId <<< traversed <<< prop (SProxy :: SProxy "isValid") .~ newValidity
 
 
 ------

@@ -14,7 +14,7 @@ import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
-import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs, selectGraphData)
+import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, GraphTitle, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs, selectGraphData)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -51,7 +51,7 @@ import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
-import UI.Constants (defaultTextFieldShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, zoomScaling, defaultTitleShape, maxTitleShape)
+import UI.Constants (defaultTextFieldShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, zoomScaling, defaultTitleShape, maxTitleShape, invalidIndicatorOffset, invalidIndicatorSize)
 import UI.Panes (zoomAtPoint, paneContainingPoint)
 import UI.SvgDefs (svgDefs)
 import Web.Event.Event as WE
@@ -391,7 +391,7 @@ graphComponent =
       , SA.markerEnd "url(#drawing-arrow)"
       ]
 
-  renderTitle :: GraphId -> String -> Tuple String (H.ComponentHTML Action Slots Aff)
+  renderTitle :: GraphId -> GraphTitle -> Tuple String (H.ComponentHTML Action Slots Aff)
   renderTitle graphId title =
     Tuple (show graphId <> "_title") $
       SE.g
@@ -400,17 +400,26 @@ graphComponent =
                              $ StopPropagation (ME.toEvent e)
                              $ DoNothing
       ]
-      [ HH.slot
-        _titleTextField
-        graphId
-        SVGContentEditable.svgContenteditable
-        { shape : defaultTitleShape
-        , initialText : title
-        , maxShape : maxTitleShape
-        , fitContentDynamic : true
-        }
-        (Just <<< TitleTextInput graphId)
-      ]
+      ([ HH.slot
+         _titleTextField
+         graphId
+         SVGContentEditable.svgContenteditable
+         { shape : defaultTitleShape
+         , initialText : title.titleText
+         , maxShape : maxTitleShape
+         , fitContentDynamic : true
+         }
+         (Just <<< TitleTextInput graphId)
+       ] <> if title.isValid
+            then []
+            else [ SE.rect
+                   [ SA.class_ "invalidIndicator"
+                   , SA.width  $ show invalidIndicatorSize
+                   , SA.height $ show invalidIndicatorSize
+                   , SA.x $ show invalidIndicatorOffset.x
+                   , SA.y $ show invalidIndicatorOffset.y
+                   ]
+                 ])
 
   renderSingleGraph :: AppState -> GraphView -> GraphData -> H.ComponentHTML Action Slots Aff
   renderSingleGraph state renderPane singleGraph =
@@ -553,10 +562,10 @@ graphComponent =
       for_ (edgeArray state.graphData) \edge -> do
         H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText edge.text
       let
-        titles :: Array (Tuple GraphId String)
+        titles :: Array (Tuple GraphId GraphTitle)
         titles = Map.toUnfoldable state.graphData.titles
       for_ titles \(Tuple graphId title) -> do
-        H.query _titleTextField graphId $ H.tell $ SVGContentEditable.SetText title
+        H.query _titleTextField graphId $ H.tell $ SVGContentEditable.SetText title.titleText
 
     NodeTextInput nodeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
@@ -582,13 +591,13 @@ graphComponent =
             H.modify_ $ doAppOperation graphId op
             handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
 
-    TitleTextInput graphId (SVGContentEditable.TextUpdate newTitle) -> do
+    TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
       state <- H.get
       case Map.lookup graphId state.graphData.titles of
         Nothing -> pure unit
         Just oldTitle ->
           let
-            op = AppOperation $ updateTitle graphId oldTitle newTitle
+            op = AppOperation $ updateTitle graphId oldTitle.titleText newTitleText
           in do
             H.raise $ SendOperation op
             H.modify_ $ doAppOperation graphId op
@@ -843,7 +852,7 @@ graphComponent =
         history <- Map.lookup graphId state.history
         undone  <- Map.lookup graphId state.undone
         let metadata = { version : appOperationVersion , timestamp : timestamp }
-        let title = fromMaybe "untitled" $ Map.lookup graphId state.graphData.titles
+        let title = fromMaybe "untitled" $ _.titleText <$> Map.lookup graphId state.graphData.titles
         pure $ Tuple (graphDataToJSON graphId focusedGraphData history undone metadata)
                      title
       of

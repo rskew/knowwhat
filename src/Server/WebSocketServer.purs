@@ -9,7 +9,7 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.Nullable (toNullable)
 import Effect (Effect)
-import Effect.Aff (Aff, launchAff, try)
+import Effect.Aff (launchAff)
 import Effect.Class.Console as Console
 import Foreign (renderForeignError)
 import Foreign as Foreign
@@ -17,7 +17,7 @@ import Foreign.Generic (decodeJSON)
 import Node.HTTP (listen)
 import Node.HTTP as HTTP
 import Node.Websocket (ConnectionClose, ConnectionMessage, EventProxy(EventProxy), Request, on)
-import Node.Websocket.Connection (remoteAddress)--, sendMessage)
+import Node.Websocket.Connection (remoteAddress)
 import Node.Websocket.Request (accept, origin)
 import Node.Websocket.Server (newWebsocketServer)
 import Node.Websocket.Types (TextFrame(..), defaultServerConfig)
@@ -48,8 +48,16 @@ startWebSocketServer db = do
       case msg of
         Left (TextFrame {utf8Data}) -> do
           Console.log ("Received message: " <> utf8Data)
-          _ <- launchAff $ handleReceivedOperation utf8Data db
-          pure unit
+          case
+            lmap (show <<< map renderForeignError)
+            $ runExcept $ (decodeJSON utf8Data :: Foreign.F (AppOperation Unit))
+          of
+            Left errors -> do
+              Console.log $ "received operation but could not decode: " <> errors
+            Right operation -> do
+              Console.log $ "received operation: " <> show operation
+              _ <- launchAff $ interpretAppOperation db conn operation
+              pure unit
         Right _ -> pure unit
 
     on close conn \ _ _ -> do
@@ -58,20 +66,3 @@ startWebSocketServer db = do
     close   = EventProxy :: EventProxy ConnectionClose
     message = EventProxy :: EventProxy ConnectionMessage
     request = EventProxy :: EventProxy Request
-
-handleReceivedOperation :: String -> DBConnection -> Aff Unit
-handleReceivedOperation encodedOp db =
-  case
-    lmap (show <<< map renderForeignError)
-    $ runExcept $ (decodeJSON encodedOp :: Foreign.F (AppOperation Unit))
-  of
-    Left errors -> do
-      Console.log $ "received operation but could not decode: " <> errors
-    Right operation -> do
-      Console.log $ "received operation: " <> show operation
-      result <- try $ interpretAppOperation db operation
-      case result of
-        Left error -> do
-          Console.log "Failed to interpret operation"
-        Right _ ->
-          Console.log ":D"
