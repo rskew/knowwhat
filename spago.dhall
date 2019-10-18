@@ -5,7 +5,7 @@ You can edit this file as you like.
 { name =
     "halogen-svg"
 , dependencies =
-    [ "affjax"
+    [ "aff-coroutines"
     , "canvas"
     , "console"
     , "effect"
@@ -24,7 +24,9 @@ You can edit this file as you like.
     , "run"
     , "strings"
     , "uuid"
+    , "web-socket"
     , "web-uievents"
+    , "node-websocket"
     ]
 , packages =
     ./packages.dhall

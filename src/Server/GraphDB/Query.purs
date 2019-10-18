@@ -150,11 +150,13 @@ dbAction queryStr params db = do
   result <- lmap show <$> (try $ SQLite.queryObjectDB db queryStr params)
   case result of
     Left e -> do
-      Console.log $ "sqlite3 error from query: " <> queryStr
+      Console.log "The following statement was unsuccessful:"
+      Console.log queryStr
+      Console.log "with the following error:"
       Console.log $ show e
       pure $ Left e
     Right _ -> do
-      Console.log "statement executed successfully: "
+      Console.log "The following statement was executed successfully:"
       Console.log queryStr
       pure $ Right unit
 

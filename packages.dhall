@@ -153,6 +153,19 @@ let additions =
       , version =
           "a92405a937ba3f0e3756fd35bf92ea12ab62cffb"
       }
+  , node-websocket =
+      { dependencies =
+          [ "console"
+          , "effect"
+          , "node-http"
+          , "prelude"
+          , "psci-support"
+          ]
+      , repo =
+          "https://github.com/rskew/purescript-node-websocket.git"
+      , version =
+          "3fc2ed2214199e20a4ca7ef23904c59f037c6c9d"
+      }
   }
 
 in  upstream // overrides // additions

@@ -3,11 +3,11 @@ module GraphComponent where
 import Prelude
 
 import AppOperation (AppOperation(..), appOperationVersion)
-import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText, updateTitle)
+import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText, updateTitle, newGraph)
 import AppOperation.Interpreter (doAppOperation, interpretAppOperation)
-import AppOperation.UIOp (moveGraphOrigin, rescalePane, rescaleWindow, removePane)
+import AppOperation.UIOp (insertPane, moveGraphOrigin, removePane, rescalePane, rescaleWindow)
 import AppOperation.UndoOp (undo, redo)
-import AppState (DrawingEdge, DrawingEdgeId, HoveredElementId(..), AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr)
+import AppState (Shape, DrawingEdge, DrawingEdgeId, HoveredElementId(..), AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr)
 import AppState.Foreign (graphDataFromJSON, graphDataToJSON)
 import CSS as CSS
 import ContentEditable.SVGComponent as SVGContentEditable
@@ -30,6 +30,7 @@ import Data.String (joinWith)
 import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
+import Data.UUID as UUID
 import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Aff (Aff)
@@ -104,24 +105,31 @@ data Action
   | Keypress KE.KeyboardEvent
   | DoNothing
 
-type Input = { windowBoundingRect :: WHE.DOMRect }
+type Input = Shape
 
 initialState :: Input -> AppState
-initialState inputs =
+initialState windowShape =
   { graphData             : emptyGraphData
   , history               : Map.empty
   , undone                : Map.empty
-  , windowBoundingRect    : inputs.windowBoundingRect
+  , windowBoundingRect    : { left : 0.0
+                            , width : windowShape.width
+                            , right : windowShape.height
+                            , top : 0.0
+                            , height : windowShape.height
+                            , bottom : windowShape.width
+                            }
   , drawingEdges          : Map.empty
   , hoveredElementId      : Nothing
   , focusedPane           : Nothing
   }
 
-data Query a = UpdateBoundingRect a
+data Query a
+  = UpdateBoundingRect a
+  | ReceiveOperation (AppOperation Unit) a
 
 data Message
-  = Focused
-  | MappingMode
+  = SendOperation (AppOperation Unit)
 
 -- Slot type for parent components using a child GraphComponent
 type Slot = H.Slot Query Message
@@ -554,24 +562,36 @@ graphComponent =
       state <- H.get
       case Map.lookup nodeId state.graphData.nodes of
         Nothing -> pure unit
-        Just node -> do
-          modifyM $ doAppOperation node.graphId $ AppOperation $ updateNodeText node text
-          handleAction $ FocusOn node.graphId $ Just $ FocusNode node.id
+        Just node ->
+          let
+            op = AppOperation $ updateNodeText node text
+          in do
+            H.raise $ SendOperation op
+            H.modify_ $ doAppOperation node.graphId op
+            handleAction $ FocusOn node.graphId $ Just $ FocusNode node.id
 
     EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
       case Map.lookup edgeId.source state.graphData.edges.sourceTarget >>= Map.lookup edgeId.target of
         Nothing -> pure unit
-        Just edge -> do
-          modifyM $ doAppOperation graphId $ AppOperation $ updateEdgeText edge text
-          handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
+        Just edge ->
+          let
+            op = AppOperation $ updateEdgeText edge text
+          in do
+            H.raise $ SendOperation op
+            H.modify_ $ doAppOperation graphId op
+            handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
 
     TitleTextInput graphId (SVGContentEditable.TextUpdate newTitle) -> do
       state <- H.get
       case Map.lookup graphId state.graphData.titles of
         Nothing -> pure unit
-        Just oldTitle -> do
-          modifyM $ doAppOperation graphId $ AppOperation $ updateTitle graphId oldTitle newTitle
+        Just oldTitle ->
+          let
+            op = AppOperation $ updateTitle graphId oldTitle newTitle
+          in do
+            H.raise $ SendOperation op
+            H.modify_ $ doAppOperation graphId op
 
     BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
       handleAction $ FocusOn graphId Nothing
@@ -581,13 +601,15 @@ graphComponent =
 
     BackgroundDragMove (Drag.Move _ dragData) graphId (PageSpacePoint2D initialGraphOrigin) _ -> do
       state <- H.get
-      let newGraphOrigin =
-            PageSpacePoint2D
-              { x : initialGraphOrigin.x + dragData.offsetX
-              , y : initialGraphOrigin.y + dragData.offsetY
-              }
-      modifyM $ doAppOperation graphId $ AppOperation
-        $ moveGraphOrigin graphId newGraphOrigin
+      let
+        newGraphOrigin =
+          PageSpacePoint2D
+            { x : initialGraphOrigin.x + dragData.offsetX
+            , y : initialGraphOrigin.y + dragData.offsetY
+            }
+        op = AppOperation $ moveGraphOrigin graphId newGraphOrigin
+      H.raise $ SendOperation op
+      H.modify_ $ doAppOperation graphId op
 
 
     BackgroundDragMove (Drag.Done _) _ _ subscriptionId ->
@@ -615,8 +637,12 @@ graphComponent =
                 }
           case Map.lookup nodeId state.graphData.nodes of
             Nothing -> pure unit
-            Just node -> do
-              modifyM $ doAppOperation node.graphId $ AppOperation $ moveNode node newNodePos
+            Just node ->
+              let
+                op = AppOperation $ moveNode node newNodePos
+              in do
+                H.raise $ SendOperation op
+                H.modify_ $ doAppOperation node.graphId op
 
     NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -686,9 +712,11 @@ graphComponent =
         newNodeGraphSpacePos =
           newNodePosition
           # toGraphSpace pane
-      modifyM $ doAppOperation pane.graphId $ AppOperation
-        $   insertNode pane.graphId newNodeId
-        >>= (const $ moveNode newNode newNodeGraphSpacePos)
+        op = AppOperation do
+          insertNode pane.graphId newNodeId
+          moveNode newNode newNodeGraphSpacePos
+      H.raise $ SendOperation op
+      H.modify_ $ doAppOperation pane.graphId op
       handleAction $ FocusOn pane.graphId $ Just $ FocusNode newNodeId
 
     AppDeleteNode node -> do
@@ -700,15 +728,25 @@ graphComponent =
           Just outgoingEdge -> handleAction $ FocusOn node.graphId $ Just $ FocusNode outgoingEdge.id.target
           Nothing -> pure unit
       state' <- H.get
-      modifyM $ doAppOperation node.graphId $ AppOperation $ deleteNode state'.graphData node
+      let op = AppOperation $ deleteNode state'.graphData node
+      H.raise $ SendOperation op
+      H.modify_ $ doAppOperation node.graphId op
 
-    AppCreateEdge graphId edgeId -> do
-      modifyM $ doAppOperation graphId $ AppOperation $ insertEdge edgeId
-      handleAction $ FocusOn edgeId.sourceGraph $ Just $ FocusEdge edgeId []
+    AppCreateEdge graphId edgeId ->
+      let
+        op = AppOperation $ insertEdge edgeId
+      in do
+        H.raise $ SendOperation op
+        H.modify_ $ doAppOperation graphId op
+        handleAction $ FocusOn edgeId.sourceGraph $ Just $ FocusEdge edgeId []
 
-    AppDeleteEdge graphId edge -> do
-      modifyM $ doAppOperation graphId $ AppOperation $ deleteEdge edge
-      handleAction $ FocusOn edge.id.sourceGraph $ Just $ FocusNode edge.id.source
+    AppDeleteEdge graphId edge ->
+      let
+        op = AppOperation $ deleteEdge edge
+      in do
+        H.raise $ SendOperation op
+        H.modify_ $ doAppOperation graphId op
+        handleAction $ FocusOn edge.id.sourceGraph $ Just $ FocusNode edge.id.source
 
     FocusOn graphId newFocus -> do
       H.modify_ $
@@ -741,13 +779,13 @@ graphComponent =
           let
             scaledZoom = (WhE.deltaY wheelEvent) * zoomScaling
             newZoom = (Math.exp scaledZoom) * pane.zoom
-          in
-            modifyM
-            $ doAppOperation pane.graphId
-            $ zoomAtPoint
-                newZoom
-                (mouseEventPosition $ WhE.toMouseEvent wheelEvent)
-                pane
+            op = zoomAtPoint
+                   newZoom
+                   (mouseEventPosition $ WhE.toMouseEvent wheelEvent)
+                   pane
+          in do
+            H.raise $ SendOperation op
+            H.modify_ $ doAppOperation pane.graphId op
 
     CenterGraphOriginAndZoom -> do
       state <- H.get
@@ -823,8 +861,12 @@ graphComponent =
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
-            Just graphId -> do
-              modifyM $ doAppOperation graphId $ AppOperation $ undo graphId
+            Just graphId ->
+              let
+                op = AppOperation $ undo graphId
+              in do
+                H.raise $ SendOperation op
+                H.modify_ $ doAppOperation graphId op
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
 
@@ -835,8 +877,12 @@ graphComponent =
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
-            Just graphId -> do
-              modifyM $ doAppOperation graphId $ AppOperation $ redo graphId
+            Just graphId ->
+              let
+                op = AppOperation $ redo graphId
+              in do
+                H.raise $ SendOperation op
+                H.modify_ $ doAppOperation graphId op
           -- Keep text state in sync
           handleAction $ UpdateContentEditableText
 
@@ -880,6 +926,17 @@ graphComponent =
             Just graphId -> do
               H.modify_ $ interpretAppOperation $ AppOperation $ removePane graphId
 
+        -- new Graph
+        "g" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          newGraphId <- H.liftEffect genUUID
+          newGraphTitle <- H.liftEffect $ UUID.toString <$> genUUID
+          let op = AppOperation do
+                newGraph newGraphId newGraphTitle
+                insertPane newGraphId
+          H.raise $ SendOperation op
+          H.modify_ $ doAppOperation newGraphId op
+
         -- TODO: highlighting
         ---- Highlight currently focused node/edge
         --"s" -> H.modify_ $ _graph %~ toggleHighlightFocus
@@ -897,6 +954,11 @@ graphComponent =
         panesRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect panesElement
         lift $ H.modify_ $ interpretAppOperation $ AppOperation
           $ rescaleWindow panesRect
+
+    ReceiveOperation op a -> do
+      state <- H.get
+      H.modify_ $ interpretAppOperation op
+      pure $ Just a
 
 
 ------

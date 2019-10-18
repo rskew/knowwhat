@@ -29,7 +29,8 @@ import Run as Run
 
 data GraphOpF next
 --  Op name     |  target graph | target node/edge | pre-op state       | post-op state      | next
-  = InsertNode     GraphId        NodeId                                                       next
+  = NewGraph       GraphId                                                String               next
+  | InsertNode     GraphId        NodeId                                                       next
   | DeleteNode     GraphId        NodeId                                                       next
   | InsertEdge                    EdgeId                                                       next
   | DeleteEdge                    EdgeId                                                       next
@@ -48,13 +49,14 @@ _graphOp = SProxy
 
 invertGraphOpF :: forall a. GraphOpF a -> Tuple (GraphOpF Unit) a
 invertGraphOpF = case _ of
+  NewGraph       graphId        title   next -> Tuple (NewGraph       graphId        title   unit) next
   InsertNode     graphId nodeId         next -> Tuple (DeleteNode     graphId nodeId         unit) next
   DeleteNode     graphId nodeId         next -> Tuple (InsertNode     graphId nodeId         unit) next
   InsertEdge             edgeId         next -> Tuple (DeleteEdge             edgeId         unit) next
   DeleteEdge             edgeId         next -> Tuple (InsertEdge             edgeId         unit) next
   MoveNode               nodeId from to next -> Tuple (MoveNode               nodeId to from unit) next
   UpdateNodeText         nodeId from to next -> Tuple (UpdateNodeText         nodeId to from unit) next
-  UpdateEdgeText         ndgeId from to next -> Tuple (UpdateEdgeText         ndgeId to from unit) next
+  UpdateEdgeText         nogeId from to next -> Tuple (UpdateEdgeText         nogeId to from unit) next
   UpdateTitle    graphId        from to next -> Tuple (UpdateTitle    graphId        to from unit) next
 
 runInvert :: forall r a.
@@ -133,6 +135,7 @@ collapseGraphOpF nextOp prevOp =
 
 handleGraphOp :: forall a. GraphOpF a -> Tuple (GraphData -> GraphData) a
 handleGraphOp = case _ of
+  NewGraph   graphId title  next     -> Tuple (updateTitleImpl graphId title)   next
   InsertNode graphId nodeId next     -> Tuple (insertNodeImpl graphId nodeId)   next
   DeleteNode graphId nodeId next     -> Tuple (deleteNodeImpl nodeId)           next
   InsertEdge edgeId next             -> Tuple (insertEdgeImpl edgeId)           next
@@ -153,6 +156,8 @@ interpretGraphOp =
 
 showGraphOp :: forall a. GraphOpF a -> Tuple String a
 showGraphOp = case _ of
+  NewGraph graphId title next ->
+    Tuple ("NewGraph " <> show graphId <> " title: " <> title) next
   InsertNode graphId nodeId next ->
     Tuple ("InsertNode graph: " <> show graphId <> " node: " <> show nodeId) next
   DeleteNode graphId nodeId next ->
@@ -179,6 +184,9 @@ interpretShowGraphOp op =
 
 ------
 -- Interface
+
+newGraph :: forall r. GraphId -> String -> Run (graphOp :: GRAPHOP | r) Unit
+newGraph graphId title = Run.lift _graphOp $ NewGraph graphId title unit
 
 insertNode :: forall r. GraphId -> NodeId -> Run (graphOp :: GRAPHOP | r) Unit
 insertNode graphId nodeId = Run.lift _graphOp $ InsertNode graphId nodeId unit
@@ -248,7 +256,8 @@ instance decodeGraphOpF :: Decode (GraphOpF Unit) where
   decode x = x # genericDecode defaultOptions >>= toExceptT <<< fromForeignGraphOpF
 
 data ForeignGraphOpF
-  = ForeignInsertNode      String String
+  = ForeignNewGraph        String        String
+  | ForeignInsertNode      String String
   | ForeignDeleteNode      String String
   | ForeignInsertEdge             String
   | ForeignDeleteEdge             String
@@ -267,6 +276,8 @@ instance decodeForeignGraphOpF :: Decode ForeignGraphOpF where
 
 toForeignGraphOpF :: forall a. GraphOpF a -> Tuple Foreign a
 toForeignGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
+  NewGraph graphId title next ->
+    Tuple (ForeignNewGraph    (UUID.toString graphId)                         title)   next
   InsertNode graphId nodeId next ->
     Tuple (ForeignInsertNode  (UUID.toString graphId) (UUID.toString  nodeId))         next
   DeleteNode graphId nodeId next ->
@@ -286,6 +297,9 @@ toForeignGraphOpF = lmap (genericEncode defaultOptions) <<< case _ of
 
 fromForeignGraphOpF :: ForeignGraphOpF -> Either String (GraphOpF Unit)
 fromForeignGraphOpF = case _ of
+  ForeignNewGraph graphIdStr title -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ NewGraph graphId title unit
   ForeignInsertNode graphIdStr nodeIdStr -> do
     graphId <- parseUUIDEither graphIdStr
     nodeId  <- parseUUIDEither nodeIdStr
