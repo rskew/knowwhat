@@ -20,6 +20,9 @@ appStateVersion = "0.0.0.0.0.0.0.1"
 ------
 -- Types
 
+type KeyHoldState
+  = { spaceDown :: Boolean }
+
 type AppState =
   { graphData          :: GraphData
   , history            :: Map GraphId (Array (AppOperation Unit))
@@ -28,6 +31,7 @@ type AppState =
   , drawingEdges       :: Map DrawingEdgeId DrawingEdge
   , hoveredElementId   :: Maybe HoveredElementId
   , focusedPane        :: Maybe GraphId
+  , keyHoldState       :: KeyHoldState
   }
 
 emptyAppState :: AppState
@@ -39,6 +43,7 @@ emptyAppState =
   , drawingEdges       : Map.empty
   , hoveredElementId   : Nothing
   , focusedPane        : Nothing
+  , keyHoldState       : { spaceDown : false }
   }
 
 type Shape = { width :: Number
@@ -121,3 +126,9 @@ _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")
 
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePoint2D
 _coerceToGraphSpace = lens GraphSpacePoint2D (\_ (GraphSpacePoint2D pos) -> pos)
+
+_history :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
+_history = prop (SProxy :: SProxy "history")
+
+_undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
+_undone = prop (SProxy :: SProxy "undone")

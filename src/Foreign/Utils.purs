@@ -6,16 +6,16 @@ import Control.Monad.Except.Trans (ExceptT, except, withExceptT)
 import Core (EdgeId)
 import Data.Array ((!!))
 import Data.Either (Either, note)
-import Data.Map (Map)
-import Data.List.NonEmpty (NonEmptyList, singleton)
 import Data.Identity (Identity)
+import Data.List.NonEmpty (NonEmptyList, singleton)
+import Data.Map (Map)
 import Data.Map as Map
 import Data.String (Pattern(..), split)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 import Data.UUID (UUID, parseUUID)
 import Data.UUID as UUID
-import Foreign (ForeignError(..))
+import Foreign (ForeignError(..), MultipleErrors, renderForeignError)
 import Foreign.Object (Object)
 import Foreign.Object as Object
 
@@ -75,3 +75,6 @@ parseEdgeIdEither edgeIdStr =
          , sourceGraph : sourceGraphId
          , targetGraph : targetGraphId
          }
+
+showForeignError :: MultipleErrors -> String
+showForeignError = show <<< map renderForeignError

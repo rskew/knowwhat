@@ -1,11 +1,13 @@
 :root {
-  --node-color: #000;
-  --node-border-color: #0001;
-  --focused-color: #fc0;
-  --highlighted-color: #08f2;
-  --invalid-color: #f662;
-  --text-field-border-color: #dddc;
-  --edge-color: #666;
+  --node-color: #000000;
+  --node-border-color: #00000033;
+  --focused-color: #ffcc00;
+  --highlighted-color: #0088ffbb;
+  --invalid-color: #ff6666bb;
+  --text-field-border-color: #aaaaaacc;
+  --text-field-background-color: #ffffffbb;
+  --edge-color: #666666;
+  --transparent-white-color: #ffffff00;
 }
 
 html {
@@ -38,7 +40,7 @@ input {
 }
 
 .pane.focused {
-    border: 2px solid #fc0;
+    border: 2px solid var(--focused-color);
 }
 
 svg {
@@ -65,7 +67,7 @@ svg {
     overflow: auto;
     white-space: pre;
     font-family: monospace;
-    background-color: #fffc;
+    background-color: var(--text-field-background-color);
 }
 
 foreignObject {
@@ -77,7 +79,7 @@ foreignObject {
 }
 
 .invalidIndicator {
-    fill: #f00a;
+    fill: var(--invalid-color);
 }
 
 .node {
@@ -86,61 +88,6 @@ foreignObject {
 
 .node.ghost {
     fill: var(--text-field-border-color);
-}
-
-.node.delay {
-    fill: url(#pattern-delay-fill);
-    stroke: black;
-    stroke-width: 2;
-}
-
-.node.focused.delay {
-    fill: url(#pattern-delay-fill);
-    stroke: var(--focused-color);
-}
-
-.node.delay.border-shadow {
-    stroke: var(--node-border-color);
-    fill: #fff0;
-}
-
-.pattern-delay-fill-rect1 {
-    fill: #0003
-}
-
-.pattern-delay-fill-rect2 {
-    fill: #0001
-}
-
-.node.focused.amplifier-below-unity {
-    fill: url(#pattern-amplifier-below-unity);
-}
-
-.amplifier-below-unity-triangle {
-    fill: var(--focused-color);
-}
-
-.node.focused.amplifier-above-unity {
-    fill: url(#pattern-amplifier-above-unity);
-}
-
-.amplifier-above-unity-triangle {
-    fill: var(--focused-color);
-}
-
-.pattern-amplifier-unity-background {
-    fill: #0005;
-}
-
-.analyser-border {
-    fill: #0000;
-    border: 1px solid var(--text-field-border-color);
-}
-
-.spectrum-polylines {
-    fill: none;
-    stroke: #000;
-    stroke-width: 1.0;
 }
 
 .node.focused {
@@ -167,23 +114,25 @@ foreignObject {
 }
 
 .nodeHalo {
-    fill: #fff0;
+    fill: var(--transparent-white-color);
     stroke: var(--node-border-color);
     stroke-width: 25;
     opacity: 0.0;
 }
 
 .nodeHalo.focused {
+    stroke: var(--focused-color);
     opacity: 1.0;
 }
 
 .nodeHalo.ready {
-    stroke: var(--focused-color);
-    opacity: 0.5;
+    stroke: var(--highlighted-color);
+    opacity: 1.0;
 }
 
 .nodeHalo.invalid {
     stroke: var(--invalid-color);
+    opacity: 1.0;
 }
 
 .edge {
@@ -192,7 +141,7 @@ foreignObject {
 }
 
 .edge.mappingEdge {
-    stroke: #28f;;
+    stroke: var(--highlighted-color);
     stroke-width: 4.5px;
 }
 

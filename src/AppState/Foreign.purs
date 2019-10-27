@@ -28,16 +28,12 @@ type SerialisedGraphData =
   { appStateOp :: AppOperation Unit
   , metadata   :: ForeignMetadata
   , graphId    :: String
-  , history    :: Array (AppOperation Unit)
-  , undone     :: Array (AppOperation Unit)
   }
 
 type DeserialisedGraphData =
   { appStateOp :: AppOperation Unit
   , metadata   :: Metadata
   , graphId    :: GraphId
-  , history    :: Array (AppOperation Unit)
-  , undone     :: Array (AppOperation Unit)
   }
 
 toForeignMetadata :: Metadata -> ForeignMetadata
@@ -51,11 +47,9 @@ graphDataToJSON :: GraphId -> GraphData -> Array (AppOperation Unit) -> Array (A
 graphDataToJSON graphId graphData history undone metadata =
   let
     serialisableGraphData =
-      ({ appStateOp : encodeGraphDataAsAppOperation graphData
-       , metadata : toForeignMetadata metadata
-       , graphId  : UUID.toString graphId
-       , history  : history
-       , undone   : undone
+      ({ appStateOp : encodeGraphDataAsAppOperation graphId graphData history undone
+       , metadata   : toForeignMetadata metadata
+       , graphId    : UUID.toString graphId
        } :: SerialisedGraphData)
   in
     encodeJSON serialisableGraphData

@@ -29,9 +29,9 @@ insertPaneImpl graphId appState =
     squishedOldPanesWidth = appState.windowBoundingRect.width - newPaneWidth - paneDividerWidth
   in
     appState
-    # rescaleWindowImpl (appState.windowBoundingRect { width = squishedOldPanesWidth
-                                                     , right = squishedOldPanesWidth
-                                                     })
+    # rescaleWindow (appState.windowBoundingRect { width = squishedOldPanesWidth
+                                                 , right = squishedOldPanesWidth
+                                                 })
     # _windowBoundingRect .~ appState.windowBoundingRect
     # _graphData <<< _panes <<< at graphId ?~ newPane
     # arrangePanes
@@ -59,8 +59,8 @@ rescalePaneImpl :: GraphId -> WHE.DOMRect -> AppState -> AppState
 rescalePaneImpl graphId rect =
   _graphData <<< _panes <<< at graphId <<< traversed <<< _boundingRect .~ rect
 
-rescaleWindowImpl :: WHE.DOMRect -> AppState -> AppState
-rescaleWindowImpl newWindowBoundingRect appState =
+rescaleWindow :: WHE.DOMRect -> AppState -> AppState
+rescaleWindow newWindowBoundingRect appState =
   let
     horizontalScale = newWindowBoundingRect.width  / appState.windowBoundingRect.width
     verticalScale   = newWindowBoundingRect.height / appState.windowBoundingRect.height
@@ -105,7 +105,7 @@ zoomAtPoint newZoom pageSpacePoint pane =
                        { x : point.x - pane.boundingRect.left - ((point.x - pane.boundingRect.left - origin.x) * (pane.zoom / newZoom))
                        , y : point.y - pane.boundingRect.top  - ((point.y - pane.boundingRect.top  - origin.y) * (pane.zoom / newZoom))
                        }
-  in AppOperation do
+  in AppOperation pane.graphId do
     moveGraphOrigin pane.graphId newGraphOrigin
     updateZoom pane.graphId newZoom
 

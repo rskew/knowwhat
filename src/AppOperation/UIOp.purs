@@ -3,6 +3,7 @@ module AppOperation.UIOp where
 import Prelude
 import Core (GraphId, PageSpacePoint2D, GraphView)
 
+import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either)
 import Data.Foldable (foldl)
@@ -30,7 +31,6 @@ data UIOpF next
   | InsertPane      GraphId                  next
   | RemovePane      GraphId                  next
   | RescalePane     GraphId WHE.DOMRect      next
-  | RescaleWindow           WHE.DOMRect      next
 
 derive instance functorUIOpF :: Functor UIOpF
 
@@ -46,7 +46,6 @@ showUIOp = case _ of
   InsertPane      graphId          next -> Tuple ("InsertPane "      <> show graphId)                             next
   RemovePane      graphId          next -> Tuple ("DeletePane "      <> show graphId)                             next
   RescalePane     graphId rect     next -> Tuple ("RescalePane "     <> show graphId <> " to: " <> show rect)     next
-  RescaleWindow           rect     next -> Tuple ("RescaleWindow  to: "                         <> show rect)     next
 
 
 ------
@@ -67,9 +66,6 @@ removePane graphId = Run.lift _uiOp $ RemovePane graphId unit
 rescalePane :: forall r. GraphId -> WHE.DOMRect -> Run (uiOp :: UIOP | r) Unit
 rescalePane graphId rect = Run.lift _uiOp $ RescalePane graphId rect unit
 
-rescaleWindow :: forall r. WHE.DOMRect -> Run (uiOp :: UIOP | r) Unit
-rescaleWindow rect = Run.lift _uiOp $ RescaleWindow rect unit
-
 encodeGraphViewAsUIOp :: forall r. GraphView -> Run (uiOp :: UIOP | r) Unit
 encodeGraphViewAsUIOp pane = do
   insertPane pane.graphId
@@ -78,11 +74,14 @@ encodeGraphViewAsUIOp pane = do
 
 encodeGraphViewsAsUIOp :: forall r. Map GraphId GraphView -> Run (uiOp :: UIOP | r) Unit
 encodeGraphViewsAsUIOp panes =
-  panes
-  # Map.values
-  <#> encodeGraphViewAsUIOp
-  <#> const
-  # foldl bind (pure unit)
+  let
+    maybeOps = (Array.fromFoldable $ Map.keys panes)
+      <#> \graphId -> do
+        pane  <- Map.lookup graphId panes
+        pure $ encodeGraphViewAsUIOp pane
+    opFuncs = const <$> Array.catMaybes maybeOps
+  in
+    foldl bind (pure unit) opFuncs
 
 
 ------
@@ -97,7 +96,6 @@ data ForeignUIOpF
   | ForeignInsertPane      String
   | ForeignRemovePane      String
   | ForeignRescalePane     String WHE.DOMRect
-  | ForeignRescaleWindow          WHE.DOMRect
 
 derive instance genericForeignUIOpF :: Generic ForeignUIOpF _
 
@@ -119,8 +117,6 @@ toForeignUIOpF = lmap (genericEncode defaultOptions) <<< case _ of
     Tuple (ForeignRemovePane (UUID.toString graphId)) next
   RescalePane graphId rect next ->
     Tuple (ForeignRescalePane (UUID.toString graphId) rect) next
-  RescaleWindow rect next ->
-    Tuple (ForeignRescaleWindow rect) next
 
 fromForeignUIOpF :: ForeignUIOpF -> Either String (UIOpF Unit)
 fromForeignUIOpF = case _ of
@@ -139,5 +135,3 @@ fromForeignUIOpF = case _ of
   ForeignRescalePane graphIdStr rect -> do
     graphId <- parseUUIDEither graphIdStr
     pure $ RescalePane graphId rect unit
-  ForeignRescaleWindow rect -> do
-    pure $ RescaleWindow rect unit

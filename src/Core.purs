@@ -196,6 +196,9 @@ _position nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <
 _nodeText :: NodeId -> Traversal' GraphData String
 _nodeText nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "text")
 
+_nodeSubgraph :: NodeId -> Traversal' GraphData (Maybe GraphId)
+_nodeSubgraph nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "subgraph")
+
 _panes :: Lens' GraphData (Map GraphId GraphView)
 _panes = prop (SProxy :: SProxy "panes")
 
@@ -287,6 +290,9 @@ setTitleValidityImpl :: GraphId -> Boolean -> GraphData -> GraphData
 setTitleValidityImpl graphId newValidity =
   _title graphId <<< traversed <<< prop (SProxy :: SProxy "isValid") .~ newValidity
 
+connectSubgraphImpl :: NodeId -> Maybe GraphId -> GraphData -> GraphData
+connectSubgraphImpl nodeId maybeGraphId =
+  _nodeSubgraph nodeId .~ maybeGraphId
 
 ------
 -- Utilities

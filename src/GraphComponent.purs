@@ -2,19 +2,19 @@ module GraphComponent where
 
 import Prelude
 
-import AppOperation (AppOperation(..), appOperationVersion)
-import AppOperation.GraphOp (insertNode, deleteNode, insertEdge, deleteEdge, moveNode, updateNodeText, updateEdgeText, updateTitle, newGraph)
+import AppOperation (AppOperation(..), appOperationVersion, undo, redo)
+import AppOperation.GraphOp (GraphOpF(..), _graphOp, deleteEdge, deleteNode, insertEdge, insertNode, moveNode, updateEdgeText, updateNodeText, updateTitle)
 import AppOperation.Interpreter (doAppOperation, interpretAppOperation)
-import AppOperation.UIOp (insertPane, moveGraphOrigin, removePane, rescalePane, rescaleWindow)
-import AppOperation.UndoOp (undo, redo)
-import AppState (Shape, DrawingEdge, DrawingEdgeId, HoveredElementId(..), AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr)
+import AppOperation.QueryServerOp (connectSubgraphIfTitleExists)
+import AppOperation.UIOp (insertPane, moveGraphOrigin, removePane)
+import AppState (AppState, DrawingEdge, DrawingEdgeId, HoveredElementId(..), Shape, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _focus, _graphData, edgeIdStr, emptyAppState)
 import AppState.Foreign (graphDataFromJSON, graphDataToJSON)
 import CSS as CSS
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except.Trans (runExceptT)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT, lift)
-import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, GraphTitle, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesTouchingNode, edgeArray, emptyGraphData, freshNode, separateGraphs, toGraphSpace, toPageSpace, allEdgesBetweenGraphs, selectGraphData)
+import Core (Edge, EdgeId, Focus(..), GraphData, GraphId, GraphSpacePoint2D(..), GraphTitle, GraphView, Node, NodeId, PageSpacePoint2D(..), _origin, _pane, _zoom, allEdgesBetweenGraphs, allEdgesTouchingNode, edgeArray, freshNode, selectGraphData, separateGraphs, toGraphSpace, toPageSpace)
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -31,7 +31,6 @@ import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
 import Data.UUID as UUID
-import DemoGraph (demo)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Console as Console
@@ -47,12 +46,14 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource as ES
 import Math as Math
+import Run as Run
+import Server.Config (config)
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
 import UI.Constants (defaultTextFieldShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, maxTextFieldShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset, zoomScaling, defaultTitleShape, maxTitleShape, invalidIndicatorOffset, invalidIndicatorSize)
-import UI.Panes (zoomAtPoint, paneContainingPoint)
+import UI.Panes (zoomAtPoint, paneContainingPoint, rescaleWindow)
 import UI.SvgDefs (svgDefs)
 import Web.Event.Event as WE
 import Web.Event.EventTarget as ET
@@ -80,7 +81,8 @@ data Action
   | StopPropagation WE.Event Action
   | EvalQuery (Query Unit)
   | Init
-  | UpdateContentEditableText
+  | UpdateContentEditableText GraphId
+  | UpdateNodeContentEditableText NodeId
   | BackgroundDragStart GraphId PageSpacePoint2D ME.MouseEvent
   | BackgroundDragMove Drag.DragEvent GraphId PageSpacePoint2D H.SubscriptionId
   | NodeDragStart GraphId NodeId GraphSpacePoint2D ME.MouseEvent
@@ -103,26 +105,22 @@ data Action
   | LoadLocalFile FileReader.FileReader H.SubscriptionId WE.Event
   | SaveLocalFile
   | Keypress KE.KeyboardEvent
+  | Keyup KE.KeyboardEvent
   | DoNothing
 
 type Input = Shape
 
 initialState :: Input -> AppState
 initialState windowShape =
-  { graphData             : emptyGraphData
-  , history               : Map.empty
-  , undone                : Map.empty
-  , windowBoundingRect    : { left : 0.0
-                            , width : windowShape.width
-                            , right : windowShape.height
-                            , top : 0.0
-                            , height : windowShape.height
-                            , bottom : windowShape.width
-                            }
-  , drawingEdges          : Map.empty
-  , hoveredElementId      : Nothing
-  , focusedPane           : Nothing
-  }
+  emptyAppState { windowBoundingRect =
+                  { left : 0.0
+                  , width : windowShape.width
+                  , right : windowShape.height
+                  , top : 0.0
+                  , height : windowShape.height
+                  , bottom : windowShape.width
+                  }
+                }
 
 data Query a
   = UpdateBoundingRect a
@@ -164,6 +162,7 @@ graphComponent =
   renderGraphNode :: AppState -> GraphView -> Node -> Tuple String (H.ComponentHTML Action Slots Aff)
   renderGraphNode state pane node =
     let
+      nodeFocused = pane.focus == Just (FocusNode node.id)
       hoveredOverBorder = state.hoveredElementId == Just (NodeBorderId node.id)
       hoveredOverHalo   = state.hoveredElementId == Just (NodeHaloId node.id)
       noDrawingEdgeFromNode =
@@ -180,7 +179,7 @@ graphComponent =
       nodeClasses =
         joinWith " " $ Array.catMaybes
         [ Just "node"
-        , if pane.focus == Just (FocusNode node.id)
+        , if nodeFocused
           then Just "focused"
           else Nothing
         ]
@@ -194,15 +193,15 @@ graphComponent =
           , if hoveredOverBorder
                &&
                (not drawingEdgeOverNode)
+               &&
+               (not nodeFocused)
             then Just "hovered"
             else Nothing
           ]
       haloClasses =
         joinWith " " $ Array.catMaybes
         [ Just "nodeHalo"
-        , if pane.focus == Just (FocusNode node.id)
-             &&
-             (not hoveredOverBorder)
+        , if nodeFocused
           then Just "focused"
           else Nothing
         , if drawingEdgeOverNode
@@ -391,8 +390,8 @@ graphComponent =
       , SA.markerEnd "url(#drawing-arrow)"
       ]
 
-  renderTitle :: GraphId -> GraphTitle -> Tuple String (H.ComponentHTML Action Slots Aff)
-  renderTitle graphId title =
+  renderTitle :: GraphId -> String -> Tuple String (H.ComponentHTML Action Slots Aff)
+  renderTitle graphId titleText =
     Tuple (show graphId <> "_title") $
       SE.g
       [ SA.class_ "title"
@@ -400,26 +399,28 @@ graphComponent =
                              $ StopPropagation (ME.toEvent e)
                              $ DoNothing
       ]
-      ([ HH.slot
-         _titleTextField
-         graphId
-         SVGContentEditable.svgContenteditable
-         { shape : defaultTitleShape
-         , initialText : title.titleText
-         , maxShape : maxTitleShape
-         , fitContentDynamic : true
-         }
-         (Just <<< TitleTextInput graphId)
-       ] <> if title.isValid
-            then []
-            else [ SE.rect
-                   [ SA.class_ "invalidIndicator"
-                   , SA.width  $ show invalidIndicatorSize
-                   , SA.height $ show invalidIndicatorSize
-                   , SA.x $ show invalidIndicatorOffset.x
-                   , SA.y $ show invalidIndicatorOffset.y
-                   ]
-                 ])
+      [ HH.slot
+        _titleTextField
+        graphId
+        SVGContentEditable.svgContenteditable
+        { shape : defaultTitleShape
+        , initialText : titleText
+        , maxShape : maxTitleShape
+        , fitContentDynamic : true
+        }
+        (Just <<< TitleTextInput graphId)
+      ]
+
+  renderTitleInvalidIndicator :: GraphId -> Tuple String (H.ComponentHTML Action Slots Aff)
+  renderTitleInvalidIndicator graphId =
+    Tuple (show graphId <> "_titleInvalidIndicator") $
+      SE.rect
+      [ SA.class_ "invalidIndicator"
+      , SA.width  $ show invalidIndicatorSize
+      , SA.height $ show invalidIndicatorSize
+      , SA.x $ show invalidIndicatorOffset.x
+      , SA.y $ show invalidIndicatorOffset.y
+      ]
 
   renderSingleGraph :: AppState -> GraphView -> GraphData -> H.ComponentHTML Action Slots Aff
   renderSingleGraph state renderPane singleGraph =
@@ -432,23 +433,29 @@ graphComponent =
                               # Map.filter (\node -> node.graphId /= renderPane.graphId)
                               # Map.values # Array.fromFoldable
 
-      ghostNodes = Array.catMaybes $ allNodesInOtherGraphs <#> renderGhostNode state renderPane
+      ghostNodes          = Array.catMaybes $ allNodesInOtherGraphs <#> renderGhostNode state renderPane
 
-      edges = Array.nub $ edgeArray singleGraph <> allEdgesBetweenGraphs state.graphData
+      edges               = Array.nub $ edgeArray singleGraph <> allEdgesBetweenGraphs state.graphData
 
-      keyedEdges = Array.mapMaybe (renderEdge state renderPane) edges
+      keyedEdges          = Array.mapMaybe (renderEdge state renderPane) edges
 
       keyedEdgeTextFields = Array.mapMaybe (renderEdgeTextField state renderPane) edges
 
-      keyedEdgeBorders = Array.mapMaybe (renderEdgeBorder state renderPane) edges
+      keyedEdgeBorders    = Array.mapMaybe (renderEdgeBorder state renderPane) edges
 
-      drawingEdges = state.drawingEdges # Map.values # Array.fromFoldable
+      drawingEdges        = state.drawingEdges # Map.values # Array.fromFoldable
 
-      keyedDrawingEdges = Array.mapMaybe (renderDrawingEdge state renderPane) drawingEdges
+      keyedDrawingEdges   = Array.mapMaybe (renderDrawingEdge state renderPane) drawingEdges
 
       keyedTitle = case Map.lookup renderPane.graphId singleGraph.titles of
         Nothing -> []
-        Just title -> [ renderTitle renderPane.graphId title ]
+        Just title -> [ renderTitle renderPane.graphId title.titleText ]
+
+      keyedTitleInvalidIndicator = case Map.lookup renderPane.graphId singleGraph.titles of
+        Nothing -> []
+        Just title -> if title.isValid
+                      then []
+                      else [ renderTitleInvalidIndicator renderPane.graphId ]
 
       zoom                    = renderPane.zoom
       PageSpacePoint2D origin = renderPane.origin
@@ -488,6 +495,7 @@ graphComponent =
            <> keyedNodes
            <> keyedEdgeTextFields
            <> keyedTitle
+           <> keyedTitleInvalidIndicator
           )
         ]
       ]
@@ -540,32 +548,36 @@ graphComponent =
                          (WE.EventType "resize")
                          (WHW.toEventTarget window)
                          \event -> Just $ EvalQuery $ UpdateBoundingRect unit
-      -- Add keyboard event listener to body
+      -- Add keydown event listener to body
       document <- H.liftEffect $ WHW.document =<< WH.window
       _ <- H.subscribe $ ES.eventListenerEventSource KET.keydown (HTMLDocument.toEventTarget document) (map Keypress <<< KE.fromEvent)
-      -- Load demo graph into pane
-      Tuple graphId demoGraphOp <- H.liftEffect demo
-      bareState <- H.get
-      let
-        initState = interpretAppOperation $ AppOperation do
-          (unwrap demoGraphOp)
-          rescalePane graphId bareState.windowBoundingRect
-        initialisedState = initState bareState
-      H.put $ initialisedState # _{ history = Map.singleton graphId []
-                                  , undone  = Map.singleton graphId []
-                                  }
+      -- keyup listener
+      _ <- H.subscribe $ ES.eventListenerEventSource KET.keyup   (HTMLDocument.toEventTarget document) (map Keyup <<< KE.fromEvent)
 
-    UpdateContentEditableText -> do
+      pure unit
+
+    UpdateContentEditableText graphId -> do
       state <- H.get
-      for_ state.graphData.nodes \node -> do
-        H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText node.text
-      for_ (edgeArray state.graphData) \edge -> do
-        H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText edge.text
-      let
-        titles :: Array (Tuple GraphId GraphTitle)
-        titles = Map.toUnfoldable state.graphData.titles
-      for_ titles \(Tuple graphId title) -> do
-        H.query _titleTextField graphId $ H.tell $ SVGContentEditable.SetText title.titleText
+      case selectGraphData graphId state.graphData of
+        Nothing -> pure unit
+        Just singleGraph -> do
+          for_ singleGraph.nodes \node -> do
+            handleAction $ UpdateNodeContentEditableText node.id
+          for_ (edgeArray singleGraph) \edge -> do
+            H.query _edgeTextField edge.id $ H.tell $ SVGContentEditable.SetText edge.text
+          let
+            titles :: Array (Tuple GraphId GraphTitle)
+            titles = Map.toUnfoldable singleGraph.titles
+          for_ titles \(Tuple graphId' title) -> do
+            H.query _titleTextField graphId' $ H.tell $ SVGContentEditable.SetText title.titleText
+
+    UpdateNodeContentEditableText nodeId -> do
+      state <- H.get
+      case Map.lookup nodeId state.graphData.nodes of
+        Nothing -> pure unit
+        Just node -> do
+          _ <- H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText node.text
+          pure unit
 
     NodeTextInput nodeId (SVGContentEditable.TextUpdate text) -> do
       state <- H.get
@@ -573,10 +585,10 @@ graphComponent =
         Nothing -> pure unit
         Just node ->
           let
-            op = AppOperation $ updateNodeText node text
+            op = AppOperation node.graphId $ updateNodeText node text
           in do
             H.raise $ SendOperation op
-            H.modify_ $ doAppOperation node.graphId op
+            H.modify_ $ doAppOperation op
             handleAction $ FocusOn node.graphId $ Just $ FocusNode node.id
 
     EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
@@ -585,10 +597,10 @@ graphComponent =
         Nothing -> pure unit
         Just edge ->
           let
-            op = AppOperation $ updateEdgeText edge text
+            op = AppOperation graphId $ updateEdgeText edge text
           in do
             H.raise $ SendOperation op
-            H.modify_ $ doAppOperation graphId op
+            H.modify_ $ doAppOperation op
             handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
 
     TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
@@ -597,10 +609,10 @@ graphComponent =
         Nothing -> pure unit
         Just oldTitle ->
           let
-            op = AppOperation $ updateTitle graphId oldTitle.titleText newTitleText
+            op = AppOperation graphId $ updateTitle graphId oldTitle.titleText newTitleText
           in do
             H.raise $ SendOperation op
-            H.modify_ $ doAppOperation graphId op
+            H.modify_ $ doAppOperation op
 
     BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
       handleAction $ FocusOn graphId Nothing
@@ -616,9 +628,9 @@ graphComponent =
             { x : initialGraphOrigin.x + dragData.offsetX
             , y : initialGraphOrigin.y + dragData.offsetY
             }
-        op = AppOperation $ moveGraphOrigin graphId newGraphOrigin
+        op = AppOperation graphId $ moveGraphOrigin graphId newGraphOrigin
       H.raise $ SendOperation op
-      H.modify_ $ doAppOperation graphId op
+      H.modify_ $ doAppOperation op
 
 
     BackgroundDragMove (Drag.Done _) _ _ subscriptionId ->
@@ -648,10 +660,10 @@ graphComponent =
             Nothing -> pure unit
             Just node ->
               let
-                op = AppOperation $ moveNode node newNodePos
+                op = AppOperation node.graphId $ moveNode node newNodePos
               in do
                 H.raise $ SendOperation op
-                H.modify_ $ doAppOperation node.graphId op
+                H.modify_ $ doAppOperation op
 
     NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
       H.unsubscribe subscriptionId
@@ -697,6 +709,7 @@ graphComponent =
           drawingEdgeTarget <-
             Map.values state.graphData.nodes
               # List.filter (\node -> node.graphId == drawingEdgeState.targetGraph)
+              # List.filter (\node -> node.id /= drawingEdgeId)
               # List.filter (drawingEdgeWithinNodeHalo drawingEdgeState targetPane)
               # List.head
           pure { source      : drawingEdgeState.source
@@ -704,13 +717,13 @@ graphComponent =
                , target      : drawingEdgeTarget.id
                , targetGraph : drawingEdgeTarget.graphId
                }
+      -- Remove the drawing edge
+      H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
+      H.unsubscribe subscriptionId
       case maybeNewEdgeId of
         Nothing -> pure unit
         Just newEdgeId -> do
           handleAction $ AppCreateEdge graphId newEdgeId
-      -- Remove the drawing edge
-      H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
-      H.unsubscribe subscriptionId
 
     AppCreateNode pane mouseEvent -> do
       newNodeId <- H.liftEffect genUUID
@@ -721,11 +734,11 @@ graphComponent =
         newNodeGraphSpacePos =
           newNodePosition
           # toGraphSpace pane
-        op = AppOperation do
+        op = AppOperation pane.graphId do
           insertNode pane.graphId newNodeId
           moveNode newNode newNodeGraphSpacePos
       H.raise $ SendOperation op
-      H.modify_ $ doAppOperation pane.graphId op
+      H.modify_ $ doAppOperation op
       handleAction $ FocusOn pane.graphId $ Just $ FocusNode newNodeId
 
     AppDeleteNode node -> do
@@ -737,30 +750,35 @@ graphComponent =
           Just outgoingEdge -> handleAction $ FocusOn node.graphId $ Just $ FocusNode outgoingEdge.id.target
           Nothing -> pure unit
       state' <- H.get
-      let op = AppOperation $ deleteNode state'.graphData node
+      let op = AppOperation node.graphId $ deleteNode state'.graphData node
       H.raise $ SendOperation op
-      H.modify_ $ doAppOperation node.graphId op
+      H.modify_ $ doAppOperation op
 
     AppCreateEdge graphId edgeId ->
       let
-        op = AppOperation $ insertEdge edgeId
+        op = AppOperation graphId $ insertEdge edgeId
       in do
         H.raise $ SendOperation op
-        H.modify_ $ doAppOperation graphId op
+        H.modify_ $ doAppOperation op
         handleAction $ FocusOn edgeId.sourceGraph $ Just $ FocusEdge edgeId []
 
     AppDeleteEdge graphId edge ->
       let
-        op = AppOperation $ deleteEdge edge
+        op = AppOperation graphId $ deleteEdge edge
       in do
         H.raise $ SendOperation op
-        H.modify_ $ doAppOperation graphId op
+        H.modify_ $ doAppOperation op
         handleAction $ FocusOn edge.id.sourceGraph $ Just $ FocusNode edge.id.source
 
     FocusOn graphId newFocus -> do
       H.modify_ $
         (_focus graphId .~ newFocus)
         >>> _{ focusedPane = Just graphId }
+      _ <- case newFocus of
+        Just (FocusNode nodeId)   -> H.query _nodeTextField nodeId $ H.tell SVGContentEditable.Focus
+        Just (FocusEdge edgeId _) -> H.query _edgeTextField edgeId $ H.tell SVGContentEditable.Focus
+        _                         -> pure $ Just unit
+      pure unit
 
     DeleteFocus graphId -> do
       state <- H.get
@@ -794,7 +812,7 @@ graphComponent =
                    pane
           in do
             H.raise $ SendOperation op
-            H.modify_ $ doAppOperation pane.graphId op
+            H.modify_ $ doAppOperation op
 
     CenterGraphOriginAndZoom -> do
       state <- H.get
@@ -831,16 +849,11 @@ graphComponent =
           H.liftEffect $ Console.log $ "Failed to parse JSON: " <> errors
         Right deserialisedGraphData -> do
           H.liftEffect $ Console.log $ "Loading saved graph encoded with AppOperation version "
-                               <> deserialisedGraphData.metadata.version
-          --reducedAppState <- H.liftEffect $ removeGraphData graphId state
-          reducedAppState <- H.get
-          let newAppState = interpretAppOperation deserialisedGraphData.appStateOp reducedAppState
-          H.put $ newAppState
-                    { history = Map.insert deserialisedGraphData.graphId deserialisedGraphData.history newAppState.history
-                    , undone  = Map.insert deserialisedGraphData.graphId deserialisedGraphData.undone  newAppState.undone
-                    }
+                                       <> deserialisedGraphData.metadata.version
+          H.put $ interpretAppOperation deserialisedGraphData.appStateOp state
           -- Keep text fields in sync
-          handleAction $ UpdateContentEditableText
+          let AppOperation graphId _ = deserialisedGraphData.appStateOp
+          handleAction $ UpdateContentEditableText graphId
       H.unsubscribe subscriptionId
 
     SaveLocalFile -> do
@@ -860,51 +873,98 @@ graphComponent =
         Just (Tuple stateJSON title) ->
           H.liftEffect $ saveJSON stateJSON $ title <> ".graph.json"
 
+    Keyup keyboardEvent ->
+      case KE.key keyboardEvent of
+        " " -> do
+          state <- H.get
+          H.modify_ _{ keyHoldState = state.keyHoldState { spaceDown = false} }
+
+        _ -> pure unit
+
     Keypress keyboardEvent -> do
       H.liftEffect $ Console.log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
+        " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          H.modify_ _{ keyHoldState = state.keyHoldState { spaceDown = true } }
+
         -- Undo
         "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
             Just graphId ->
               let
-                op = AppOperation $ undo graphId
+                op = AppOperation graphId $ undo graphId
               in do
                 H.raise $ SendOperation op
-                H.modify_ $ doAppOperation graphId op
-          -- Keep text state in sync
-          handleAction $ UpdateContentEditableText
+                H.modify_ $ doAppOperation op
+                -- Keep text state in sync
+                handleAction $ UpdateContentEditableText graphId
 
         -- Redo
         "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
             Just graphId ->
               let
-                op = AppOperation $ redo graphId
+                op = AppOperation graphId $ redo graphId
               in do
                 H.raise $ SendOperation op
-                H.modify_ $ doAppOperation graphId op
-          -- Keep text state in sync
-          handleAction $ UpdateContentEditableText
+                H.modify_ $ doAppOperation op
+                -- Keep text state in sync
+                handleAction $ UpdateContentEditableText graphId
 
-        -- Load saved graph from local JSON file
         "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ loadFile
-
-        -- Save current graph to local JSON file
-        "s" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          -- Save app state as a local json file
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
-          handleAction $ SaveLocalFile
+          state <- H.get
+          if state.keyHoldState.spaceDown
+          then do
+            case focusNodeSubgraph state of
+              Nothing -> pure unit
+              Just subgraphId ->
+                let
+                  op = AppOperation subgraphId $ insertPane subgraphId
+                in
+                  H.raise $ SendOperation op
+          else
+            -- Load saved graph from local JSON file
+            H.liftEffect loadFile
+
+        "s" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          if state.keyHoldState.spaceDown
+          then
+            -- connect focused node to Subgraph with same title as node text
+            case do
+              graphId <- state.focusedPane
+              pane    <- Map.lookup graphId state.graphData.panes
+              focus   <- pane.focus
+              nodeId  <- case focus of
+                FocusNode nodeId -> Just nodeId
+                _ -> Nothing
+              focusNode <- Map.lookup nodeId state.graphData.nodes
+              pure $ Tuple pane.graphId focusNode
+            of
+              Nothing -> pure unit
+              Just (Tuple graphId node) ->
+                let
+                  op = AppOperation graphId $ connectSubgraphIfTitleExists node.id node.text
+                in
+                  H.raise $ SendOperation op
+          else
+            -- Save current graph to local JSON file
+            handleAction $ SaveLocalFile
 
         -- Return to graph origin and reset zoom
         "o" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
@@ -922,9 +982,9 @@ graphComponent =
         -- Unfocus
         "Escape" -> do
           state <- H.get
-          for_ (Map.keys state.graphData.panes) \graphId ->
+          for_ (Map.keys state.graphData.panes) \graphId -> do
             handleAction $ FocusOn graphId Nothing
-          handleAction $ UpdateContentEditableText
+            handleAction $ UpdateContentEditableText graphId
 
         -- reMove pane
         "m" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
@@ -932,23 +992,61 @@ graphComponent =
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
-            Just graphId -> do
-              H.modify_ $ interpretAppOperation $ AppOperation $ removePane graphId
+            Just graphId ->
+              let
+                op = AppOperation graphId do
+                  removePane graphId
+              in do
+              H.raise $ SendOperation op
+              H.modify_ $ interpretAppOperation op
 
         -- new Graph
         "g" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
           newGraphId <- H.liftEffect genUUID
           newGraphTitle <- H.liftEffect $ UUID.toString <$> genUUID
-          let op = AppOperation do
-                newGraph newGraphId newGraphTitle
+          let op = AppOperation newGraphId do
                 insertPane newGraphId
+                updateTitle newGraphId "" newGraphTitle
           H.raise $ SendOperation op
-          H.modify_ $ doAppOperation newGraphId op
+          H.modify_ $ doAppOperation op
 
         -- TODO: highlighting
         ---- Highlight currently focused node/edge
         --"s" -> H.modify_ $ _graph %~ toggleHighlightFocus
+
+        -- jump Down into the subgraph of the focused node
+        "d" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          if state.keyHoldState.spaceDown
+          then
+            case Tuple state.focusedPane (focusNodeSubgraph state) of
+              Tuple (Just focusedGraphId) (Just subgraphId) ->
+                let
+                  op = AppOperation focusedGraphId do
+                    removePane focusedGraphId
+                    insertPane subgraphId
+                in do
+                  H.raise $ SendOperation op
+                  H.modify_ $ doAppOperation op
+              _ -> pure unit
+          else
+            -- Load saved graph from local JSON file
+            H.liftEffect loadFile
+
+        -- load the Knowledge navigator
+        "k" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          H.liftEffect $ WE.stopPropagation $ KE.toEvent keyboardEvent
+          state <- H.get
+          if state.keyHoldState.spaceDown
+          then
+            H.raise $ SendOperation $ AppOperation config.knowledgeNavigatorId $
+              insertPane config.knowledgeNavigatorId
+          else
+            pure unit
 
         _ -> pure unit
 
@@ -961,12 +1059,14 @@ graphComponent =
       map (const a) <$> runMaybeT do
         panesElement <- MaybeT $ H.getHTMLElementRef (H.RefLabel "panes")
         panesRect <- lift $ H.liftEffect $ WHE.getBoundingClientRect panesElement
-        lift $ H.modify_ $ interpretAppOperation $ AppOperation
-          $ rescaleWindow panesRect
+        lift $ H.modify_ $ rescaleWindow panesRect
 
     ReceiveOperation op a -> do
       state <- H.get
       H.modify_ $ interpretAppOperation op
+      case opUpdatesNodeText op of
+        Nothing -> pure unit
+        Just nodeId -> handleAction $ UpdateNodeContentEditableText nodeId
       pure $ Just a
 
 
@@ -1021,3 +1121,27 @@ edgeMidPosition state edge renderPane = do
            { x : (sourcePos.x + targetPos.x) / 2.0
            , y : (sourcePos.y + targetPos.y) / 2.0
            }
+
+-- | Utility to indicate if an operation received from the server updates a node's
+-- | text, in which case the contenteditable field needs to be refreshed.
+opUpdatesNodeText :: AppOperation Unit -> Maybe NodeId
+opUpdatesNodeText (AppOperation graphId runOp) =
+  case Run.peel runOp of
+    Left opV -> opV # (Run.on _graphOp (case _ of
+        UpdateNodeText nodeId from to next ->
+          Just nodeId
+        _ -> Nothing)
+     (Run.default Nothing))
+    _ -> Nothing
+
+focusNodeSubgraph :: AppState -> Maybe GraphId
+focusNodeSubgraph state = do
+   graphId    <- state.focusedPane
+   pane       <- Map.lookup graphId state.graphData.panes
+   focus      <- pane.focus
+   nodeId     <- case focus of
+                   FocusNode nodeId -> Just nodeId
+                   _ -> Nothing
+   node       <- Map.lookup nodeId state.graphData.nodes
+   subgraphId <- node.subgraph
+   pure subgraphId

@@ -62,7 +62,7 @@ prop_InsertRemoveNodeB (TestGraph graphId graphData extraNodes _) =
 prop_EncodeDecode :: TestGraph -> Result
 prop_EncodeDecode (TestGraph graphId graphData _ _) =
   let
-    baseAppOp = map (const unit) $ AppOperation $ encodeGraphDataAsGraphOp graphData
+    baseAppOp = map (const unit) $ AppOperation graphId $ encodeGraphDataAsGraphOp graphData
   in
     case runExceptT $ decode $ encode baseAppOp of
       Identity (Left err) -> Failed $ show $ Foreign.renderForeignError <$> err

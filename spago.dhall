@@ -17,16 +17,18 @@ You can edit this file as you like.
     , "halogen-svg"
     , "httpure"
     , "node-sqlite3"
+    , "node-websocket"
+    , "nullable"
     , "prelude"
     , "profunctor-lenses"
     , "psci-support"
     , "quickcheck"
     , "run"
+    , "simple-json"
     , "strings"
     , "uuid"
     , "web-socket"
     , "web-uievents"
-    , "node-websocket"
     ]
 , packages =
     ./packages.dhall

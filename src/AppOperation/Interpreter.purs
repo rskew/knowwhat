@@ -2,12 +2,12 @@ module AppOperation.Interpreter where
 
 import Prelude
 
-import AppOperation (AppOperation(..))
+import AppOperation (AppOperation(..), UndoOpF(..), _undoOp, UNDOOP)
 import AppOperation.GraphOp (_graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, interpretGraphOp, invertGraphOp)
+import AppOperation.QueryServerOp (interpretQueryServerOpOnClient)
 import AppOperation.UIOp (UIOpF(..), _uiOp, UIOP)
-import AppOperation.UndoOp (UndoOpF(..), _undoOp, UNDOOP)
-import AppState (AppState, _graphData)
-import Core (GraphId, selectGraphData, _panes, _pane, _origin, _zoom)
+import AppState (AppState, _graphData, _history, _undone)
+import Core (GraphId, _origin, _pane, _panes, _zoom, _title, selectGraphData)
 import Data.Array (cons, uncons)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -16,27 +16,27 @@ import Data.Lens ((.~), (%~))
 import Data.Lens.At (at)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
-import Data.Newtype (wrap, unwrap)
 import Data.Tuple (Tuple(..), fst)
 import Run (Run, Step(..))
 import Run as Run
-import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl, rescaleWindowImpl)
+import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
 
 -- | Interpret the operation and push it onto the history stack
-doAppOperation :: GraphId -> AppOperation Unit -> AppState -> AppState
-doAppOperation graphId op appState =
+doAppOperation :: AppOperation Unit -> AppState -> AppState
+doAppOperation appOp appState =
   let
+    AppOperation graphId op = appOp
     history = case Map.lookup graphId appState.history of
       Nothing -> []
       Just graphHistory -> graphHistory
-    newHistory = filteredHistoryUpdate op history
+    newHistory = filteredHistoryUpdate appOp history
   in
     appState { history = Map.insert graphId newHistory appState.history }
-      # interpretAppOperation op
+      # interpretAppOperation appOp
 
 interpretAppOperation :: forall a.
                          AppOperation a -> (AppState -> AppState)
-interpretAppOperation (AppOperation uiUndoGraphOp) =
+interpretAppOperation (AppOperation graphId uiUndoGraphOp) =
   let
     undoGraphOp =
       interpretUIOp uiUndoGraphOp
@@ -48,10 +48,13 @@ interpretAppOperation (AppOperation uiUndoGraphOp) =
       # map (\(Tuple undoUpdate uIUpdate) ->
                uIUpdate >>> undoUpdate)
 
-    noOp =
+    queryServerOp =
       interpretGraphOp graphOp
       # map \(Tuple graphUpdate uIUndoUpdate) ->
               uIUndoUpdate >>> (_graphData %~ graphUpdate)
+
+    noOp = interpretQueryServerOpOnClient queryServerOp
+           # map \(Tuple noUpdate allUpdates) -> noUpdate >>> allUpdates
   in
     noOp
     -- All sublangs have now been interpreted so we can grab the accumulated result
@@ -60,43 +63,48 @@ interpretAppOperation (AppOperation uiUndoGraphOp) =
 filteredHistoryUpdate :: AppOperation Unit
                            -> Array (AppOperation Unit)
                            -> Array (AppOperation Unit)
-filteredHistoryUpdate op history =
-  case Run.peel (unwrap op) of
-    Right _ -> history
-    Left opV -> opV # Run.on _graphOp (\_ ->
-      case Array.uncons history of
-        Nothing -> [ op ]
-        Just unconsHistory ->
-          case collapseAppOperation op unconsHistory.head of
-            Nothing -> Array.cons op history
-            Just collapsedOp -> Array.cons collapsedOp unconsHistory.tail)
-      (Run.default history)
+filteredHistoryUpdate appOp history =
+  let
+    AppOperation graphId op = appOp
+  in
+    case Run.peel op of
+      Right _ -> history
+      Left opV -> opV # Run.on _graphOp (\_ ->
+        case Array.uncons history of
+          Nothing -> [ appOp ]
+          Just unconsHistory ->
+            case collapseAppOperation appOp unconsHistory.head of
+              Nothing -> Array.cons appOp history
+              Just collapsedOp -> Array.cons collapsedOp unconsHistory.tail)
+        (Run.default history)
 
 collapseAppOperation :: forall a.
                         AppOperation a
                         -> AppOperation a
                         -> Maybe (AppOperation Unit)
-collapseAppOperation (AppOperation newOp) (AppOperation historyHeadOp) =
-  map wrap
-  case Tuple (Run.peel newOp) (Run.peel historyHeadOp) of
-    Tuple (Left newOpV) (Left historyHeadOpV) ->
-      newOpV # ((Run.default Nothing) # Run.on _graphOp (\newOpF ->
-        historyHeadOpV # ((Run.default Nothing) # Run.on _graphOp (\historyHeadOpF ->
-          case collapseGraphOpF newOpF historyHeadOpF of
-            Nothing -> Nothing
-            Just collapsed ->
-              -- Call recursively to check that the whole of the ops can be
-              -- collapsed together
-              let
-                collapsedRun = collapsed.collapsedOp # Run.lift _graphOp
-              in
-                collapseAppOperation (wrap collapsed.nextNext) (wrap collapsed.prevNext)
-                <#> (\op -> collapsedRun >>= const (unwrap op))))))
-    -- Base case for the recursion
-    Tuple (Right nextLeaf) ( Right prevLeaf) ->
-      Just $ pure unit
-    _ ->
-      Nothing
+collapseAppOperation (AppOperation graphId newOp) (AppOperation graphId' historyHeadOp) =
+  if graphId /= graphId'
+  then Nothing
+  else
+    case Tuple (Run.peel newOp) (Run.peel historyHeadOp) of
+      Tuple (Left newOpV) (Left historyHeadOpV) ->
+        newOpV # ((Run.default Nothing) # Run.on _graphOp (\newOpF ->
+          historyHeadOpV # ((Run.default Nothing) # Run.on _graphOp (\historyHeadOpF ->
+            case collapseGraphOpF newOpF historyHeadOpF of
+              Nothing -> Nothing
+              Just collapsed ->
+                -- Call recursively to check that the whole of the ops can be
+                -- collapsed together
+                let
+                  collapsedRun = collapsed.collapsedOp # Run.lift _graphOp
+                in
+                  collapseAppOperation (AppOperation graphId  collapsed.nextNext) (AppOperation graphId collapsed.prevNext)
+                  <#> (\(AppOperation graphId'' op) -> AppOperation graphId'' (collapsedRun >>= const op))))))
+      -- Base case for the recursion
+      Tuple (Right nextLeaf) ( Right prevLeaf) ->
+        Just $ AppOperation graphId $ pure unit
+      _ ->
+        Nothing
 
 
 ------
@@ -109,14 +117,15 @@ handleUndoOp = case _ of
             Nothing -> appState
             Just unconsHistory ->
               let
-                undoOp     = unconsHistory.head # unwrap >>> invertGraphOp >>> wrap
+                AppOperation graphId lastOp = unconsHistory.head
+                undoOp     = invertGraphOp lastOp
                 newHistory = unconsHistory.tail
                 newUndone  = case Map.lookup graphId appState.undone of
                   Nothing -> [ unconsHistory.head ]
                   Just undone -> cons unconsHistory.head undone
               in
                 appState
-                # interpretAppOperation undoOp
+                # interpretAppOperation (AppOperation graphId undoOp)
                 # _{ history = Map.insert graphId newHistory appState.history
                    , undone  = Map.insert graphId newUndone  appState.undone
                    }
@@ -138,6 +147,12 @@ handleUndoOp = case _ of
                      }
           )
           next
+
+  SetHistory graphId history next ->
+    Tuple (_history %~ Map.insert graphId history) next
+
+  SetUndone graphId undone next ->
+    Tuple (_undone %~ Map.insert graphId undone) next
 
 interpretUndoOp :: forall r a.
                    Run (undoOp :: UNDOOP | r) a -> Run r (Tuple (AppState -> AppState) a)
@@ -164,13 +179,10 @@ handleUIOp = case _ of
     Tuple (insertPaneImpl graphId) next
 
   RemovePane graphId next ->
-    Tuple (removePaneImpl graphId) next
+    Tuple (removePaneImpl graphId >>> (_graphData <<< _title graphId .~ Nothing)) next
 
   RescalePane graphId rect next ->
     Tuple (rescalePaneImpl graphId rect) next
-
-  RescaleWindow rect next ->
-    Tuple (rescaleWindowImpl rect) next
 
 interpretUIOp :: forall r a.
                  Run (uiOp :: UIOP | r) a -> Run r (Tuple (AppState -> AppState) a)
@@ -189,7 +201,7 @@ removeGraphData graphId appState =
       let
         remover = encodeGraphDataAsGraphOp graphToRemove
                   # invertGraphOp
-                  # wrap
+                  # AppOperation graphId
                   # interpretAppOperation
         appState' = remover appState
       in
