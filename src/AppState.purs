@@ -132,3 +132,6 @@ _history = prop (SProxy :: SProxy "history")
 
 _undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
 _undone = prop (SProxy :: SProxy "undone")
+
+_focusedPane :: Lens' AppState (Maybe GraphId)
+_focusedPane = prop (SProxy :: SProxy "focusedPane")

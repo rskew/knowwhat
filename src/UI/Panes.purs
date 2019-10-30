@@ -4,7 +4,7 @@ import Prelude
 
 import AppOperation (AppOperation(..))
 import AppOperation.UIOp (moveGraphOrigin, updateZoom)
-import AppState (AppState, _graphData, _windowBoundingRect)
+import AppState (AppState, _focusedPane, _graphData, _windowBoundingRect)
 import Core (GraphId, PageSpacePoint2D(..), GraphView, emptyPane, _panes, _boundingRect)
 import Data.Array as Array
 import Data.Int (toNumber)
@@ -34,6 +34,7 @@ insertPaneImpl graphId appState =
                                                  })
     # _windowBoundingRect .~ appState.windowBoundingRect
     # _graphData <<< _panes <<< at graphId ?~ newPane
+    # _focusedPane ?~ graphId
     # arrangePanes
 
 arrangePanes :: AppState -> AppState

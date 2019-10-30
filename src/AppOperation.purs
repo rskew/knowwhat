@@ -65,8 +65,12 @@ instance eqAppOperation :: Eq a => Eq (AppOperation a) where
 -- UndoOp DSL adding undo-redo functionality to GraphOps
 
 data UndoOpF next
+  -- For undoing/redoing actions from the UI
   = Undo GraphId next
   | Redo GraphId next
+  -- For the server to push changes to the history state to the UI
+  | ConsHistory GraphId (AppOperation Unit) next
+  | ConsUndone  GraphId (AppOperation Unit) next
   | SetHistory GraphId (Array (AppOperation Unit)) next
   | SetUndone  GraphId (Array (AppOperation Unit)) next
 
@@ -81,8 +85,10 @@ showUndoOp :: forall a. UndoOpF a -> Tuple String a
 showUndoOp = case _ of
   Undo graphId next -> Tuple ("Undo " <> show graphId) next
   Redo graphId next -> Tuple ("Redo " <> show graphId) next
+  ConsHistory graphId op next -> Tuple ("ConsHistory for graph: " <> show graphId <> " op: " <> show op) next
+  ConsUndone  graphId op next -> Tuple ("ConsUndone  for graph: " <> show graphId <> " op: " <> show op) next
   SetHistory graphId history next -> Tuple ("Set History for graph: " <> show graphId <> " to: " <> show history) next
-  SetUndone  graphId undone  next -> Tuple ("Set Undone  for graph: " <> show graphId <> " to: " <> show undone) next
+  SetUndone graphId undone next -> Tuple ("Set Undone for graph: " <> show graphId <> " to: " <> show undone) next
 
 
 ------
@@ -93,6 +99,12 @@ undo graphId = Run.lift _undoOp $ Undo graphId unit
 
 redo :: forall r. GraphId -> Run (undoOp :: UNDOOP | r) Unit
 redo graphId = Run.lift _undoOp $ Redo graphId unit
+
+consHistory :: forall r. GraphId -> AppOperation Unit -> Run (undoOp :: UNDOOP | r) Unit
+consHistory graphId op = Run.lift _undoOp $ ConsHistory graphId op unit
+
+consUndone :: forall r. GraphId -> AppOperation Unit -> Run (undoOp :: UNDOOP | r) Unit
+consUndone graphId op = Run.lift _undoOp $ ConsUndone graphId op unit
 
 setHistory :: forall r. GraphId -> Array (AppOperation Unit) -> Run (undoOp :: UNDOOP | r) Unit
 setHistory graphId history = Run.lift _undoOp $ SetHistory graphId history unit
@@ -109,6 +121,8 @@ instance decodeUndoOpF :: Decode (UndoOpF Unit) where
 data ForeignUndoOpF
   = ForeignUndo String
   | ForeignRedo String
+  | ForeignConsHistory String (AppOperation Unit)
+  | ForeignConsUndone  String (AppOperation Unit)
   | ForeignSetHistory String (Array (AppOperation Unit))
   | ForeignSetUndone  String (Array (AppOperation Unit))
 
@@ -126,6 +140,10 @@ toForeignUndoOpF = lmap (genericEncode defaultOptions) <<< case _ of
     Tuple (ForeignUndo (UUID.toString graphId)) next
   Redo graphId next ->
     Tuple (ForeignRedo (UUID.toString graphId)) next
+  ConsHistory graphId op next ->
+    Tuple (ForeignConsHistory (UUID.toString graphId) op) next
+  ConsUndone graphId op next ->
+    Tuple (ForeignConsUndone (UUID.toString graphId) op) next
   SetHistory graphId history next ->
     Tuple (ForeignSetHistory (UUID.toString graphId) history) next
   SetUndone graphId undone next ->
@@ -139,6 +157,12 @@ fromForeignUndoOpF = case _ of
   ForeignRedo graphIdStr -> do
     graphId <- parseUUIDEither graphIdStr
     pure $ Redo graphId unit
+  ForeignConsHistory graphIdStr op -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ ConsHistory graphId op unit
+  ForeignConsUndone graphIdStr op -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ ConsUndone graphId op unit
   ForeignSetHistory graphIdStr history -> do
     graphId <- parseUUIDEither graphIdStr
     pure $ SetHistory graphId history unit

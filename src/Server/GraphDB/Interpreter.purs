@@ -2,19 +2,19 @@ module Server.GraphDB.Interpreter where
 
 import Prelude
 
-import AppOperation (AppOperation(..), UndoOpF(..))
+import AppOperation (AppOperation(..), UndoOpF(..), consHistory)
 import AppOperation.GraphOp (GraphOpF(..), _graphOp, connectSubgraph, invertGraphOp, setTitleValidity)
 import AppOperation.GraphOp as GraphOp
 import AppOperation.Interpreter (collapseAppOperation)
 import AppOperation.QueryServerOp (QueryServerOpF(..))
-import AppOperation.UIOp (UIOpF(..))
+import AppOperation.UIOp (UIOpF(..), insertPane, removePane)
 import Control.Monad.Except.Trans (ExceptT(..))
 import Core (GraphId, freshNode, freshEdge)
 import Data.Array (length)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Data.Traversable (for_, sequence_)
+import Data.Traversable (foldl, for_, sequence_)
 import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
 import Effect (Effect)
@@ -28,7 +28,7 @@ import Run as Run
 import SQLite3 (DBConnection)
 import Server.Config (config)
 import Server.GraphDB.ParseRow (parseHistoryRow)
-import Server.GraphDB.Query (consHistory, consUndone, dbAction, deleteEdge, deleteNode, graphWithTitle, insertEdge, insertGraph, insertNode, lastOpFromHistory, lastOpFromUndone, loadGraphAsAppOperation, lookupRepresentativeInKnowledgeNavigator, moveNode, removeOpFromHistory, removeOpFromUndone, replaceLastOpInHistory, selectEdgesBetweenGraphs, selectEdgesBetweenNodes, selectNode, updateEdgeText, updateGraphTitle, updateNodeSubgraph, updateNodeText)
+import Server.GraphDB.Query (consHistoryDB, consUndoneDB, dbAction, deleteEdge, deleteNode, graphWithTitle, insertEdge, insertGraph, insertNode, lastOpFromHistory, lastOpFromUndone, loadGraphAsAppOperation, lookupNodesBySubgraph, lookupRepresentativeInKnowledgeNavigator, moveNode, removeOpFromHistory, removeOpFromUndone, replaceLastOpInHistory, selectEdgesBetweenGraphs, selectEdgesBetweenNodes, selectNode, updateEdgeText, updateGraphTitle, updateNodeSubgraph, updateNodeText)
 import Server.GraphDB.Schema (historyTableSchema, undoneTableSchema)
 
 interpretAppOperation :: DBConnection -> WSConnection -> AppOperation Unit -> ExceptT String Aff Unit
@@ -53,12 +53,12 @@ filteredHistoryUpdate appOp db =
       -- Empty op
       Right _ -> ExceptT $ pure $ Left "Tried to add empty operation to history"
       -- Non-empty op
-      Left opV -> opV # Run.on _graphOp (\_ -> addToHistory appOp db)
+      Left opV -> opV # Run.on _graphOp (\_ -> addToHistoryDB appOp db)
         -- If not graphOp, don't record the action
         (Run.default $ pure unit)
 
-addToHistory :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
-addToHistory appOp db =
+addToHistoryDB :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
+addToHistoryDB appOp db =
   let
     AppOperation graphId op = appOp
   in do
@@ -72,7 +72,7 @@ addToHistory appOp db =
           Console.log $ show error
           Console.log "Creating table if not exists..."
         dbAction (historyTableSchema graphId) {} db
-        consHistory appOp db
+        consHistoryDB appOp db
       -- Can read last operation from history.
       -- Check if it can be collapased with the new op before inserting
       Right lastOpRow -> do
@@ -85,7 +85,7 @@ addToHistory appOp db =
               Console.log $ show appOp
               Console.log "last operation in history:"
               Console.log $ show lastOp
-            consHistory appOp db
+            consHistoryDB appOp db
           Just collapsedOp -> do
             replaceLastOpInHistory collapsedOp db
             ExceptT $ Right <$> do
@@ -201,7 +201,22 @@ handleGraphOp db wsConn = case _ of
     pure next
 
   ConnectSubgraph nodeId old new next -> do
-    _ <- updateNodeSubgraph nodeId new db
+    result <- try $ updateNodeSubgraph nodeId new db
+    case result of
+      Left error ->
+        ExceptT $ map Right $ Console.log $ "error: " <> show error
+      Right _ -> do
+        -- Echo back the operation if successful so it can be executed on the client
+        -- and add it to both histories
+        maybeNode <- selectNode nodeId db
+        case maybeNode of
+          Nothing -> pure unit
+          Just node -> do
+            let op = AppOperation node.graphId $ connectSubgraph node new
+            _ <- try $ consHistoryDB op db
+            ExceptT $ map Right $ liftEffect do
+              sendOperation wsConn op
+              sendOperation wsConn $ AppOperation node.graphId $ consHistory node.graphId op
     pure next
 
 handleUIOp :: forall a. DBConnection -> WSConnection -> UIOpF a -> ExceptT String Aff a
@@ -241,14 +256,14 @@ handleUndoOp db wsConn = case _ of
       reversedOpRun = invertGraphOp lastOpRun
     interpretAppOperation db wsConn $ AppOperation graphId reversedOpRun
     removeOpFromHistory graphId lastOpRow db
-    result <- try $ consUndone lastOp db
+    result <- try $ consUndoneDB lastOp db
     case result of
       Left error -> do
         ExceptT $ Right <$> do
           Console.log "Error inserting op into undone table."
           Console.log "Making sure undone table exists then trying again"
         dbAction (undoneTableSchema graphId) {} db
-        consUndone lastOp db
+        consUndoneDB lastOp db
       Right _ -> pure unit
     pure next
 
@@ -260,7 +275,13 @@ handleUndoOp db wsConn = case _ of
     interpretAppOperation db wsConn lastOp
     let AppOperation graphId _ = lastOp
     removeOpFromUndone graphId lastOpRow db
-    consHistory lastOp db
+    consHistoryDB lastOp db
+    pure next
+
+  ConsHistory graphId op next ->
+    pure next
+
+  ConsUndone graphId op next ->
     pure next
 
   SetHistory graphId history next ->
@@ -281,22 +302,52 @@ serveGraph graphId db wsConn = do
 
 handleQueryServerOp :: forall a. DBConnection -> WSConnection -> QueryServerOpF a -> ExceptT String Aff a
 handleQueryServerOp db wsConn = case _ of
-   ConnectSubgraphIfTitleExists nodeId title next -> do
-     maybeGraphId <- graphWithTitle (String.trim title) db
-     maybeNode <- selectNode nodeId db
-     case do
-       graphId <- maybeGraphId
-       node <- maybeNode
-       pure $ Tuple graphId node
-     of
-       Nothing -> pure next
-       Just (Tuple graphId node) ->
-         let
-           op = AppOperation graphId $ connectSubgraph node (Just graphId)
-         in do
-           interpretAppOperation db wsConn op
-           liftEffect $ sendOperation wsConn op
-           pure next
+  ConnectSubgraphIfTitleExists nodeId title next -> do
+    maybeGraphId <- graphWithTitle (String.trim title) db
+    maybeNode <- selectNode nodeId db
+    ExceptT $ map Right do
+      Console.log "connecting subgraph"
+      Console.log $ String.trim title
+      Console.log $ show maybeGraphId
+      Console.log $ show maybeNode
+    case do
+      graphId <- maybeGraphId
+      node <- maybeNode
+      pure $ Tuple graphId node
+    of
+      Nothing -> pure next
+      Just (Tuple graphId node) ->
+        let
+          op = AppOperation node.graphId $ connectSubgraph node (Just graphId)
+          historyOp = AppOperation node.graphId $ consHistory node.graphId op
+        in do
+          interpretAppOperation db wsConn op
+          liftEffect $ sendOperation wsConn op
+          _ <- try $ consHistoryDB op db
+          liftEffect $ sendOperation wsConn historyOp
+          pure next
+
+  OpenGraphsWithSubgraph graphId next -> do
+    nodesAbove <- lookupNodesBySubgraph graphId db
+    if length nodesAbove == 0
+    then
+      pure next
+    else
+      let
+        op = AppOperation graphId do
+          removePane graphId
+          foldl bind (pure unit) $
+            nodesAbove <#> \node -> const (insertPane node.graphId)
+      in do
+        ExceptT $ map Right do
+          Console.log $ "sending op " <> show op
+        interpretAppOperation db wsConn op
+        liftEffect $ sendOperation wsConn op
+        pure next
+
+  CreateGraph graphId title next -> do
+    insertGraph graphId title db
+    pure next
 
 sendOperation :: WSConnection -> AppOperation Unit -> Effect Unit
 sendOperation wsConn op =

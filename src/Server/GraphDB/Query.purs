@@ -34,7 +34,7 @@ insertGraph graphId title db =
     queryStr = "INSERT INTO graphs (  graphid,  title ) \
                \VALUES             ( $graphid, $title );"
     params = { "$graphid" : UUID.toString graphId
-             , "$title"   : title
+             , "$title"   : String.trim title
              }
   in do
     ExceptT $ Right <$> (Console.log "inserting graph")
@@ -150,8 +150,8 @@ updateEdgeText edgeId text =
   in
     dbAction queryStr params
 
-consHistory :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
-consHistory appOp =
+consHistoryDB :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
+consHistoryDB appOp =
   let
     AppOperation graphId op = appOp
     queryStr = "INSERT INTO " <> historyTableName graphId <> " ( operation ) VALUES ( $operation );"
@@ -159,8 +159,8 @@ consHistory appOp =
   in
     dbAction queryStr params
 
-consUndone :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
-consUndone appOp =
+consUndoneDB :: AppOperation Unit -> DBConnection -> ExceptT String Aff Unit
+consUndoneDB appOp =
   let
     AppOperation graphId op = appOp
     queryStr = "INSERT INTO "<> undoneTableName graphId <> " ( operation ) VALUES ( $operation );"
@@ -316,7 +316,7 @@ graphWithTitle :: String -> DBConnection -> ExceptT String Aff (Maybe GraphId)
 graphWithTitle title db =
   let
     queryStr = "SELECT * FROM graphs WHERE title = $title;"
-    params   = { "$title" : title }
+    params   = { "$title" : String.trim title }
   in do
     rows <- dbQuery queryStr params db
     parsedRows <- ExceptT $ pure $ traverse parseGraphRow rows
@@ -336,13 +336,14 @@ selectNode nodeId db =
       [ node ] -> pure $ Just node
       _ -> pure Nothing
 
-lookupNodesBySubgraph :: GraphId -> DBConnection -> ExceptT String Aff (Array NodeRow)
-lookupNodesBySubgraph subgraphId =
+lookupNodesBySubgraph :: GraphId -> DBConnection -> ExceptT String Aff (Array Node)
+lookupNodesBySubgraph subgraphId db =
   let
     queryStr = "SELECT * FROM nodes WHERE subgraphid = $subgraphid;"
     params   = { "$subgraphid" : UUID.toString subgraphId }
-  in
-    dbQuery queryStr params
+  in do
+    rows <- dbQuery queryStr params db
+    ExceptT $ pure $ traverse parseNodeRow rows
 
 lookupRepresentativeInKnowledgeNavigator :: GraphId -> DBConnection -> ExceptT String Aff (Array Node)
 lookupRepresentativeInKnowledgeNavigator graphId db =

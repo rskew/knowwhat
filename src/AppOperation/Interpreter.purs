@@ -148,6 +148,16 @@ handleUndoOp = case _ of
           )
           next
 
+  ConsHistory graphId op next ->
+    Tuple (\appState ->
+            appState { history = Map.update (Just <<< cons op) graphId appState.history })
+          next
+
+  ConsUndone graphId op next ->
+    Tuple (\appState ->
+            appState { undone = Map.update (Just <<< cons op) graphId appState.undone })
+          next
+
   SetHistory graphId history next ->
     Tuple (_history %~ Map.insert graphId history) next
 

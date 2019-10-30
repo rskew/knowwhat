@@ -2,7 +2,7 @@ module AppOperation.QueryServerOp where
 
 import Prelude
 
-import Core (NodeId)
+import Core (GraphId, NodeId)
 import Data.Bifunctor (lmap)
 import Data.Either (Either)
 import Data.Foldable (foldl)
@@ -25,6 +25,8 @@ import Run as Run
 
 data QueryServerOpF next
   = ConnectSubgraphIfTitleExists NodeId String next
+  | OpenGraphsWithSubgraph GraphId next
+  | CreateGraph GraphId String next
 
 derive instance functorQueryServerOpF :: Functor QueryServerOpF
 
@@ -36,6 +38,8 @@ _queryServerOp = SProxy
 handleQueryServerOpOnClient :: forall a b. QueryServerOpF a -> Tuple (b -> b) a
 handleQueryServerOpOnClient = case _ of
   ConnectSubgraphIfTitleExists nodeId title next -> Tuple (identity) next
+  OpenGraphsWithSubgraph graphId next -> Tuple (identity) next
+  CreateGraph graphId title next -> Tuple (identity) next
 
 interpretQueryServerOpOnClient :: forall r a b.
                                   Run (queryServerOp :: QUERYSERVEROP | r) a -> Run r (Tuple (b -> b) a)
@@ -50,6 +54,10 @@ showQueryServerOp :: forall a. QueryServerOpF a -> Tuple String a
 showQueryServerOp = case _ of
   ConnectSubgraphIfTitleExists nodeId title next ->
     Tuple ("ConnectSubgraphIfTitleExists title: " <> title <> " nodeId: " <> show nodeId) next
+  OpenGraphsWithSubgraph graphId next ->
+    Tuple ("OpenGraphsWithSubgraph " <> show graphId) next
+  CreateGraph graphId title next ->
+    Tuple ("CreateNewGraph " <> show graphId <> " with title: " <> title) next
 
 interpretShowQueryServerOp :: forall r a. Run (queryServerOp :: QUERYSERVEROP | r) a -> Run r String
 interpretShowQueryServerOp op =
@@ -64,6 +72,12 @@ interpretShowQueryServerOp op =
 connectSubgraphIfTitleExists :: forall r. NodeId -> String -> Run (queryServerOp :: QUERYSERVEROP | r) Unit
 connectSubgraphIfTitleExists nodeId title = Run.lift _queryServerOp $ ConnectSubgraphIfTitleExists nodeId title unit
 
+openGraphsWithSubgraph :: forall r. GraphId -> Run (queryServerOp :: QUERYSERVEROP | r) Unit
+openGraphsWithSubgraph graphId = Run.lift _queryServerOp $ OpenGraphsWithSubgraph graphId unit
+
+createGraph :: forall r. GraphId -> String -> Run (queryServerOp :: QUERYSERVEROP | r) Unit
+createGraph graphId title = Run.lift _queryServerOp $ CreateGraph graphId title unit
+
 
 --------
 ---- Serialisation/deserialisation
@@ -73,6 +87,8 @@ instance decodeQueryServerOpF :: Decode (QueryServerOpF Unit) where
 
 data ForeignQueryServerOpF
   = ForeignConnectSubgraphIfTitleExists String String
+  | ForeignOpenGraphsWithSubgraph String
+  | ForeignCreateGraph String String
 
 derive instance genericForeignQueryServerOpF :: Generic ForeignQueryServerOpF _
 
@@ -86,12 +102,22 @@ toForeignQueryServerOpF :: forall a. QueryServerOpF a -> Tuple Foreign a
 toForeignQueryServerOpF = lmap (genericEncode defaultOptions) <<< case _ of
   ConnectSubgraphIfTitleExists nodeId title next ->
     Tuple (ForeignConnectSubgraphIfTitleExists (UUID.toString nodeId) title) next
+  OpenGraphsWithSubgraph graphId next ->
+    Tuple (ForeignOpenGraphsWithSubgraph (UUID.toString graphId)) next
+  CreateGraph graphId title next ->
+    Tuple (ForeignCreateGraph (UUID.toString graphId) title) next
 
 fromForeignQueryServerOpF :: ForeignQueryServerOpF -> Either String (QueryServerOpF Unit)
 fromForeignQueryServerOpF = case _ of
   ForeignConnectSubgraphIfTitleExists nodeIdStr title -> do
     nodeId <- parseUUIDEither nodeIdStr
     pure $ ConnectSubgraphIfTitleExists nodeId title unit
+  ForeignOpenGraphsWithSubgraph graphIdStr -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ OpenGraphsWithSubgraph graphId unit
+  ForeignCreateGraph graphIdStr title -> do
+    graphId <- parseUUIDEither graphIdStr
+    pure $ CreateGraph graphId title unit
 
 newtype ForeignQueryServerOp = ForeignQueryServerOp (Run (queryServerOp :: QUERYSERVEROP) Unit)
 
