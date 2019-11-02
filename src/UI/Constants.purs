@@ -32,7 +32,7 @@ maxTextFieldShape :: Shape
 maxTextFieldShape = { width : 700.0, height : 500.0 }
 
 paneDividerWidth :: Number -- px
-paneDividerWidth = 20.0
+paneDividerWidth = 0.0--20.0
 
 defaultTitleShape :: Shape
 defaultTitleShape = { width : 200.0, height : 100.0 }

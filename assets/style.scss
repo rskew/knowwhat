@@ -1,13 +1,34 @@
 :root {
-  --node-color: #000000;
-  --node-border-color: #00000033;
-  --focused-color: #ffcc00;
-  --highlighted-color: #0088ffbb;
-  --invalid-color: #ff6666bb;
-  --text-field-border-color: #aaaaaacc;
-  --text-field-background-color: #ffffffbb;
-  --edge-color: #666666;
-  --transparent-white-color: #ffffff00;
+    --pane-border-width: 4px;
+
+    // TODO: make this switchable once there's the semblance of a menu
+    // light mode
+    //--svg-background-color: #ffffff;
+    //--node-color: #000000;
+    //--node-border-color: #00000033;
+    //--focused-color: #ffcc00;
+    //--highlighted-color: #0088ffbb;
+    //--invalid-color: #ff6666bb;
+    //--text-field-border-color: #aaaaaacc;
+    //--text-field-background-color: #ffffffbb;
+    //--edge-color: #666666;
+    //--transparent-white-color: #ffffff00;
+    //--text-color: #000000;
+
+    // dark mode
+    --svg-background-color: #000000;
+    --node-color: #ffffff;
+    --node-border-color: #ffffff33;
+    --focused-color: #ffcc00;
+    --highlighted-color: #0088ffbb;
+    --invalid-color: #ff6666bb;
+    --text-field-border-color: #aaaaaacc;
+    --text-field-background-color: #1a1a1abb;
+    --background-color: #1a1a1a;
+    --edge-color: #ffffff;
+    --transparent-white-color: #ffffff00;
+    --text-color: #ffffff;
+    --divider-color: #444444;
 }
 
 html {
@@ -29,24 +50,34 @@ input {
 .panes {
     height: 100%;
     width: 100%;
-    background-color: var(--text-field-border-color);
     display: block;
+    background-color: var(--divider-color);
 }
 
 .pane {
-    background-color: white;
     position: absolute;
-    border: 2px solid white;
+    border: var(--pane-border-width) solid white;
+    background-color: var(--background-color);
+    box-sizing: border-box;
 }
 
 .pane.focused {
-    border: 2px solid var(--focused-color);
+    border: var(--pane-border-width) solid var(--focused-color);
 }
 
 svg {
-    z-index: -1;
+    //z-index: -1;
     height: 100%;
     width: 100%;
+    //background-color: var(--svg-background-color);
+    // To center in the pane:
+    display: block;
+    margin: auto;
+    position: relative;
+    top: 50%;
+    -webkit-transform: translateY(-50%);
+    -ms-transform: translateY(-50%);
+    transform: translateY(-50%);
 }
 
 .nonsvg {
@@ -68,6 +99,7 @@ svg {
     white-space: pre;
     font-family: monospace;
     background-color: var(--text-field-background-color);
+    color: var(--text-color);
 }
 
 foreignObject {
@@ -172,4 +204,8 @@ foreignObject {
 
 .drawingEdge {
     pointer-events: none;
+}
+
+marker {
+    fill: #ffffff;
 }
