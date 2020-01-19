@@ -1,3 +1,4 @@
+-- | QueryServerOp DSL for asking the server/database questions from the client
 module AppOperation.QueryServerOp where
 
 import Prelude
@@ -19,9 +20,6 @@ import Foreign.Utils (parseUUIDEither, toExceptT)
 import Run (Run, FProxy, Step(..))
 import Run as Run
 
-
-------
--- QueryServerOp DSL for asking the server/database questions from the client
 
 data QueryServerOpF next
   = ConnectSubgraphIfTitleExists NodeId String next

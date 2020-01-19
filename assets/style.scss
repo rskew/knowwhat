@@ -4,31 +4,33 @@
     // TODO: make this switchable once there's the semblance of a menu
     // light mode
     //--svg-background-color: #ffffff;
-    //--node-color: #000000;
-    //--node-border-color: #00000033;
-    //--focused-color: #ffcc00;
-    //--highlighted-color: #0088ffbb;
-    //--invalid-color: #ff6666bb;
-    //--text-field-border-color: #aaaaaacc;
-    //--text-field-background-color: #ffffffbb;
-    //--edge-color: #666666;
-    //--transparent-white-color: #ffffff00;
-    //--text-color: #000000;
-
-    // dark mode
-    --svg-background-color: #000000;
-    --node-color: #ffffff;
-    --node-border-color: #ffffff33;
+    --node-color: #000000;
+    --node-border-color: #00000033;
     --focused-color: #ffcc00;
     --highlighted-color: #0088ffbb;
     --invalid-color: #ff6666bb;
     --text-field-border-color: #aaaaaacc;
-    --text-field-background-color: #1a1a1abb;
-    --background-color: #1a1a1a;
-    --edge-color: #ffffff;
+    --text-field-background-color: #ffffffbb;
+    --background-color: #ffffff;
+    --edge-color: #666666;
     --transparent-white-color: #ffffff00;
-    --text-color: #ffffff;
+    --text-color: #000000;
     --divider-color: #444444;
+
+    // dark mode
+    //--svg-background-color: #000000;
+    //--node-color: #ffffff;
+    //--node-border-color: #ffffff33;
+    //--focused-color: #ffcc00;
+    //--highlighted-color: #0088ffbb;
+    //--invalid-color: #ff6666bb;
+    //--text-field-border-color: #aaaaaacc;
+    //--text-field-background-color: #1a1a1abb;
+    //--background-color: #1a1a1a;
+    //--edge-color: #ffffff;
+    //--transparent-white-color: #ffffff00;
+    //--text-color: #ffffff;
+    //--divider-color: #444444;
 }
 
 html {

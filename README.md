@@ -22,6 +22,13 @@ yarn dev        # run development server
 yarn build      # build production assets
 ```
 
+### Run the server
+
+```sh
+cd dist
+node ../server/main.js
+```
+
 ## Development
 
 We use [spago](https://github.com/spacchetti/spago) to manage our Purescript dependencies.

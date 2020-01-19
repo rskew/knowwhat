@@ -52,13 +52,16 @@ type EdgeRow
 edgesTableSchema :: String
 edgesTableSchema = """
 CREATE TABLE IF NOT EXISTS edges (
+  id            INTEGER PRIMARY KEY NOT NULL, -- ID
   sourcenodeid  TEXT NOT NULL, -- UUID
   sourcegraphid TEXT NOT NULL, -- UUID
   targetnodeid  TEXT NOT NULL, -- UUID
   targetgraphid TEXT NOT NULL, -- UUID
   edgetext      TEXT NOT NULL,
   FOREIGN KEY(sourcenodeid) REFERENCES nodes(nodeid),
+  FOREIGN KEY(sourcegraphid) REFERENCES graphs(graphid),
   FOREIGN KEY(targetnodeid) REFERENCES nodes(nodeid)
+  FOREIGN KEY(targetgraphid) REFERENCES graphs(graphid),
 );
 """
 
@@ -80,5 +83,30 @@ undoneTableSchema graphId = "\
 \CREATE TABLE IF NOT EXISTS \"undone_" <> UUID.toString graphId <> "\"" <> """ (
   historyindex INTEGER PRIMARY KEY,
   operation    TEXT NOT NULL -- AppOperation Unit
+);
+"""
+
+type mappingEdgesRow
+  = { sourceedgeid  :: String
+    , sourcegraphid :: String
+    , targetedgeid  :: String
+    , targetgraphid :: String
+    , edgetext      :: String
+    }
+
+mappingEdgesTableSchema :: String
+
+edgesTableSchema :: String
+edgesTableSchema = """
+CREATE TABLE IF NOT EXISTS mappingedges (
+  sourceedgeid  INTEGER NOT NULL, -- edge ID
+  sourcegraphid TEXT NOT NULL, -- UUID
+  targetedgeid  INTEGER NOT NULL, -- edge ID
+  targetgraphid TEXT NOT NULL, -- UUID
+  edgetext      TEXT NOT NULL,
+  FOREIGN KEY(sourceedgeid) REFERENCES edges(id),
+  FOREIGN KEY(sourcegraphid) REFERENCES graphs(graphid),
+  FOREIGN KEY(targetedgeid) REFERENCES edges(id)
+  FOREIGN KEY(targetgraphid) REFERENCES graphs(graphid),
 );
 """

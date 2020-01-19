@@ -1,3 +1,4 @@
+-- | GraphOp DSL for making UI interactions undoable and streamable
 module AppOperation.GraphOp where
 
 import Prelude
@@ -24,9 +25,9 @@ import Run (Run, FProxy, Step(..))
 import Run as Run
 
 
-------
--- GraphOp DSL for making UI interactions undoable and streamable
-
+-- | A graph operation is represented as the graph it operates on, the node or
+-- | edge it operates on, and the before and after state of the field it operates
+-- | on. This allows any operation to be undone.
 data GraphOpF next
 --  Op name        | target graph | target node/edge | pre-op state       | post-op state      | next
   = InsertNode       GraphId        NodeId                                                       next

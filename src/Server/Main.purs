@@ -5,6 +5,7 @@ import Prelude
 import Effect (Effect)
 import Effect.Aff (launchAff)
 import Effect.Class (liftEffect)
+import Effect.Class.Console as Console
 import Server.Config (config)
 import Server.FileServer (startFileServer)
 import Server.WebSocketServer (startWebSocketServer)

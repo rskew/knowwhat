@@ -1,3 +1,4 @@
+-- | UIOp DSL for UI interactions that are not undoable, but are streamable
 module AppOperation.UIOp where
 
 import Prelude
@@ -21,9 +22,6 @@ import Run (Run, FProxy)
 import Run as Run
 import Web.HTML.HTMLElement as WHE
 
-
-------
--- UIOp DSL for UI interactions that are not undoable, but are streamable
 
 data UIOpF next
   = MoveGraphOrigin GraphId PageSpacePoint2D next
