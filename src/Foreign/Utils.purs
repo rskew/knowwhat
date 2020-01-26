@@ -3,7 +3,6 @@ module Foreign.Utils where
 import Prelude
 
 import Control.Monad.Except.Trans (ExceptT, except, withExceptT)
-import Core (EdgeId)
 import Data.Array ((!!))
 import Data.Either (Either, note)
 import Data.Identity (Identity)
@@ -18,6 +17,7 @@ import Data.UUID as UUID
 import Foreign (ForeignError(..), MultipleErrors, renderForeignError)
 import Foreign.Object (Object)
 import Foreign.Object as Object
+import Graph (EdgeMetadata)
 
 
 toForeignMap :: forall a b c. (a -> b) -> (c -> String) -> Map c a -> Object b
@@ -51,29 +51,25 @@ toExceptT = except >>> withExceptT (singleton <<< ForeignError)
 parseUUIDEither :: String -> Either String UUID
 parseUUIDEither = parseUUID >>> note "failed to convert UUID from foreign"
 
-edgeIdToString :: EdgeId -> String
-edgeIdToString edgeId = UUID.toString edgeId.source
+edgeMetadataToString :: EdgeMetadata -> String
+edgeMetadataToString edgeMetadata = UUID.toString edgeMetadata.id
                         <> " "
-                        <> UUID.toString edgeId.sourceGraph
+                        <> UUID.toString edgeMetadata.source
                         <> " "
-                        <> UUID.toString edgeId.target
-                        <> " "
-                        <> UUID.toString edgeId.targetGraph
+                        <> UUID.toString edgeMetadata.target
 
-parseEdgeIdEither :: String -> Either String EdgeId
-parseEdgeIdEither edgeIdStr =
+parseEdgeMetadataEither :: String -> Either String EdgeMetadata
+parseEdgeMetadataEither edgeMetadataStr =
   let
-    edgeIdStrs = split (Pattern " ") edgeIdStr
+    edgeMetadataStrs = split (Pattern " ") edgeMetadataStr
   in
   note "Failed to parse EdgeId" do
-    sourceId      <- edgeIdStrs !! 0 >>= parseUUID
-    sourceGraphId <- edgeIdStrs !! 1 >>= parseUUID
-    targetId      <- edgeIdStrs !! 2 >>= parseUUID
-    targetGraphId <- edgeIdStrs !! 3 >>= parseUUID
-    pure { source : sourceId
+    edgeMetadata        <- edgeMetadataStrs !! 0 >>= parseUUID
+    sourceId      <- edgeMetadataStrs !! 0 >>= parseUUID
+    targetId      <- edgeMetadataStrs !! 2 >>= parseUUID
+    pure { id     : edgeMetadata
+         , source : sourceId
          , target : targetId
-         , sourceGraph : sourceGraphId
-         , targetGraph : targetGraphId
          }
 
 showForeignError :: MultipleErrors -> String

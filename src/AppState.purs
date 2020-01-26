@@ -2,8 +2,7 @@ module AppState where
 
 import Prelude
 
-import AppOperation (AppOperation)
-import Core (GraphData, Edge, GraphId, NodeId, EdgeId, PageSpacePoint2D, GraphSpacePoint2D(..), Focus, GraphView, Point2D, emptyGraphData)
+--import AppOperation (AppOperation)
 import Data.Lens (Lens', Traversal', lens, traversed)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
@@ -11,6 +10,8 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Symbol (SProxy(..))
+import Graph (Edge, EdgeId, Graph, GraphId, GraphSpacePoint2D(..), GraphView, NodeId, PageSpacePoint2D, Point2D, Mapping, emptyGraph, emptyPane)
+import GraphOperation
 import Web.HTML.HTMLElement as WHE
 
 
@@ -21,44 +22,79 @@ appStateVersion = "0.0.0.0.0.0.0.1"
 -- Types
 
 type KeyHoldState
-  = { spaceDown :: Boolean }
+  = { spaceDown :: Boolean
+    }
 
-type AppState =
-  { graphData          :: GraphData
-  , history            :: Map GraphId (Array (AppOperation Unit))
-  , undone             :: Map GraphId (Array (AppOperation Unit))
-  , windowBoundingRect :: WHE.DOMRect
-  , drawingEdges       :: Map DrawingEdgeId DrawingEdge
-  , hoveredElementId   :: Maybe HoveredElementId
-  , focusedPane        :: Maybe GraphId
-  , keyHoldState       :: KeyHoldState
-  }
+type GraphState
+  = { graph :: Graph
+    , view :: GraphView
+    , history :: Array GraphUpdate
+    , undone :: Array GraphUpdate
+    }
+
+emptyGraphState :: GraphId -> GraphState
+emptyGraphState graphId = { graph : emptyGraph graphId
+                          , view : emptyPane graphId
+                          , history : []
+                          , undone : []
+                          }
+
+type MappingState
+  = { mapping :: Mapping
+    , history :: Array GraphUpdate
+    , undone  :: Array GraphUpdate
+    }
+
+-- | A selection of graphs and mappings from the larger megagraph.
+-- | A megagraph is a collection of graphs and mappings between graphs
+-- | where each node has a subgraph and each edge has a submapping.
+-- | A mapping is a set of mappingEdges from nodes to nodes and edges to edges.
+-- | The UI represents a sub-megagraph, where there is only a single mapping
+-- | between any pairs of graphs. This is a view on a larger megagraph.
+type SubMegagraphState
+  = { graphs :: Map GraphId GraphState
+    , mappingsSourceTarget :: Map GraphId (Map GraphId MappingState)
+    }
+
+emptySubMegagraph :: SubMegagraphState
+emptySubMegagraph = { graphs : Map.empty
+                    , mappingsSourceTarget : Map.empty
+                    }
+
+type AppState
+  = { subMegagraph         :: SubMegagraphState
+    , windowBoundingRect   :: WHE.DOMRect
+    , drawingEdges         :: Map DrawingEdgeId DrawingEdge
+    , hoveredElementId     :: Maybe HoveredElementId
+    , focusedPane          :: Maybe GraphId
+    , keyHoldState         :: KeyHoldState
+    }
 
 emptyAppState :: AppState
 emptyAppState =
-  { graphData          : emptyGraphData
-  , history            : Map.empty
-  , undone             : Map.empty
-  , windowBoundingRect : { height : 0.0, width : 0.0, left : 0.0, right : 0.0, top : 0.0, bottom : 0.0 }
-  , drawingEdges       : Map.empty
-  , hoveredElementId   : Nothing
-  , focusedPane        : Nothing
-  , keyHoldState       : { spaceDown : false }
+  { subMegagraph         : emptySubMegagraph
+  , windowBoundingRect   : { height : 0.0, width : 0.0, left : 0.0, right : 0.0, top : 0.0, bottom : 0.0 }
+  , drawingEdges         : Map.empty
+  , hoveredElementId     : Nothing
+  , focusedPane          : Nothing
+  , keyHoldState         : { spaceDown : false }
   }
 
-type Shape = { width :: Number
-             , height :: Number
-             }
+type Shape
+  = { width :: Number
+    , height :: Number
+    }
 
 edgeIdStr :: Edge -> String
-edgeIdStr edge = show edge.id.source <> "_" <> show edge.id.target
+edgeIdStr edge = show edge.source <> "_" <> show edge.target
 
-type DrawingEdge = { source         :: NodeId
-                   , sourcePosition :: PageSpacePoint2D
-                   , sourceGraph    :: GraphId
-                   , pointPosition  :: PageSpacePoint2D
-                   , targetGraph    :: GraphId
-                   }
+type DrawingEdge
+  = { source         :: NodeId
+    , sourcePosition :: PageSpacePoint2D
+    , sourceGraph    :: GraphId
+    , pointPosition  :: PageSpacePoint2D
+    , targetGraph    :: GraphId
+    }
 
 type DrawingEdgeId = NodeId
 
@@ -95,17 +131,17 @@ instance showHoveredElementId :: Show HoveredElementId where
 ------
 -- Lenses
 
-_graphView :: GraphId -> Lens' AppState (Maybe GraphView)
-_graphView graphId =
-  prop (SProxy :: SProxy "graphData")
-  <<< prop (SProxy :: SProxy "panes")
-  <<< at graphId
+--_graphView :: GraphId -> Lens' AppState (Maybe GraphView)
+--_graphView graphId =
+--  prop (SProxy :: SProxy "graphData")
+--  <<< prop (SProxy :: SProxy "panes")
+--  <<< at graphId
 
-_focus :: GraphId -> Traversal' AppState (Maybe Focus)
-_focus graphId =
-  _graphView graphId
-  <<< traversed
-  <<< prop (SProxy :: SProxy "focus")
+--_focus :: GraphId -> Traversal' AppState (Maybe Focus)
+--_focus graphId =
+--  _graphView graphId
+--  <<< traversed
+--  <<< prop (SProxy :: SProxy "focus")
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
 _drawingEdges = prop (SProxy :: SProxy "drawingEdges")
@@ -118,8 +154,23 @@ _drawingEdgeTargetGraph :: DrawingEdgeId -> Traversal' AppState GraphId
 _drawingEdgeTargetGraph drawingEdgeId =
   _drawingEdges <<< at drawingEdgeId <<< traversed <<< prop (SProxy :: SProxy "targetGraph")
 
-_graphData :: Lens' AppState GraphData
-_graphData = prop (SProxy :: SProxy "graphData")
+_graphState :: GraphId -> Lens' AppState (Maybe GraphState)
+_graphState graphId =
+  prop (SProxy :: SProxy "subMegagraph")
+  <<< prop (SProxy :: SProxy "graphs")
+  <<< at graphId
+
+_mappingState :: MappingId -> Lens' AppState (Maybe MappingState)
+_mappingState mappingId =
+  prop (SProxy :: SProxy "subMegagraph")
+  <<< prop (SProxy :: SProxy "mappingsSourceTarget")
+  <<< at mappingId
+
+_mapping :: Lens' MappingState Mapping
+_mapping = prop (SProxy :: SProxy "mapping")
+
+_graph :: Lens' GraphState Graph
+_graph = prop (SProxy :: SProxy "graph")
 
 _windowBoundingRect :: Lens' AppState WHE.DOMRect
 _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")
@@ -127,11 +178,11 @@ _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePoint2D
 _coerceToGraphSpace = lens GraphSpacePoint2D (\_ (GraphSpacePoint2D pos) -> pos)
 
-_history :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
-_history = prop (SProxy :: SProxy "history")
-
-_undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
-_undone = prop (SProxy :: SProxy "undone")
+--_history :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
+--_history = prop (SProxy :: SProxy "history")
+--
+--_undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
+--_undone = prop (SProxy :: SProxy "undone")
 
 _focusedPane :: Lens' AppState (Maybe GraphId)
 _focusedPane = prop (SProxy :: SProxy "focusedPane")

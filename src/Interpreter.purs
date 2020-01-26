@@ -1,4 +1,5 @@
-module AppOperation.Interpreter where
+-- | Purescript data structure implementation
+module Interpreter where
 
 import Prelude
 
@@ -6,8 +7,8 @@ import AppOperation (AppOperation(..), UndoOpF(..), _undoOp, UNDOOP)
 import AppOperation.GraphOp (_graphOp, collapseGraphOpF, encodeGraphDataAsGraphOp, interpretGraphOp, invertGraphOp)
 import AppOperation.QueryServerOp (interpretQueryServerOpOnClient)
 import AppOperation.UIOp (UIOpF(..), _uiOp, UIOP)
-import AppState (AppState, _graphData, _history, _undone)
-import Core (GraphId, _origin, _pane, _panes, _zoom, _title, selectGraphData)
+import AppState (AppState, _graphState, _mappingState)
+import Graph (GraphId)
 import Data.Array (cons, uncons)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
@@ -20,6 +21,66 @@ import Data.Tuple (Tuple(..), fst)
 import Run (Run, Step(..))
 import Run as Run
 import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
+
+-- TODO
+-- make UIOperation interface, just constructors for (Array GraphOperation, HistoryUpdate GraphOperation, HistoryUpdate GraphOperation)
+-- interpret UIOperation
+-- make it compile (comment out GraphComponent)
+-- use new UIOperation from GraphComponent
+-- QueryServerOps as top-level UI queries, in GraphComponent Action
+-- - likewise pane ops
+
+
+interpretGraphOperation :: GraphOperation -> (SubMegagraph -> SubMegagraph)
+interpretGraphOperation = case _ of
+  InsertNode graphId nodeId ->
+    _graphState graphId <<< _graph %~ insertNewNode nodeId
+
+  DeleteNode graphId nodeId ->
+    _graphState graphId <<< _graph %~ deleteNode nodeId
+
+  InsertEdge graphId edgeMetadata ->
+    _graphState graphId <<< _graph %~ insertNewEdge edgeMetadata
+
+  DeleteEdge graphId edgeMetadata ->
+    _graphState graphId <<< _graph %~ deleteEdge edgeMetadata
+
+  MoveNode graphId nodeId from to ->
+    _graphState graphId <<< _graph %~ moveNode nodeId to
+
+  UpdateNodeText graphId nodeId from to ->
+    _graphState graphId <<< _graph %~ updateNodeText nodeId to
+
+  UpdateEdgeText graphId edgeMetadata from to ->
+    _graphState graphId <<< _graph %~ updateEdgeText edgeMetadata to
+
+  UpdateTitle graphId from to ->
+    _graphState graphId <<< _graph %~ updateTitle to
+
+  SetTitleValidity graphId validity ->
+    _graphState graphId <<< _graph %~ setTitleValidity validity
+
+  ConnectSubgraph graphId nodeId old new ->
+    _graphState graphId <<< _graph %~ connectSubgraph graphId nodeId new
+
+  InsertPathEquation graphId pathEquation ->
+    _graphState graphId <<< _graph %~ insertPathEquation pathEquation
+
+  DeletePathEquation graphId pathEquation
+    _graphState graphId <<< _graph %~ deletePathEquation pathEquation
+
+  InsertNodeMappingEdge mappingId sourceGraph targetGraph sourceNode targetNode ->
+    _mappingState mappingId <<< _mapping %~ insertNodeMappingEdge sourceNode targetNode
+
+  DeleteNodeMappingEdge mappingId sourceGraph targetGraph sourceNode targetNode ->
+    _mappingState mappingId <<< _mapping %~ deleteNodeMappingEdge sourceNode targetNode
+
+  InsertEdgeMappingEdge mappingId sourceGraph targetGraph sourceEdge targetEdge ->
+    _mappingState mappingId <<< _mapping %~ insertMappingEdge sourceEdge targetEdge
+
+  DeleteEdgeMappingEdge mappingId sourceGraph targetGraph sourceEdge targetEdge ->
+    _mappingState mappingId <<< _mapping %~ deleteEdgeMappingEdge sourceEdge targetEdge
+
 
 -- | Interpret the operation and push it onto the history stack
 doAppOperation :: AppOperation Unit -> AppState -> AppState
