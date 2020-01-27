@@ -22,64 +22,67 @@ import Run (Run, Step(..))
 import Run as Run
 import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
 
--- TODO
--- make UIOperation interface, just constructors for (Array GraphOperation, HistoryUpdate GraphOperation, HistoryUpdate GraphOperation)
--- interpret UIOperation
--- make it compile (comment out GraphComponent)
--- use new UIOperation from GraphComponent
--- QueryServerOps as top-level UI queries, in GraphComponent Action
--- - likewise pane ops
 
 
-interpretGraphOperation :: GraphOperation -> (SubMegagraph -> SubMegagraph)
+interpretGraphOperation :: GraphOperation -> SubMegagraph -> SubMegagraph
 interpretGraphOperation = case _ of
-  InsertNode graphId nodeId ->
-    _graphState graphId <<< _graph %~ insertNewNode nodeId
+  InsertNode nodeId ->                   insertNewNode nodeId
+  DeleteNode nodeId ->                   deleteNode nodeId
+  InsertEdge edgeMetadata ->             insertNewEdge edgeMetadata
+  DeleteEdge edgeMetadata ->             deleteEdge edgeMetadata
+  MoveNode nodeId from to ->             moveNode nodeId to
+  UpdateNodeText nodeId from to ->       updateNodeText nodeId to
+  UpdateEdgeText edgeMetadata from to -> updateEdgeText edgeMetadata to
+  UpdateTitle from to ->                 updateTitle to
+  SetTitleValidity validity ->           setTitleValidity validity
+  ConnectSubgraph nodeId old new ->      connectSubgraph graphId nodeId new
 
-  DeleteNode graphId nodeId ->
-    _graphState graphId <<< _graph %~ deleteNode nodeId
+interpretEquationOperation :: EquationOperation -> SubMegagraph -> SubMegagraph
+interpretEquationOperation = case _ of
+  InsertPathEquation pathEquation -> insertPathEquation pathEquation
+  DeletePathEquation pathEquation -> deletePathEquation pathEquation
 
-  InsertEdge graphId edgeMetadata ->
-    _graphState graphId <<< _graph %~ insertNewEdge edgeMetadata
+interpretMappingOperation :: MappingOperation -> SubMegagraph -> SubMegagraph
+interpretMappingOperation = case _ of
+  InsertNodeMappingEdge sourceGraph targetGraph sourceNode targetNode ->
+    insertNodeMappingEdge sourceNode targetNode
+  DeleteNodeMappingEdge sourceGraph targetGraph sourceNode targetNode ->
+    deleteNodeMappingEdge sourceNode targetNode
+  InsertEdgeMappingEdge sourceGraph targetGraph sourceEdge targetEdge ->
+    insertMappingEdge sourceEdge targetEdge
+  DeleteEdgeMappingEdge sourceGraph targetGraph sourceEdge targetEdge ->
+    deleteEdgeMappingEdge sourceEdge targetEdge
 
-  DeleteEdge graphId edgeMetadata ->
-    _graphState graphId <<< _graph %~ deleteEdge edgeMetadata
+interpretSubMegagraphOperation :: SubMegagraphOperation -> SubMegagraph -> SubMegagraph
+interpretSubMegagraphOperation = case _ of
+  SubGraphOperation graphId graphOp ->
+    _graphState graphId <<< _graph %~ interpretGraphOperation graphOp
+  SubGraphEquationOperation graphId equationOp
+    _graphState graphId <<< _graph %~ interpretEquationOperation equationOp
+  SubMappingOperation mappingId mappingOp ->
+    _mappingState mappingId <<< _mapping %~ interpretMappingOperation mappingOp
 
-  MoveNode graphId nodeId from to ->
-    _graphState graphId <<< _graph %~ moveNode nodeId to
-
-  UpdateNodeText graphId nodeId from to ->
-    _graphState graphId <<< _graph %~ updateNodeText nodeId to
-
-  UpdateEdgeText graphId edgeMetadata from to ->
-    _graphState graphId <<< _graph %~ updateEdgeText edgeMetadata to
-
-  UpdateTitle graphId from to ->
-    _graphState graphId <<< _graph %~ updateTitle to
-
-  SetTitleValidity graphId validity ->
-    _graphState graphId <<< _graph %~ setTitleValidity validity
-
-  ConnectSubgraph graphId nodeId old new ->
-    _graphState graphId <<< _graph %~ connectSubgraph graphId nodeId new
-
-  InsertPathEquation graphId pathEquation ->
-    _graphState graphId <<< _graph %~ insertPathEquation pathEquation
-
-  DeletePathEquation graphId pathEquation
-    _graphState graphId <<< _graph %~ deletePathEquation pathEquation
-
-  InsertNodeMappingEdge mappingId sourceGraph targetGraph sourceNode targetNode ->
-    _mappingState mappingId <<< _mapping %~ insertNodeMappingEdge sourceNode targetNode
-
-  DeleteNodeMappingEdge mappingId sourceGraph targetGraph sourceNode targetNode ->
-    _mappingState mappingId <<< _mapping %~ deleteNodeMappingEdge sourceNode targetNode
-
-  InsertEdgeMappingEdge mappingId sourceGraph targetGraph sourceEdge targetEdge ->
-    _mappingState mappingId <<< _mapping %~ insertMappingEdge sourceEdge targetEdge
-
-  DeleteEdgeMappingEdge mappingId sourceGraph targetGraph sourceEdge targetEdge ->
-    _mappingState mappingId <<< _mapping %~ deleteEdgeMappingEdge sourceEdge targetEdge
+interpretUIOperation :: UIOperation -> SubMegagraph -> SubMegagraph
+interpretUIOperation {op, target, historyUpdate, undoneUpdate} subMegagraph =
+  let
+    applySubMegagraphUpdate = \op' subMegagraph' -> foldl (flip interpretSubMegagraphOperation) subMegagraph' op'
+    historyUpdater = case _ of
+      Insert -> Array.cons op
+      Pop -> Array.drop 1
+      NoOp -> id
+    updateComponentHistory target' = case target' of
+      GraphComponent graphId ->
+        (_graphState graphId <<< traverse <<< prop (SProxy :: SProxy "history") %~ historyUpdater)
+        >>>
+        (_graphState graphId <<< traverse <<< prop (SProxy :: SProxy "undone") %~ historyUpdater)
+      MappingComponent mappingId ->
+        (_mappingState mappingId <<< traverse <<< prop (SProxy :: SProxy "history" %~ historyUpdater))
+        >>>
+        (_mappingState mappingId <<< traverse <<< prop (SProxy :: SProxy "undone" %~ historyUpdater))
+  in
+    subMegagraph
+    # applySubMegagraphUpdate op
+    # updateComponentHistory target
 
 
 -- | Interpret the operation and push it onto the history stack

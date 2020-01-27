@@ -725,9 +725,7 @@ handleAction = case _ of
     let
       newNode = freshNode pane.graphId newNodeId
       newNodePosition = mouseEventPosition mouseEvent
-      newNodeGraphSpacePos =
-        newNodePosition
-        # toGraphSpace pane
+      newNodeGraphSpacePos = toGraphSpace pane newNodePosition
       op = AppOperation pane.graphId do
         insertNode pane.graphId newNodeId
         moveNode newNode newNodeGraphSpacePos

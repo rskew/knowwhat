@@ -28,8 +28,8 @@ type KeyHoldState
 type GraphState
   = { graph :: Graph
     , view :: GraphView
-    , history :: Array GraphUpdate
-    , undone :: Array GraphUpdate
+    , history :: Array SubMegagraphUpdate
+    , undone :: Array SubMegagraphUpdate
     }
 
 emptyGraphState :: GraphId -> GraphState
@@ -41,8 +41,8 @@ emptyGraphState graphId = { graph : emptyGraph graphId
 
 type MappingState
   = { mapping :: Mapping
-    , history :: Array GraphUpdate
-    , undone  :: Array GraphUpdate
+    , history :: Array SubMegagraphUpdate
+    , undone  :: Array SubMegagraphUpdate
     }
 
 -- | A selection of graphs and mappings from the larger megagraph.

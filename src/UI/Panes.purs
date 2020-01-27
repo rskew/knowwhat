@@ -5,7 +5,7 @@ import Prelude
 import AppOperation (AppOperation(..))
 import AppOperation.UIOp (moveGraphOrigin, updateZoom)
 import AppState (AppState, _focusedPane, _graphData, _windowBoundingRect)
-import Core (GraphId, PageSpacePoint2D(..), GraphView, emptyPane, _panes, _boundingRect)
+import Graph (GraphId, PageSpacePoint2D(..), GraphView, emptyPane, _panes, _boundingRect)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Lens ((?~), (.~), traversed, (%~))

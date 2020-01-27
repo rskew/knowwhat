@@ -1,7 +1,7 @@
 module UI.Constants where
 
 import AppState (Shape)
-import Core (Point2D)
+import Graph (Point2D)
 import Prelude
 
 nodeRadius :: Number
