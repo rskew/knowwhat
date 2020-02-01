@@ -2,221 +2,102 @@ module AppOperation where
 
 import Prelude
 
-import AppOperation.GraphOp (GRAPHOP, GraphOpF, _graphOp, encodeGraphDataAsGraphOp, showGraphOp, toForeignGraphOpF)
-import AppOperation.UIOp (UIOP, UIOpF, _uiOp, encodeGraphViewsAsUIOp, showUIOp, toForeignUIOpF)
-import AppOperation.QueryServerOp (QueryServerOpF, QUERYSERVEROP, _queryServerOp, showQueryServerOp, toForeignQueryServerOpF)
-import Control.Alt ((<|>))
-import Control.Monad.Except (except)
-import Core (GraphId, GraphData)
-import Data.Bifunctor (lmap)
-import Data.Either (Either)
+import AppState (GraphState, MappingState, MegagraphState)
+import Data.Array as Array
 import Data.Generic.Rep (class Generic)
-import Data.List.NonEmpty (singleton)
-import Data.Traversable (traverse, foldl)
-import Data.Tuple (Tuple(..))
-import Data.Symbol (SProxy(..))
-import Data.UUID as UUID
-import Foreign (Foreign, ForeignError(..))
-import Foreign.Class (class Encode, encode, class Decode, decode)
+import Data.Map as Map
+import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Foreign.Utils (parseUUIDEither, toExceptT)
-import Foreign as Foreign
-import Run (Run, FProxy, Step(..))
-import Run as Run
+import Megagraph (GraphId, MappingId)
+import MegagraphOperation (MegagraphUpdate, encodeGraphAsMegagraphUpdate, encodeMappingAsMegagraphUpdate)
 
 
-appOperationVersion :: String
-appOperationVersion = "0.0.0.0.0.1"
+data MegagraphElement
+  = GraphElement GraphId
+  | MappingElement MappingId GraphId GraphId
 
+data HistoryUpdate
+  = Insert MegagraphUpdate
+  | Pop
+  | Replace (Array MegagraphUpdate)
+  | NoOp
 
-------
--- AppOperation DSL
+-- | The AppOperation represents the data needed to update the megagraph and its
+-- | history in response to a high-level interaction, e.g. deleting a node
+-- | or undoing the last operation.
+-- | This type allows flexibly defining how an interaction affects the state, as
+-- | these may involve many low-level graph and/or mapping
+-- | operations, and some operations may not be stored in the history if they are
+-- | not to be undone (e.g. panning around, modifying the graph origin).
+newtype AppOperation
+  = AppOperation
+    { target        :: MegagraphElement
+    , op            :: MegagraphUpdate
+    , historyUpdate :: HistoryUpdate
+    , undoneUpdate  :: HistoryUpdate
+    }
 
-type AppOperationRow =
-  ( graphOp       :: GRAPHOP
-  , uiOp          :: UIOP
-  , undoOp        :: UNDOOP
-  , queryServerOp :: QUERYSERVEROP
-  )
+derive instance genericMegagraphComponent :: Generic MegagraphElement _
+instance decodeMegagraphComponent :: Decode MegagraphElement where
+  decode = genericDecode defaultOptions
+instance encodeMegagraphComponent :: Encode MegagraphElement where
+  encode = genericEncode defaultOptions
 
-data AppOperation a = AppOperation GraphId (Run AppOperationRow a)
+derive instance genericHistoryUpdate :: Generic HistoryUpdate _
+instance decodeHistoryUpdate :: Decode HistoryUpdate where
+  decode = genericDecode defaultOptions
+instance encodeHistoryUpdate :: Encode HistoryUpdate where
+  encode = genericEncode defaultOptions
 
-derive instance functorAppOperation :: Functor AppOperation
+derive instance genericAppOperation :: Generic AppOperation _
+instance decodeAppOperation :: Decode AppOperation where
+  decode = genericDecode defaultOptions
+instance encodeAppOperation :: Encode AppOperation where
+  encode = genericEncode defaultOptions
 
-instance showAppOperation :: Show (AppOperation a) where
-  show (AppOperation graphId op) = do
-    show graphId
-    <>
-    Run.extract (op # Run.runAccumPure
-      (\accumulator -> Run.match
-        { graphOp       : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showGraphOp
-        , uiOp          : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showUIOp
-        , undoOp        : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showUndoOp
-        , queryServerOp : Loop <<< lmap ((<>) (accumulator <> " ")) <<< showQueryServerOp
-        })
-      (\accumulator a -> accumulator)
-      "")
+instance showMegagraphComponent :: Show MegagraphElement where
+  show = case _ of
+    GraphElement graphId -> "GraphComponent " <> show graphId
+    MappingElement mappingId from to -> "MappingComponent "
+                                        <> show mappingId
+                                        <> " from: " <> show from
+                                        <> " to: " <> show to
 
-instance eqAppOperation :: Eq a => Eq (AppOperation a) where
-  eq opA opB = show opA == show opB
+instance showHistoryUpdate :: Show HistoryUpdate where
+  show = case _ of
+    Insert op -> "Insert " <> show op
+    Pop -> "Pop"
+    Replace megagraphUpdate -> "Replace " <> show megagraphUpdate
+    NoOp -> "NoOp"
 
+instance showAppOperation :: Show AppOperation where
+  show (AppOperation {target, op, historyUpdate, undoneUpdate}) =
+    "AppOperation with target: " <> show target
+       <> ", op: " <> show op
+       <> ", historyUpdate: " <> show historyUpdate
+       <> ", undoneUpdate: " <> show undoneUpdate
 
-------
--- UndoOp DSL adding undo-redo functionality to GraphOps
+encodeGraphStateAsAppOperation :: GraphState -> AppOperation
+encodeGraphStateAsAppOperation graphState =
+  AppOperation { target : GraphElement graphState.graph.id
+               , op : encodeGraphAsMegagraphUpdate graphState.graph
+               , historyUpdate : Replace graphState.history
+               , undoneUpdate : Replace graphState.undone
+               }
 
-data UndoOpF next
-  -- For undoing/redoing actions from the UI
-  = Undo GraphId next
-  | Redo GraphId next
-  -- For the server to push changes to the history state to the UI
-  | ConsHistory GraphId (AppOperation Unit) next
-  | ConsUndone  GraphId (AppOperation Unit) next
-  | SetHistory GraphId (Array (AppOperation Unit)) next
-  | SetUndone  GraphId (Array (AppOperation Unit)) next
+encodeMappingStateAsAppOperation :: MappingState -> AppOperation
+encodeMappingStateAsAppOperation mappingState =
+  AppOperation { target : MappingElement
+                            mappingState.mapping.id
+                            mappingState.mapping.sourceGraph
+                            mappingState.mapping.targetGraph
+               , op : encodeMappingAsMegagraphUpdate mappingState.mapping
+               , historyUpdate : Replace mappingState.history
+               , undoneUpdate : Replace mappingState.undone
+               }
 
-derive instance functorUndoOpF :: Functor UndoOpF
-
-type UNDOOP = FProxy UndoOpF
-
-_undoOp :: SProxy "undoOp"
-_undoOp = SProxy
-
-showUndoOp :: forall a. UndoOpF a -> Tuple String a
-showUndoOp = case _ of
-  Undo graphId next -> Tuple ("Undo " <> show graphId) next
-  Redo graphId next -> Tuple ("Redo " <> show graphId) next
-  ConsHistory graphId op next -> Tuple ("ConsHistory for graph: " <> show graphId <> " op: " <> show op) next
-  ConsUndone  graphId op next -> Tuple ("ConsUndone  for graph: " <> show graphId <> " op: " <> show op) next
-  SetHistory graphId history next -> Tuple ("Set History for graph: " <> show graphId <> " to: " <> show history) next
-  SetUndone graphId undone next -> Tuple ("Set Undone for graph: " <> show graphId <> " to: " <> show undone) next
-
-
-------
--- Interface
-
-undo :: forall r. GraphId -> Run (undoOp :: UNDOOP | r) Unit
-undo graphId = Run.lift _undoOp $ Undo graphId unit
-
-redo :: forall r. GraphId -> Run (undoOp :: UNDOOP | r) Unit
-redo graphId = Run.lift _undoOp $ Redo graphId unit
-
-consHistory :: forall r. GraphId -> AppOperation Unit -> Run (undoOp :: UNDOOP | r) Unit
-consHistory graphId op = Run.lift _undoOp $ ConsHistory graphId op unit
-
-consUndone :: forall r. GraphId -> AppOperation Unit -> Run (undoOp :: UNDOOP | r) Unit
-consUndone graphId op = Run.lift _undoOp $ ConsUndone graphId op unit
-
-setHistory :: forall r. GraphId -> Array (AppOperation Unit) -> Run (undoOp :: UNDOOP | r) Unit
-setHistory graphId history = Run.lift _undoOp $ SetHistory graphId history unit
-
-setUndone :: forall r. GraphId -> Array (AppOperation Unit) -> Run (undoOp :: UNDOOP | r) Unit
-setUndone graphId undone   = Run.lift _undoOp $ SetUndone  graphId undone unit
-
-------
--- Serialisation/deserialisation for UndoOp
-
-instance decodeUndoOpF :: Decode (UndoOpF Unit) where
-  decode x = x # genericDecode defaultOptions >>= toExceptT <<< fromForeignUndoOpF
-
-data ForeignUndoOpF
-  = ForeignUndo String
-  | ForeignRedo String
-  | ForeignConsHistory String (AppOperation Unit)
-  | ForeignConsUndone  String (AppOperation Unit)
-  | ForeignSetHistory String (Array (AppOperation Unit))
-  | ForeignSetUndone  String (Array (AppOperation Unit))
-
-derive instance genericForeignUndoOpF :: Generic ForeignUndoOpF _
-
-instance encodeForeignUndoOpF :: Encode ForeignUndoOpF where
-  encode x = x # genericEncode defaultOptions
-
-instance decodeForeignUndoOpF :: Decode ForeignUndoOpF where
-  decode x = x # genericDecode defaultOptions
-
-toForeignUndoOpF :: forall a. UndoOpF a -> Tuple Foreign a
-toForeignUndoOpF = lmap (genericEncode defaultOptions) <<< case _ of
-  Undo graphId next ->
-    Tuple (ForeignUndo (UUID.toString graphId)) next
-  Redo graphId next ->
-    Tuple (ForeignRedo (UUID.toString graphId)) next
-  ConsHistory graphId op next ->
-    Tuple (ForeignConsHistory (UUID.toString graphId) op) next
-  ConsUndone graphId op next ->
-    Tuple (ForeignConsUndone (UUID.toString graphId) op) next
-  SetHistory graphId history next ->
-    Tuple (ForeignSetHistory (UUID.toString graphId) history) next
-  SetUndone graphId undone next ->
-    Tuple (ForeignSetUndone (UUID.toString graphId) undone) next
-
-fromForeignUndoOpF :: ForeignUndoOpF -> Either String (UndoOpF Unit)
-fromForeignUndoOpF = case _ of
-  ForeignUndo graphIdStr -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ Undo graphId unit
-  ForeignRedo graphIdStr -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ Redo graphId unit
-  ForeignConsHistory graphIdStr op -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ ConsHistory graphId op unit
-  ForeignConsUndone graphIdStr op -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ ConsUndone graphId op unit
-  ForeignSetHistory graphIdStr history -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ SetHistory graphId history unit
-  ForeignSetUndone graphIdStr undone -> do
-    graphId <- parseUUIDEither graphIdStr
-    pure $ SetUndone graphId undone unit
-
-
-------
--- Serialisation/deserialisation for AppOperation
-
-instance encodeAppOperation' :: Encode (AppOperation Unit) where
-  encode = Foreign.unsafeToForeign <<< encodeAppOperation
-
-instance decodeAppOperation' :: Decode (AppOperation Unit) where
-  decode = decodeAppOperation
-
-encodeAppOperation :: forall a. AppOperation a -> Foreign
-encodeAppOperation (AppOperation graphId op) =
-  let
-    foreignOp = Run.extract $
-      (op # Run.runAccumPure
-        (\accumulator -> Run.match
-          { graphOp        : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignGraphOpF
-          , uiOp           : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignUIOpF
-          , undoOp         : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignUndoOpF
-          , queryServerOp  : Loop <<< lmap (\encodedOp -> accumulator <> [encodedOp]) <<< toForeignQueryServerOpF
-          })
-        (\accumulator a -> accumulator)
-        [])
-  in
-    encode { graphIdStr : UUID.toString graphId
-           , operations : foreignOp
-           }
-
-decodeAppOperation :: Foreign -> Foreign.F (AppOperation Unit)
-decodeAppOperation foreignOp =
-  let
-    decodeUIOp          = map (Run.lift _uiOp)          <<< (decode :: Foreign -> Foreign.F (UIOpF Unit))
-    decodeUndoOp        = map (Run.lift _undoOp)        <<< (decode :: Foreign -> Foreign.F (UndoOpF Unit))
-    decodeGraphOp       = map (Run.lift _graphOp)       <<< (decode :: Foreign -> Foreign.F (GraphOpF Unit))
-    decodeQueryServerOp = map (Run.lift _queryServerOp) <<< (decode :: Foreign -> Foreign.F (QueryServerOpF Unit))
-    tryDecode op        = decodeUIOp op <|> decodeUndoOp op <|> decodeGraphOp op <|> decodeQueryServerOp op
-  in do
-    foreignRec <- decode foreignOp :: Foreign.F { graphIdStr :: String, operations :: Array Foreign }
-    decodedOperations <- traverse tryDecode foreignRec.operations
-    graphId <- except $ lmap (singleton <<< ForeignError) $ parseUUIDEither foreignRec.graphIdStr
-    let operation = foldl bind (pure unit) $ map const decodedOperations
-    pure $ AppOperation graphId operation
-
-encodeGraphDataAsAppOperation :: GraphId -> GraphData -> Array (AppOperation Unit) -> Array (AppOperation Unit) -> AppOperation Unit
-encodeGraphDataAsAppOperation graphId graphData history undone =
-  AppOperation graphId do
-    encodeGraphDataAsGraphOp graphData
-    encodeGraphViewsAsUIOp graphData.panes
-    setHistory graphId history
-    setUndone  graphId undone
+encodeMegagraphStateAsAppOperations :: MegagraphState -> Array AppOperation
+encodeMegagraphStateAsAppOperations megagraphState =
+  (megagraphState.graphs # Map.values >>> Array.fromFoldable >>> map encodeGraphStateAsAppOperation)
+  <>
+  (megagraphState.mappings # Map.values >>> Array.fromFoldable >>> map encodeMappingStateAsAppOperation)

@@ -1,4 +1,8 @@
-module Graph where
+-- | A Megagraph is a graph where each node is linked to another graph, and each
+-- | edge is linked to a mapping between graphs.
+-- | Graphs can also have path-equations, allowing them to represent ologs, with
+-- | mappings representing functors between ologs.
+module Megagraph where
 
 import Prelude
 
@@ -8,17 +12,18 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', Traversal', traversed, (.~), (?~), (%~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple)
 import Data.UUID (UUID)
 import Data.UUID as UUID
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
+import Math as Math
 import Record.Builder as Builder
 import Web.HTML.HTMLElement as WHE
 
@@ -65,8 +70,29 @@ instance encodePageSpacePoint2D :: Encode PageSpacePoint2D where
 instance decodePageSpacePoint2D :: Decode PageSpacePoint2D where
   decode x = x # genericDecode defaultOptions
 
-toGraphSpace :: GraphView -> PageSpacePoint2D -> GraphSpacePoint2D
-toGraphSpace pane (PageSpacePoint2D pagePosition) =
+-- | Edge space is the coordinate system local to a particular edge,
+-- | with the midpoint of the source and target as zero and the
+-- | source and target aligned with the x-axis, with the source
+-- | to the left of zero.
+-- | This makes is simple to represent the curve of the edge
+-- | in a way that's invariant to rotation, and preserves the deviation from
+-- | the midpoint when elongated.
+newtype EdgeSpacePoint2D = EdgeSpacePoint2D { angle :: Number, radius :: Number }
+
+derive newtype instance showEdgeSpacePoint2D :: Show EdgeSpacePoint2D
+
+derive newtype instance eqEdgeSpacePoint2D :: Eq EdgeSpacePoint2D
+
+derive instance genericEdgeSpacePoint2D :: Generic EdgeSpacePoint2D _
+
+instance encodeEdgeSpacePoint2D :: Encode EdgeSpacePoint2D where
+  encode x = x # genericEncode defaultOptions
+
+instance decodeEdgeSpacePoint2D :: Decode EdgeSpacePoint2D where
+  decode x = x # genericDecode defaultOptions
+
+pageSpaceToGraphSpace :: GraphView -> PageSpacePoint2D -> GraphSpacePoint2D
+pageSpaceToGraphSpace pane (PageSpacePoint2D pagePosition) =
   let
     -- origin is relative to the pane, not the window
     PageSpacePoint2D origin = pane.origin
@@ -76,8 +102,8 @@ toGraphSpace pane (PageSpacePoint2D pagePosition) =
       , y : (pagePosition.y - pane.boundingRect.top  - origin.y) * pane.zoom
       }
 
-toPageSpace :: GraphView -> GraphSpacePoint2D -> PageSpacePoint2D
-toPageSpace pane (GraphSpacePoint2D graphPosition) =
+graphSpaceToPageSpace :: GraphView -> GraphSpacePoint2D -> PageSpacePoint2D
+graphSpaceToPageSpace pane (GraphSpacePoint2D graphPosition) =
   let
     -- origin is relative to the pane, not the window :/
     PageSpacePoint2D origin = pane.origin
@@ -85,6 +111,36 @@ toPageSpace pane (GraphSpacePoint2D graphPosition) =
     PageSpacePoint2D $ { x : (graphPosition.x / pane.zoom) + pane.boundingRect.left + origin.x
                        , y : (graphPosition.y / pane.zoom) + pane.boundingRect.top  + origin.y
                        }
+
+edgeSpaceToGraphSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> EdgeSpacePoint2D -> GraphSpacePoint2D
+edgeSpaceToGraphSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (EdgeSpacePoint2D edgeSpacePoint) =
+  let
+    sourceTargetVector = targetPos - sourcePos
+    edgeMidpoint = { x : (targetPos.x + sourcePos.x) / 2.0
+                   , y : (targetPos.y + sourcePos.y) / 2.0
+                   }
+    edgeAngle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
+  in
+    GraphSpacePoint2D
+    { x : Math.cos (edgeSpacePoint.angle + edgeAngle) * edgeSpacePoint.radius + edgeMidpoint.x
+    , y : Math.sin (edgeSpacePoint.angle + edgeAngle) * edgeSpacePoint.radius + edgeMidpoint.y
+    }
+
+graphSpaceToEdgeSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> GraphSpacePoint2D -> EdgeSpacePoint2D
+graphSpaceToEdgeSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (GraphSpacePoint2D graphSpacePoint) =
+  let
+    sourceTargetVector = targetPos - sourcePos
+    edgeMidpoint = { x : (targetPos.x + sourcePos.x) / 2.0
+                   , y : (targetPos.y + sourcePos.y) / 2.0
+                   }
+    edgeAngle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
+    positionRelativeToEdgeMidpoint = graphSpacePoint - edgeMidpoint
+    totalAngle = Math.atan2 positionRelativeToEdgeMidpoint.y positionRelativeToEdgeMidpoint.x
+    norm point = Math.sqrt (point.x * point.x + point.y * point.y)
+  in
+    EdgeSpacePoint2D { angle : totalAngle - edgeAngle
+                     , radius : norm positionRelativeToEdgeMidpoint
+                     }
 
 type EdgeMetadata
   = { id      :: EdgeId
@@ -97,19 +153,21 @@ type EdgeMetadata
 -- | edge.source.graphId == edge.graphId
 -- | edge.target.graphId == edge.graphId
 type Edge
-  = { id      :: EdgeId
-    , graphId :: GraphId
-    , source  :: NodeId
-    , target  :: NodeId
-    , text    :: String
-    , isValid :: Boolean
+  = { id       :: EdgeId
+    , graphId  :: GraphId
+    , source   :: NodeId
+    , target   :: NodeId
+    , midpoint :: EdgeSpacePoint2D
+    , text     :: String
+    , isValid  :: Boolean
     }
 
 freshEdge :: EdgeMetadata -> Edge
 freshEdge edgeMetadata =
   Builder.build (Builder.merge edgeMetadata)
-  $ { text    : ""
-    , isValid : true
+  $ { text     : ""
+    , midpoint : EdgeSpacePoint2D { angle : 0.0, radius : 0.0 }
+    , isValid  : true
     }
 
 type Node
@@ -142,8 +200,18 @@ derive instance genericFocus :: Generic Focus _
 instance showFocus :: Show Focus where
   show = genericShow
 
-type PathEquation
-  = Tuple (Array EdgeId) (Array EdgeId)
+data PathEquation = PathEquation (Array EdgeId) (Array EdgeId)
+
+derive instance eqPathEquation :: Eq PathEquation
+derive instance ordPathEquation :: Ord PathEquation
+derive instance genericPathEquation :: Generic PathEquation _
+instance decodePathEquation :: Decode PathEquation where
+  decode = genericDecode defaultOptions
+instance encodePathEquation :: Encode PathEquation where
+  encode = genericEncode defaultOptions
+instance showPathEquation :: Show PathEquation where
+  show (PathEquation leftPath rightPath) =
+    "PathEquation: " <> show leftPath <> " == " <> show rightPath
 
 type GraphTitle
   = { text :: String
@@ -159,6 +227,7 @@ type Graph
     , nodes :: Map NodeId Node
     , edges :: { sourceTarget :: Map NodeId (Map NodeId (Map EdgeId Edge))
                , targetSource :: Map NodeId (Map NodeId (Map EdgeId Edge))
+               , idMap :: Map EdgeId Edge
                }
     , pathEquations :: Set PathEquation
     }
@@ -172,27 +241,33 @@ emptyGraph id
     , nodes : Map.empty
     , edges : { sourceTarget : Map.empty
               , targetSource : Map.empty
+              , idMap : Map.empty
               }
     , pathEquations : Set.empty
     }
 
+
+type MappingId = UUID
+
 type NodeMappingEdge
-  = { sourceNode :: NodeId
+  = { id :: EdgeId
+    , mappingId :: MappingId
+    , sourceNode :: NodeId
     , targetNode :: NodeId
     }
 
 type EdgeMappingEdge
-  = { sourceEdge :: EdgeId
+  = { id :: EdgeId
+    , mappingId :: MappingId
+    , sourceEdge :: EdgeId
     , targetEdge :: EdgeId
     }
 
-type MappingId = UUID
 
--- | Invariants:
--- | all ((mapping.nodeMappingEdges <#> _.sourceNode.graphId) == mapping.sourceGraph)
--- | all ((mapping.nodeMappingEdges <#> _.targetNode.graphId) == mapping.targetGraph)
--- | all ((mapping.edgeMappingEdges <#> _.graphId) == mapping.sourceGraph)
--- | all ((mapping.edgeMappingEdges <#> _.graphId) == mapping.targetGraph)
+-- | all ((==) mapping.sourceGraph) (mapping.nodeMappingEdges <#> _.sourceNode.graphId)
+-- | all ((==) mapping.targetGraph) (mapping.nodeMappingEdges <#> _.targetNode.graphId)
+-- | all ((==) mapping.sourceGraph) (mapping.edgeMappingEdges <#> _.sourceEdge.graphId)
+-- | all ((==) mapping.targetGraph) (mapping.edgeMappingEdges <#> _.targetEdge.graphId)
 type Mapping
   = { id :: MappingId
     , name :: String
@@ -220,19 +295,13 @@ type GraphView
     , boundingRect :: WHE.DOMRect
     }
 
-emptyPane :: GraphId -> GraphView
-emptyPane graphId
+freshPane :: GraphId -> WHE.DOMRect -> GraphView
+freshPane graphId rect
   = { graphId      : graphId
     , origin       : PageSpacePoint2D { x : 0.0, y : 0.0 }
     , zoom         : 1.0
     , focus        : Nothing
-    , boundingRect : { width  : 0.0
-                     , height : 0.0
-                     , left   : 0.0
-                     , right  : 0.0
-                     , top    : 0.0
-                     , bottom : 0.0
-                     }
+    , boundingRect : rect
     }
 
 
@@ -242,11 +311,23 @@ emptyPane graphId
 _title :: Lens' Graph GraphTitle
 _title = prop (SProxy :: SProxy "title")
 
+_text :: Lens' GraphTitle String
+_text = prop (SProxy :: SProxy "text")
+
+_nodes :: Lens' Graph (Map NodeId Node)
+_nodes = prop (SProxy :: SProxy "nodes")
+
 _sourceTarget :: Lens' Graph (Map NodeId (Map NodeId (Map EdgeId Edge)))
 _sourceTarget = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "sourceTarget")
 
 _targetSource :: Lens' Graph (Map NodeId (Map NodeId (Map EdgeId Edge)))
 _targetSource = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "targetSource")
+
+_idMap :: Lens' Graph (Map EdgeId Edge)
+_idMap = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "idMap")
+
+_edge :: EdgeId -> Lens' Graph (Maybe Edge)
+_edge edgeId = _idMap <<< at edgeId
 
 _position :: NodeId -> Traversal' Graph GraphSpacePoint2D
 _position nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "position")
@@ -257,7 +338,7 @@ _nodeText nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <
 _nodeSubgraph :: NodeId -> Traversal' Graph (Maybe GraphId)
 _nodeSubgraph nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "subgraph")
 
-_pathEquations :: Graph -> Set PathEquation
+_pathEquations :: Lens' Graph (Set PathEquation)
 _pathEquations = prop (SProxy :: SProxy "pathEquations")
 
 -- These go to state
@@ -273,8 +354,14 @@ _zoom = prop (SProxy :: SProxy "zoom")
 _origin :: Lens' GraphView PageSpacePoint2D
 _origin = prop (SProxy :: SProxy "origin")
 
+_focus :: Lens' GraphView (Maybe Focus)
+_focus = prop (SProxy :: SProxy "focus")
+
 _boundingRect :: Lens' GraphView WHE.DOMRect
 _boundingRect = prop (SProxy :: SProxy "boundingRect")
+
+_height :: Lens' WHE.DOMRect Number
+_height = prop (SProxy :: SProxy "height")
 
 _nodeMappingEdges :: Lens' Mapping (Set NodeMappingEdge)
 _nodeMappingEdges = prop (SProxy :: SProxy "nodeMappingEdges")
@@ -282,16 +369,22 @@ _nodeMappingEdges = prop (SProxy :: SProxy "nodeMappingEdges")
 _edgeMappingEdges :: Lens' Mapping (Set EdgeMappingEdge)
 _edgeMappingEdges = prop (SProxy :: SProxy "edgeMappingEdges")
 
+_source :: Lens' Edge NodeId
+_source = prop (SProxy :: SProxy "source")
+
+_target :: Lens' Edge NodeId
+_target = prop (SProxy :: SProxy "target")
+
 
 ------
 -- Interface
 
-insertNewNode :: GraphId -> NodeId -> Graph -> Graph
-insertNewNode graphId nodeId graph =
+insertNewNode :: NodeId -> Graph -> Graph
+insertNewNode nodeId graph =
   graph { nodes =
              Map.insert
              nodeId
-             (freshNode graphId nodeId)
+             (freshNode graph.id nodeId)
              graph.nodes
         }
 
@@ -320,25 +413,37 @@ insertNewEdge edgeMetadata graph =
                           newEdge.id
                           newEdge
                           graph.edges.targetSource
+    idMap = Map.insert edgeMetadata.id newEdge graph.edges.idMap
   in
-    graph { edges = { sourceTarget : edgesSourceTarget, targetSource : edgesTargetSource } }
+    graph { edges = { sourceTarget : edgesSourceTarget
+                    , targetSource : edgesTargetSource
+                    , idMap : idMap
+                    }
+          }
 
 -- why would I even want this?
 --batchInsertEdges :: Graph -> Array Edge -> Graph
 --batchInsertEdges = foldr (\edge -> insertEdgeImpl edge.id >>> updateEdgeData (const edge) edge.id)
 
-updateEdgeData :: (Edge -> Edge) -> EdgeMetadata -> Graph -> Graph
-updateEdgeData updater edgeMetadata =
-  (_sourceTarget <<< at edgeMetadata.source <<< traversed <<< at edgeMetadata.target <<< traversed <<< at edgeMetadata.id <<< traversed %~ updater)
-  >>>
-  (_targetSource <<< at edgeMetadata.target <<< traversed <<< at edgeMetadata.source <<< traversed <<< at edgeMetadata.id <<< traversed %~ updater)
+updateEdgeData :: (Edge -> Edge) -> EdgeId -> Graph -> Graph
+updateEdgeData updater edgeId graph =
+  case lookupEdgeById edgeId graph of
+    Nothing -> graph
+    Just edge ->
+      graph
+      # (_sourceTarget <<< at edge.source <<< traversed <<< at edge.target <<< traversed <<< at edge.id <<< traversed %~ updater)
+      # (_targetSource <<< at edge.target <<< traversed <<< at edge.source <<< traversed <<< at edge.id <<< traversed %~ updater)
+      # (_idMap <<< at edge.id <<< traversed %~ updater)
 
--- TODO continue from here
-deleteEdge :: EdgeMetadata -> Graph -> Graph
-deleteEdge edgeMetadata =
-  (_sourceTarget <<< at edgeMetadata.source <<< traversed <<< at edgeMetadata.target .~ Nothing)
-  >>>
-  (_targetSource <<< at edgeMetadata.target <<< traversed <<< at edgeMetadata.source .~ Nothing)
+deleteEdge :: EdgeId -> Graph -> Graph
+deleteEdge edgeId graph =
+  case lookupEdgeById edgeId graph of
+    Nothing -> graph
+    Just edge ->
+      graph
+      # (_sourceTarget <<< at edge.source <<< traversed <<< at edge.target <<< traversed <<< at edge.id .~ Nothing)
+      # (_targetSource <<< at edge.target <<< traversed <<< at edge.source <<< traversed <<< at edge.id .~ Nothing)
+      # (_idMap <<< at edge.id .~ Nothing)
 
 moveNode :: NodeId -> GraphSpacePoint2D -> Graph -> Graph
 moveNode nodeId newPos = _position nodeId .~ newPos
@@ -346,8 +451,12 @@ moveNode nodeId newPos = _position nodeId .~ newPos
 updateNodeText :: NodeId -> String -> Graph -> Graph
 updateNodeText nodeId newText = _nodeText nodeId .~ newText
 
-updateEdgeText :: EdgeMetadata -> String -> Graph -> Graph
-updateEdgeText edgeMetadata newText = updateEdgeData _{ text = newText } edgeMetadata
+updateEdgeText :: EdgeId -> String -> Graph -> Graph
+updateEdgeText edgeId newText = updateEdgeData _{ text = newText } edgeId
+
+updateEdgeMidpoint :: EdgeId -> EdgeSpacePoint2D -> Graph -> Graph
+updateEdgeMidpoint edgeId newMidpoint =
+  updateEdgeData _{ midpoint = newMidpoint } edgeId
 
 updateTitle :: String -> Graph -> Graph
 updateTitle newTitle =
@@ -369,35 +478,43 @@ deletePathEquation :: PathEquation -> Graph -> Graph
 deletePathEquation pathEquation =
   _pathEquations %~ Set.delete pathEquation
 
-insertNodeMappingEdge :: NodeId -> NodeId -> Mapping -> Mapping
-insertNodeMappingEdge source target =
-  _nodeMappingEdges %~ Set.insert { sourceNode : source, targetNode : target }
+insertNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
+insertNodeMappingEdge nodeMappingEdge =
+  _nodeMappingEdges %~ Set.insert nodeMappingEdge
 
-deleteNodeMappingEdge :: NodeId -> NodeId -> Mapping -> Mapping
-deleteNodeMappingEdge source target =
-  _nodeMappingEdges %~ Set.delete { sourceNode : source, targetNode : target }
+deleteNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
+deleteNodeMappingEdge nodeMappingEdge =
+  _nodeMappingEdges %~ Set.delete nodeMappingEdge
 
-insertEdgeMappingEdge :: EdgeId -> EdgeId -> Mapping -> Mapping
-insertEdgeMappingEdge source target =
-  _edgeMappingEdges %~ Set.insert { sourceEdge : source, targetEdge : target }
+insertEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
+insertEdgeMappingEdge edgeMappingEdge =
+  _edgeMappingEdges %~ Set.insert edgeMappingEdge
 
-deleteEdgeMappingEdge :: EdgeId -> EdgeId -> Mapping -> Mapping
-deleteEdgeMappingEdge source target =
-  _edgeMappingEdges %~ Set.delete { sourceEdge : source, targetEdge : target }
+deleteEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
+deleteEdgeMappingEdge edgeMappingEdge =
+  _edgeMappingEdges %~ Set.delete edgeMappingEdge
 
 
 ------
 -- Utilities
 
-allEdgesTouchingNode :: NodeId -> Graph -> { incoming :: Array (Map EdgeId Edge), outgoing :: Array (Map EdgeId Edge) }
+edgeToMetadata :: Edge -> EdgeMetadata
+edgeToMetadata edge
+  = { id : edge.id
+    , graphId : edge.graphId
+    , source : edge.source
+    , target : edge.target
+    }
+
+allEdgesTouchingNode :: NodeId -> Graph -> { incoming :: Array Edge, outgoing :: Array Edge }
 allEdgesTouchingNode nodeId graph =
   let
     outgoingEdges = case Map.lookup nodeId graph.edges.sourceTarget of
       Nothing -> []
-      Just targetEdgeMap -> Array.fromFoldable $ Map.values targetEdgeMap
+      Just targetEdgeMap -> Array.fromFoldable $ List.concatMap Map.values $ Map.values targetEdgeMap
     incomingEdges = case Map.lookup nodeId graph.edges.targetSource of
       Nothing -> []
-      Just targetEdgeMap -> Array.fromFoldable $ Map.values targetEdgeMap
+      Just targetEdgeMap -> Array.fromFoldable $ List.concatMap Map.values $ Map.values targetEdgeMap
   in
     { outgoing : outgoingEdges
     , incoming : incomingEdges
@@ -409,6 +526,10 @@ edgeArray graph = Array.fromFoldable do
   edgeMap <- Map.values targetEdgeMap
   edge <- Map.values edgeMap
   pure edge
+
+lookupEdgeById :: EdgeId -> Graph -> Maybe Edge
+lookupEdgeById edgeId graph = do
+  Map.lookup edgeId graph.edges.idMap
 
 -- TODO
 -- why do I want this?

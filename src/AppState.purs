@@ -2,7 +2,6 @@ module AppState where
 
 import Prelude
 
---import AppOperation (AppOperation)
 import Data.Lens (Lens', Traversal', lens, traversed)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
@@ -10,8 +9,8 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Symbol (SProxy(..))
-import Graph (Edge, EdgeId, Graph, GraphId, GraphSpacePoint2D(..), GraphView, NodeId, PageSpacePoint2D, Point2D, Mapping, emptyGraph, emptyPane)
-import GraphOperation
+import Megagraph (Edge, EdgeId, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, NodeId, PageSpacePoint2D, Point2D, emptyGraph, emptyMapping, freshPane)
+import MegagraphOperation (MegagraphUpdate)
 import Web.HTML.HTMLElement as WHE
 
 
@@ -28,22 +27,29 @@ type KeyHoldState
 type GraphState
   = { graph :: Graph
     , view :: GraphView
-    , history :: Array SubMegagraphUpdate
-    , undone :: Array SubMegagraphUpdate
+    , history :: Array MegagraphUpdate
+    , undone :: Array MegagraphUpdate
     }
 
-emptyGraphState :: GraphId -> GraphState
-emptyGraphState graphId = { graph : emptyGraph graphId
-                          , view : emptyPane graphId
-                          , history : []
-                          , undone : []
-                          }
+emptyGraphState :: GraphId -> WHE.DOMRect -> GraphState
+emptyGraphState graphId rect
+  = { graph : emptyGraph graphId
+    , view : freshPane graphId rect
+    , history : []
+    , undone : []
+    }
 
 type MappingState
   = { mapping :: Mapping
-    , history :: Array SubMegagraphUpdate
-    , undone  :: Array SubMegagraphUpdate
+    , history :: Array MegagraphUpdate
+    , undone  :: Array MegagraphUpdate
     }
+
+emptyMappingState :: MappingId -> GraphId -> GraphId -> MappingState
+emptyMappingState mappingId from to = { mapping : emptyMapping mappingId from to
+                                      , history : []
+                                      , undone : []
+                                      }
 
 -- | A selection of graphs and mappings from the larger megagraph.
 -- | A megagraph is a collection of graphs and mappings between graphs
@@ -51,34 +57,34 @@ type MappingState
 -- | A mapping is a set of mappingEdges from nodes to nodes and edges to edges.
 -- | The UI represents a sub-megagraph, where there is only a single mapping
 -- | between any pairs of graphs. This is a view on a larger megagraph.
-type SubMegagraphState
+type MegagraphState
   = { graphs :: Map GraphId GraphState
-    , mappingsSourceTarget :: Map GraphId (Map GraphId MappingState)
+    , mappings :: Map MappingId MappingState
     }
 
-emptySubMegagraph :: SubMegagraphState
-emptySubMegagraph = { graphs : Map.empty
-                    , mappingsSourceTarget : Map.empty
-                    }
+emptyMegagraph :: MegagraphState
+emptyMegagraph = { graphs : Map.empty
+                 , mappings : Map.empty
+                 }
 
 type AppState
-  = { subMegagraph         :: SubMegagraphState
-    , windowBoundingRect   :: WHE.DOMRect
-    , drawingEdges         :: Map DrawingEdgeId DrawingEdge
-    , hoveredElementId     :: Maybe HoveredElementId
-    , focusedPane          :: Maybe GraphId
-    , keyHoldState         :: KeyHoldState
+  = { megagraph          :: MegagraphState
+    , windowBoundingRect :: WHE.DOMRect
+    , drawingEdges       :: Map DrawingEdgeId DrawingEdge
+    , hoveredElementId   :: Maybe HoveredElementId
+    , focusedPane        :: Maybe GraphId
+    , keyHoldState       :: KeyHoldState
     }
 
-emptyAppState :: AppState
-emptyAppState =
-  { subMegagraph         : emptySubMegagraph
-  , windowBoundingRect   : { height : 0.0, width : 0.0, left : 0.0, right : 0.0, top : 0.0, bottom : 0.0 }
-  , drawingEdges         : Map.empty
-  , hoveredElementId     : Nothing
-  , focusedPane          : Nothing
-  , keyHoldState         : { spaceDown : false }
-  }
+emptyAppState :: WHE.DOMRect -> AppState
+emptyAppState rect
+  = { megagraph          : emptyMegagraph
+    , windowBoundingRect : rect
+    , drawingEdges       : Map.empty
+    , hoveredElementId   : Nothing
+    , focusedPane        : Nothing
+    , keyHoldState       : { spaceDown : false }
+    }
 
 type Shape
   = { width :: Number
@@ -101,23 +107,10 @@ type DrawingEdgeId = NodeId
 drawingEdgeKey :: DrawingEdgeId -> String
 drawingEdgeKey id = "DrawingEdge_" <> show id
 
-data DragSource
-  = NodeDrag
-  | HaloDrag
-  | BackgroundDrag
-
-derive instance eqDragSource :: Eq DragSource
-
-derive instance ordDragSource :: Ord DragSource
-
-instance showDragSource :: Show DragSource where
-  show NodeDrag       = "NodeDrag"
-  show HaloDrag       = "HaloDrag"
-  show BackgroundDrag = "BackgroundDrag"
-
 data HoveredElementId
   = NodeHaloId NodeId
   | NodeBorderId NodeId
+  | EdgeHaloId EdgeId
   | EdgeBorderId EdgeId
 
 derive instance eqGraphElementId :: Eq HoveredElementId
@@ -126,6 +119,7 @@ instance showHoveredElementId :: Show HoveredElementId where
    show = case _ of
      NodeHaloId nodeId   -> "NodeHaloId " <> show nodeId
      NodeBorderId nodeId -> "NodeBorderId " <> show nodeId
+     EdgeHaloId edgeId   -> "EdgeHaloId " <> show edgeId
      EdgeBorderId edgeId -> "EdgeBorderId " <> show edgeId
 
 ------
@@ -154,16 +148,23 @@ _drawingEdgeTargetGraph :: DrawingEdgeId -> Traversal' AppState GraphId
 _drawingEdgeTargetGraph drawingEdgeId =
   _drawingEdges <<< at drawingEdgeId <<< traversed <<< prop (SProxy :: SProxy "targetGraph")
 
-_graphState :: GraphId -> Lens' AppState (Maybe GraphState)
+_megagraph :: Lens' AppState MegagraphState
+_megagraph = prop (SProxy :: SProxy "megagraph")
+
+_graphs :: Lens' MegagraphState (Map GraphId GraphState)
+_graphs = prop (SProxy :: SProxy "graphs")
+
+_graphState :: GraphId -> Lens' MegagraphState (Maybe GraphState)
 _graphState graphId =
-  prop (SProxy :: SProxy "subMegagraph")
-  <<< prop (SProxy :: SProxy "graphs")
+  prop (SProxy :: SProxy "graphs")
   <<< at graphId
 
-_mappingState :: MappingId -> Lens' AppState (Maybe MappingState)
+_mappings :: Lens' MegagraphState (Map MappingId MappingState)
+_mappings = prop (SProxy :: SProxy "mappings")
+
+_mappingState :: MappingId -> Lens' MegagraphState (Maybe MappingState)
 _mappingState mappingId =
-  prop (SProxy :: SProxy "subMegagraph")
-  <<< prop (SProxy :: SProxy "mappingsSourceTarget")
+  prop (SProxy :: SProxy "mappings")
   <<< at mappingId
 
 _mapping :: Lens' MappingState Mapping
@@ -171,6 +172,15 @@ _mapping = prop (SProxy :: SProxy "mapping")
 
 _graph :: Lens' GraphState Graph
 _graph = prop (SProxy :: SProxy "graph")
+
+_graphAtId :: GraphId -> Traversal' AppState Graph
+_graphAtId graphId = _megagraph <<< _graphState graphId <<< traversed <<< _graph
+
+_pane :: Lens' GraphState GraphView
+_pane = prop (SProxy :: SProxy "view")
+
+_paneAtId :: GraphId -> Traversal' AppState GraphView
+_paneAtId graphId = _megagraph <<< _graphState graphId <<< traversed <<< _pane
 
 _windowBoundingRect :: Lens' AppState WHE.DOMRect
 _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")

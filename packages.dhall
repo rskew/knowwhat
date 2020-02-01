@@ -168,6 +168,7 @@ let additions =
       , version =
           "3fc2ed2214199e20a4ca7ef23904c59f037c6c9d"
       }
+  , datetime = ../purescript-datetime/spago.dhall as Location
   }
 
 in  upstream // overrides // additions

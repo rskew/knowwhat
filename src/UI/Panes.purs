@@ -2,70 +2,70 @@ module UI.Panes where
 
 import Prelude
 
-import AppOperation (AppOperation(..))
-import AppOperation.UIOp (moveGraphOrigin, updateZoom)
-import AppState (AppState, _focusedPane, _graphData, _windowBoundingRect)
-import Graph (GraphId, PageSpacePoint2D(..), GraphView, emptyPane, _panes, _boundingRect)
+import AppState (AppState, GraphState, _focusedPane, _graphState, _graphs, _megagraph, _pane, _windowBoundingRect)
 import Data.Array as Array
 import Data.Int (toNumber)
-import Data.Lens ((?~), (.~), traversed, (%~))
-import Data.Lens.At (at)
+import Data.Lens ((.~), (%~), (?~))
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
+import Megagraph (GraphId, GraphView, PageSpacePoint2D(..), _boundingRect, _origin, _zoom, emptyGraph, freshPane)
 import UI.Constants (paneDividerWidth)
 import Web.HTML.HTMLElement as WHE
 
-insertPaneImpl :: GraphId -> AppState -> AppState
-insertPaneImpl graphId appState =
+
+insertPane :: GraphId -> AppState -> AppState
+insertPane graphId state =
   let
-    newPaneWidth = (appState.windowBoundingRect.width / (toNumber $ 1 + (Map.size appState.graphData.panes)))
+    newPaneWidth = (state.windowBoundingRect.width / (toNumber (1 + (Map.size state.megagraph.graphs))))
                    - paneDividerWidth
-    newPaneRect  = appState.windowBoundingRect { width = newPaneWidth
-                                               , left  = appState.windowBoundingRect.right - newPaneWidth
-                                               }
-    newPane = (emptyPane graphId) { boundingRect = newPaneRect }
-    squishedOldPanesWidth = appState.windowBoundingRect.width - newPaneWidth - paneDividerWidth
+    newPaneRect  = state.windowBoundingRect { width = newPaneWidth
+                                            , left  = state.windowBoundingRect.right - newPaneWidth
+                                            }
+    newPane = freshPane graphId newPaneRect
+    squishedOldPanesWidth = state.windowBoundingRect.width - newPaneWidth - paneDividerWidth
   in
-    appState
-    # rescaleWindow (appState.windowBoundingRect { width = squishedOldPanesWidth
-                                                 , right = squishedOldPanesWidth
-                                                 })
-    # _windowBoundingRect .~ appState.windowBoundingRect
-    # _graphData <<< _panes <<< at graphId ?~ newPane
+    state
+    # rescaleWindow (state.windowBoundingRect { width = squishedOldPanesWidth
+                                              , right = squishedOldPanesWidth
+                                              })
+    # _windowBoundingRect .~ state.windowBoundingRect
+    # _megagraph <<< _graphState graphId ?~ { graph: emptyGraph graphId
+                                            , view : newPane
+                                            , history : []
+                                            , undone : []
+                                            }
     # _focusedPane ?~ graphId
     # arrangePanes
 
 arrangePanes :: AppState -> AppState
-arrangePanes appState =
-  let
-    orderedPanes = appState.graphData.panes
-                   # Map.values >>> Array.fromFoldable
-                   # Array.sortBy (comparing _.boundingRect.left)
-    nPanes = toNumber $ Array.length orderedPanes
-    paneWidth = (appState.windowBoundingRect.width - paneDividerWidth * (nPanes - 1.0)) / nPanes
-    newPanes = orderedPanes # Array.mapWithIndex \index pane ->
-      Tuple pane.graphId $
-        pane { boundingRect =
-                  pane.boundingRect { width =  paneWidth
-                                    , left  = (paneWidth + paneDividerWidth) * (toNumber index)
-                                    , right = (paneWidth + paneDividerWidth) * (toNumber index) + paneWidth
-                                    }
-             }
-  in
-    appState # _graphData <<< _panes .~ Map.fromFoldable newPanes
-
-rescalePaneImpl :: GraphId -> WHE.DOMRect -> AppState -> AppState
-rescalePaneImpl graphId rect =
-  _graphData <<< _panes <<< at graphId <<< traversed <<< _boundingRect .~ rect
+arrangePanes state =
+  state # _megagraph <<< _graphs %~ mapMapWithIndex updatePane
+    where
+      nPanes = toNumber $ Map.size state.megagraph.graphs
+      paneWidth = (state.windowBoundingRect.width - paneDividerWidth * (nPanes - 1.0)) / nPanes
+      updatePane :: Int -> GraphState -> GraphState
+      updatePane index graphState =
+          graphState
+          # _pane <<< _boundingRect %~ _{ width = paneWidth
+                                        , left  = (paneWidth + paneDividerWidth) * (toNumber index)
+                                        , right = (paneWidth + paneDividerWidth) * (toNumber index) + paneWidth
+                                        }
+      mapMapWithIndex f =
+        Map.toUnfoldable
+        >>>
+        Array.mapWithIndex (\index (Tuple key val) ->
+          Tuple key (f index val))
+        >>>
+        Map.fromFoldable
 
 rescaleWindow :: WHE.DOMRect -> AppState -> AppState
 rescaleWindow newWindowBoundingRect appState =
   let
     horizontalScale = newWindowBoundingRect.width  / appState.windowBoundingRect.width
     verticalScale   = newWindowBoundingRect.height / appState.windowBoundingRect.height
-    shiftRect rect =
+    scaleRect rect =
       { width  : rect.width  * horizontalScale
       , left   : rect.left   * horizontalScale
       , right  : rect.right  * horizontalScale
@@ -74,11 +74,10 @@ rescaleWindow newWindowBoundingRect appState =
       , bottom : rect.bottom * verticalScale
       }
     maxScale = Math.max horizontalScale verticalScale
-    newPanes = appState.graphData.panes <#> (_boundingRect %~ shiftRect)
   in
     appState
     # _windowBoundingRect .~ newWindowBoundingRect
-    # _graphData <<< _panes .~ newPanes
+    # _megagraph <<< _graphs %~ map (_pane <<< _boundingRect %~ scaleRect)
 
 -- | Zoom in/out holding the focus point invariant in page space and graph space
 -- |
@@ -97,18 +96,19 @@ rescaleWindow newWindowBoundingRect appState =
 -- |     newGraphOrigin = p - paneTopLeft - ((p - paneTopLeft - oldGraphOrigin) * (oldZoom / newZoom))
 -- |
 -- | If newZoom --> inf, newGraphOrigin --> focusPoint, as expected.
-zoomAtPoint :: Number -> PageSpacePoint2D -> GraphView -> AppOperation Unit
-zoomAtPoint newZoom pageSpacePoint pane =
+zoomAtPoint :: Number -> PageSpacePoint2D -> GraphView -> GraphView
+zoomAtPoint newZoom (PageSpacePoint2D zoomFocus) pane =
   let
-    PageSpacePoint2D point = pageSpacePoint
     PageSpacePoint2D origin = pane.origin
-    newGraphOrigin = PageSpacePoint2D
-                       { x : point.x - pane.boundingRect.left - ((point.x - pane.boundingRect.left - origin.x) * (pane.zoom / newZoom))
-                       , y : point.y - pane.boundingRect.top  - ((point.y - pane.boundingRect.top  - origin.y) * (pane.zoom / newZoom))
-                       }
-  in AppOperation pane.graphId do
-    moveGraphOrigin pane.graphId newGraphOrigin
-    updateZoom pane.graphId newZoom
+    newGraphOrigin =
+      PageSpacePoint2D
+      { x : zoomFocus.x - pane.boundingRect.left - ((zoomFocus.x - pane.boundingRect.left - origin.x) * (pane.zoom / newZoom))
+      , y : zoomFocus.y - pane.boundingRect.top  - ((zoomFocus.y - pane.boundingRect.top  - origin.y) * (pane.zoom / newZoom))
+      }
+  in
+    pane
+    # _origin .~ newGraphOrigin
+    # _zoom .~ newZoom
 
 paneContainingPoint :: Array GraphView -> PageSpacePoint2D -> Maybe GraphView
 paneContainingPoint panes pagePosition =

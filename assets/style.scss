@@ -172,6 +172,7 @@ foreignObject {
 .edge {
     stroke: var(--edge-color);
     stroke-width: 1.5px;
+    fill: transparent;
 }
 
 .edge.mappingEdge {
@@ -193,6 +194,7 @@ foreignObject {
     stroke: var(--node-border-color);
     stroke-width: 25px;
     opacity: 0.0;
+    fill: transparent;
 }
 
 .edgeBorder.hover {
@@ -209,5 +211,5 @@ foreignObject {
 }
 
 marker {
-    fill: #ffffff;
+    fill: var(--node-color);
 }

@@ -2,7 +2,6 @@ module Main where
 
 import Prelude
 
-import AppOperation (AppOperation)
 import Control.Coroutine as CR
 import Control.Coroutine.Aff (emit)
 import Control.Coroutine.Aff as CRA
@@ -18,17 +17,18 @@ import Effect.Class (liftEffect)
 import Effect.Class.Console as Console
 import Foreign (F, Foreign, renderForeignError, unsafeToForeign, readString)
 import Foreign.Generic (encodeJSON, decodeJSON)
-import GraphComponent as G
+import GraphComponent (graphComponent)
+import GraphComponent.Types (Message(..), Query(..))
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
-import Server.Config (config)
 import Web.Event.EventTarget as EET
 import Web.HTML (window)
 import Web.HTML.Window (innerWidth, innerHeight)
 import Web.Socket.Event.EventTypes as WSET
 import Web.Socket.Event.MessageEvent as ME
 import Web.Socket.WebSocket as WS
+import WireData (WireDataRaw, decodeWireData, encodeWireData)
 
 
 ---- Websocket stuff from
@@ -54,48 +54,54 @@ wsProducer socket = CRA.produce \emitter -> do
 -- A consumer coroutine that takes the `query` function from our component IO
 -- record and sends `ReceiveMessage` queries in when it receives inputs from the
 -- producer.
-wsConsumer :: (forall a. G.Query a -> Aff (Maybe a)) -> CR.Consumer String Aff Unit
+wsConsumer :: (forall a. Query a -> Aff (Maybe a)) -> CR.Consumer String Aff Unit
 wsConsumer query = CR.consumer \msg -> do
   case
     lmap (show <<< map renderForeignError)
-    $ runExcept $ (decodeJSON msg :: F (AppOperation Unit))
+    $ runExcept $ (decodeJSON msg :: F WireDataRaw) >>= decodeWireData
   of
     Left errors -> do
       Console.log $ "received operation but could not decode: " <> errors
       pure Nothing
-    Right operation -> do
-      Console.log $ "received operation: " <> show operation
-      void $ query $ H.tell $ G.ReceiveOperation operation
+    Right wireData -> do
+      Console.log $ "received operation: " <> show wireData.op
+      void $ query $ H.tell $ ReceiveOperation wireData.op
       pure Nothing
 
 -- A consumer coroutine that takes output messages from our component IO
 -- and sends them using the websocket
-wsSender :: WS.WebSocket -> CR.Consumer G.Message Aff Unit
+wsSender :: WS.WebSocket -> CR.Consumer Message Aff Unit
 wsSender socket = CR.consumer \msg -> do
   case msg of
-    G.SendOperation operation ->
-      liftEffect $ WS.sendString socket $ encodeJSON operation
+    SendOperation operation -> do
+      encodedOperation <- liftEffect $ encodeJSON <$> encodeWireData operation
+      liftEffect $ WS.sendString socket encodedOperation
   pure Nothing
 
 main :: Effect Unit
 main = do
-  connection <- WS.create config.webSocketAddress []
+  -- TODO
+  -- connection <- WS.create config.webSocketAddress []
+  connection <- WS.create "ws://localhost:8111" []
   HA.runHalogenAff do
     body <- HA.awaitBody
     w <- H.liftEffect window
     windowWidth <- H.liftEffect $ innerWidth w
     windowHeight <- H.liftEffect $ innerHeight w
     ui <- runUI
-          G.graphComponent
+          graphComponent
           { width  : toNumber windowWidth
           , height : toNumber windowHeight
           }
           body
 
+    -- TODO
+    pure unit
+
     -- The wsSender consumer subscribes to all output messages
     -- from our component
-    ui.subscribe $ wsSender connection
+    -- ui.subscribe $ wsSender connection
 
     -- Connecting the consumer to the producer initializes both,
     -- feeding queries back to our component as messages are received.
-    CR.runProcess (wsProducer connection CR.$$ wsConsumer ui.query)
+    -- CR.runProcess (wsProducer connection CR.$$ wsConsumer ui.query)
