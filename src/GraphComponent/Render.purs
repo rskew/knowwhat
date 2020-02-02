@@ -2,7 +2,7 @@ module GraphComponent.Render where
 
 import Prelude
 
-import AppState (AppState, DrawingEdge, HoveredElementId(..), _drawingEdges, _graphAtId, _paneAtId)
+import AppState (AppState, DrawingEdge, EdgeSourceElement(..), HoveredElementId(..), MegagraphElement(..), _drawingEdges, _graphAtId, _mappingFocus, _mappings, _megagraph, _paneAtId)
 import CSS as CSS
 import ContentEditable.SVGComponent as SVGContentEditable
 import DOM.HTML.Indexed.InputType (InputType(..))
@@ -15,19 +15,19 @@ import Data.String (joinWith)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
 import GraphComponent.Types (Action(..), Slots, _edgeTextField, _nodeTextField, _titleTextField)
-import GraphComponent.Utils (bezierControlPointFromParabolaPoints, drawingEdgeWithinNodeHalo, edgeMidPosition, edgeSourcePosition, edgeTargetPosition)
+import GraphComponent.Utils (bezierControlPointFromParabolaPoints, drawingEdgeWithinNodeHalo, lookupNodePositionInPane, parallelParabola)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import Megagraph (Edge, EdgeMappingEdge, EdgeSpacePoint2D(..), Focus(..), Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, Node, NodeMappingEdge, PageSpacePoint2D(..), _nodes, edgeArray, edgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, pageSpaceToGraphSpace)
+import Megagraph (Edge, EdgeMappingEdge, Focus(..), Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, Node, NodeMappingEdge, PageSpacePoint2D(..), _nodes, _position, _subgraph, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
-import UI.Constants (defaultTextFieldShape, defaultTitleShape, edgeTextBoxOffset, groupNodeRadius, haloRadius, invalidIndicatorOffset, invalidIndicatorSize, maxTextFieldShape, maxTitleShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset)
+import UI.Constants (defaultTextFieldShape, defaultTitleShape, edgeHaloOffset, edgeTextBoxOffset, groupNodeRadius, haloRadius, invalidIndicatorOffset, invalidIndicatorSize, maxTextFieldShape, maxTitleShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset)
 import UI.SvgDefs (svgDefs)
 import Web.UIEvent.MouseEvent as ME
 
@@ -36,19 +36,20 @@ renderGraphNode :: AppState -> GraphView -> Node -> Tuple String (H.ComponentHTM
 renderGraphNode state pane node =
   let
     nodeFocused = pane.focus == Just (FocusNode node.id)
-    hoveredOverBorder = state.hoveredElementId == Just (NodeBorderId node.id)
-    hoveredOverHalo   = state.hoveredElementId == Just (NodeHaloId node.id)
+    hoveredOverBorder = state.hoveredElementId == Just (NodeBorderId pane.graphId node.id)
+    hoveredOverHalo   = state.hoveredElementId == Just (NodeHaloId pane.graphId node.id)
     noDrawingEdgeFromNode =
-      Map.isEmpty (Map.filter (\drawingEdge -> drawingEdge.source == node.id)
-                              (state ^. _drawingEdges))
-    existsDrawingEdgeHoveredOverNode =
-      (0 < Map.size (Map.filter (\drawingEdge -> drawingEdgeWithinNodeHalo drawingEdge pane node) state.drawingEdges))
+      state ^. _drawingEdges
+      # Map.filter (\drawingEdge -> drawingEdge.source == NodeSource node.id)
+      # Map.isEmpty
     drawingEdgeOverNode =
-      (hoveredOverBorder || hoveredOverHalo)
-      &&
-      noDrawingEdgeFromNode
-      &&
-      existsDrawingEdgeHoveredOverNode
+      state.drawingEdges
+      # Map.filter (\drawingEdge -> drawingEdgeWithinNodeHalo drawingEdge pane node
+                                    && case drawingEdge.source of
+                                         EdgeSource _ -> false
+                                         NodeSource drawingEdgeSourceNode -> drawingEdgeSourceNode /= node.id)
+      # Map.size
+      # \n -> n > 0
     nodeClasses =
       joinWith " " $ Array.catMaybes
       [ Just "node"
@@ -74,6 +75,9 @@ renderGraphNode state pane node =
     haloClasses =
       joinWith " " $ Array.catMaybes
       [ Just "nodeHalo"
+      , if hoveredOverHalo
+        then Just "hovered"
+        else Nothing
       , if nodeFocused
         then Just "focused"
         else Nothing
@@ -106,11 +110,11 @@ renderGraphNode state pane node =
         [ SA.class_ haloClasses
         , SA.r $ show haloRadius
         , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
-                               $ EdgeDrawStart pane node.id e
-        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId node.id
+                               $ EdgeDrawStart pane (NodeSource node.id) e
+        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeHaloId node.graphId node.id
         , HE.onMouseLeave \_ -> Just $ Hover Nothing
         ]
-
+      -- Node core
       , SE.circle
         [ SA.class_ nodeClasses
         , SA.r $ show $ if isJust node.subgraph
@@ -126,7 +130,7 @@ renderGraphNode state pane node =
                                $ NodeDragStart node.graphId node.id node.position e
         , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
                                  $ AppDeleteNode node
-        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId node.id
+        , HE.onMouseEnter \_ -> Just $ Hover $ Just $ NodeBorderId node.graphId node.id
         , HE.onMouseLeave \_ -> Just $ Hover Nothing
         ]
       ] <> textBoxHTML nodeTextBoxOffset
@@ -159,74 +163,226 @@ renderGhostNode state renderPane node =
 
 renderNodeMappingEdge :: AppState -> GraphView -> Mapping -> NodeMappingEdge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
 renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
-  sourcePos <- edgeSourcePosition state mapping.sourceGraph nodeMappingEdge.sourceNode renderPane
-  targetPos <- edgeTargetPosition state mapping.targetGraph nodeMappingEdge.targetNode renderPane
+  GraphSpacePoint2D sourcePos <- lookupNodePositionInPane state mapping.sourceGraph nodeMappingEdge.sourceNode renderPane
+  GraphSpacePoint2D targetPos <- lookupNodePositionInPane state mapping.targetGraph nodeMappingEdge.targetNode renderPane
   let
-    focused = renderPane.focus == (Just $ FocusEdge nodeMappingEdge.id [])
-    edgeClasses = ["nodeMappingEdge"] <> if focused then ["focused"] else []
+    focused = (state ^? _megagraph <<< _mappings <<< at mapping.id <<< traversed <<< _mappingFocus <<< traversed)
+              == Just nodeMappingEdge.id
+    edgeClasses = joinWith " " $ ["edge", "nodeMappingEdge"] <> if focused then ["focused"] else []
+    edgeBorderClasses =
+      joinWith " " $ Array.catMaybes
+      [ Just "edgeBorder"
+      , if state.hoveredElementId == (Just $ EdgeBorderId (MappingElement mapping.id mapping.sourceGraph mapping.targetGraph) nodeMappingEdge.id)
+        then Just "hovered"
+        else Nothing
+      , if focused
+        then Just "focused"
+        else Nothing
+      ]
+    targetHasSubgraph =
+      isJust $ state ^? _graphAtId mapping.targetGraph <<< _nodes <<< at nodeMappingEdge.targetNode <<< traversed <<< _subgraph <<< traversed
+    markerRef = if targetHasSubgraph
+                then "url(#arrow-to-group)"
+                else "url(#arrow)"
+    sourcePosPageSpace = graphSpaceToPageSpace renderPane (GraphSpacePoint2D sourcePos)
+    targetPosPageSpace = graphSpaceToPageSpace renderPane (GraphSpacePoint2D targetPos)
+    GraphSpacePoint2D midpointGraphSpace =
+      nodeMappingEdge.midpoint
+      # pageEdgeSpaceToPageSpace sourcePosPageSpace targetPosPageSpace
+      # pageSpaceToGraphSpace renderPane
+    bezierControlPoint = bezierControlPointFromParabolaPoints {p0: sourcePos, p1: midpointGraphSpace, p2: targetPos}
     edgeKey = show nodeMappingEdge.id <> "_edge_" <> show renderPane.graphId
-    targetHasSubgraph = isJust do
-      graphState <- Map.lookup mapping.targetGraph state.megagraph.graphs
-      targetNode <- Map.lookup nodeMappingEdge.targetNode graphState.graph.nodes
-      targetNode.subgraph
-    zeroMidpoint = EdgeSpacePoint2D {angle: 0.0, radius: 0.0}
-    svg = edgeSvg sourcePos targetPos zeroMidpoint edgeClasses targetHasSubgraph
-  pure $ Tuple edgeKey svg
+  pure $ Tuple edgeKey $
+    SE.g
+    []
+    [ SE.path
+      [ SA.class_ edgeClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , SA.markerEnd markerRef
+      ]
+    , SE.path
+      [ SA.class_ edgeBorderClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , HE.onMouseDown \e -> Just $ StopPropagation (ME.toEvent e)
+                                  $ NodeMappingEdgeDragStart mapping.id nodeMappingEdge e
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId (MappingElement mapping.id mapping.sourceGraph mapping.targetGraph) nodeMappingEdge.id
+      , HE.onMouseLeave \_ -> Just $ Hover Nothing
+      , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                                    $ AppDeleteNodeMappingEdge mapping.id nodeMappingEdge.id
+      ]
+    ]
 
 renderEdgeMappingEdge :: AppState -> GraphView -> Mapping -> EdgeMappingEdge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
 renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
-  sourceGraph <- Map.lookup mapping.sourceGraph state.megagraph.graphs <#> _.graph
+  sourceGraph <- state ^? _graphAtId mapping.sourceGraph
   sourceEdge <- lookupEdgeById edgeMappingEdge.sourceEdge sourceGraph
-  targetGraph <- Map.lookup mapping.targetGraph state.megagraph.graphs <#> _.graph
+  sourcePane <- state ^? _paneAtId mapping.sourceGraph
+  sourceEdgeSourcePos <- sourceGraph ^? _position sourceEdge.source
+  sourceEdgeTargetPos <- sourceGraph ^? _position sourceEdge.target
+  targetGraph <- state ^? _graphAtId mapping.targetGraph
   targetEdge <- lookupEdgeById edgeMappingEdge.targetEdge targetGraph
-  sourcePos <- edgeMidPosition state mapping.sourceGraph sourceEdge.source sourceEdge.target renderPane
-  targetPos <- edgeMidPosition state mapping.sourceGraph targetEdge.source targetEdge.target renderPane
+  targetPane <- state ^? _paneAtId mapping.targetGraph
+  targetEdgeSourcePos <- targetGraph ^? _position targetEdge.source
+  targetEdgeTargetPos <- targetGraph ^? _position targetEdge.target
   let
-    focused = renderPane.focus == (Just $ FocusEdge edgeMappingEdge.id [])
-    edgeClasses = ["edgeMappingEdge"] <> if focused then ["focused"] else []
-    edgeKey = show edgeMappingEdge.id <> "_edge_" <> show renderPane.graphId
+    sourcePosGraphSpace = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos sourceEdge.midpoint
+    targetPosGraphSpace = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos targetEdge.midpoint
+    sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePosGraphSpace
+    targetPosPageSpace = graphSpaceToPageSpace targetPane targetPosGraphSpace
+    focused = (state ^? _megagraph <<< _mappings <<< at mapping.id <<< traversed <<< _mappingFocus <<< traversed)
+              == Just edgeMappingEdge.id
+    edgeClasses = joinWith " " $ ["edge", "edgeMappingEdge"] <> if focused then ["focused"] else []
+    edgeBorderClasses =
+      joinWith " " $ Array.catMaybes
+      [ Just "edgeBorder"
+      , if state.hoveredElementId == (Just $ EdgeBorderId (MappingElement mapping.id mapping.sourceGraph mapping.targetGraph) edgeMappingEdge.id)
+        then Just "hovered"
+        else Nothing
+      , if focused
+        then Just "focused"
+        else Nothing
+      ]
+    markerRef = "url(#arrow-to-edge)"
     targetHasSubgraph = false
-    zeroMidpoint = EdgeSpacePoint2D {angle: 0.0, radius: 0.0}
-    svg = edgeSvg sourcePos targetPos zeroMidpoint edgeClasses targetHasSubgraph
-  pure $ Tuple edgeKey svg
+    GraphSpacePoint2D midpointGraphSpace =
+      edgeMappingEdge.midpoint
+      # pageEdgeSpaceToPageSpace sourcePosPageSpace targetPosPageSpace
+      # pageSpaceToGraphSpace renderPane
+    GraphSpacePoint2D sourcePos = pageSpaceToGraphSpace renderPane sourcePosPageSpace
+    GraphSpacePoint2D targetPos = pageSpaceToGraphSpace renderPane targetPosPageSpace
+    bezierControlPoint = bezierControlPointFromParabolaPoints {p0: sourcePos, p1: midpointGraphSpace, p2: targetPos}
+    edgeKey = show edgeMappingEdge.id <> "_edge_" <> show renderPane.graphId
+  pure $ Tuple edgeKey $
+    SE.g
+    []
+    [ SE.path
+      [ SA.class_ edgeClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , SA.markerEnd markerRef
+      ]
+    , SE.path
+      [ SA.class_ edgeBorderClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ EdgeMappingEdgeDragStart mapping.id edgeMappingEdge e
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId (MappingElement mapping.id mapping.sourceGraph mapping.targetGraph) edgeMappingEdge.id
+      , HE.onMouseLeave \_ -> Just $ Hover Nothing
+      , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                               $ AppDeleteEdgeMappingEdge mapping.id edgeMappingEdge.id
+      ]
+    ]
 
 renderEdge :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
 renderEdge state renderPane edge = do
-  sourcePos <- edgeSourcePosition state edge.graphId edge.source renderPane
-  targetPos <- edgeTargetPosition state edge.graphId edge.target renderPane
+  GraphSpacePoint2D sourcePos <- lookupNodePositionInPane state edge.graphId edge.source renderPane
+  GraphSpacePoint2D targetPos <- lookupNodePositionInPane state edge.graphId edge.target renderPane
   let
     focused = renderPane.focus == (Just $ FocusEdge edge.id [])
-    edgeClasses = if focused then ["focused"] else []
+    drawingEdgeFromDifferentGraphEdgeExists =
+      state.drawingEdges
+      # Map.filter (\drawingEdge -> case drawingEdge.source of
+                                      EdgeSource _ -> drawingEdge.sourceGraph /= edge.graphId
+                                      NodeSource _ -> false)
+      # Map.size
+      # \n -> n > 0
+    borderHovered = state.hoveredElementId == (Just $ EdgeBorderId (GraphElement edge.graphId) edge.id)
+    haloHovered = state.hoveredElementId == (Just $ EdgeHaloId (GraphElement edge.graphId) edge.id)
+    edgeClasses = joinWith " " $ ["edge"] <> if focused then ["focused"] else []
+    edgeBorderClasses =
+      joinWith " " $ Array.catMaybes
+      [ Just "edgeBorder"
+      , if borderHovered
+        then Just "hovered"
+        else Nothing
+      ]
+    edgeHaloClasses =
+      joinWith " " $ Array.catMaybes
+      [ Just "edgeHalo"
+      , if haloHovered
+        then Just "hovered"
+        else Nothing
+      , if haloHovered && drawingEdgeFromDifferentGraphEdgeExists
+        then Just "ready"
+        else Nothing
+      ]
     edgeKey = show edge.id <> "_edge_" <> show renderPane.graphId
     targetHasSubgraph = isJust do
       graphState <- Map.lookup edge.graphId state.megagraph.graphs
       targetNode <- Map.lookup edge.target graphState.graph.nodes
       targetNode.subgraph
-    svg = edgeSvg sourcePos targetPos edge.midpoint edgeClasses targetHasSubgraph
-  pure $ Tuple edgeKey svg
-
-edgeSvg :: GraphSpacePoint2D -> GraphSpacePoint2D -> EdgeSpacePoint2D -> Array String -> Boolean -> H.ComponentHTML Action Slots Aff
-edgeSvg (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) midpoint classes targetHasSubgraph =
-  let
-    edgeClasses =
-      joinWith " " $ ["edge"] <> classes
     markerRef = if targetHasSubgraph
                 then "url(#arrow-to-group)"
                 else "url(#arrow)"
     GraphSpacePoint2D midpointGraphSpace =
-      edgeSpaceToGraphSpace
+      graphEdgeSpaceToGraphSpace
         (GraphSpacePoint2D sourcePos)
         (GraphSpacePoint2D targetPos)
-        midpoint
-    bezierControlPoint = bezierControlPointFromParabolaPoints sourcePos midpointGraphSpace targetPos
-  in
-    SE.path
-    [ SA.class_ edgeClasses
-    , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
-           , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
-           ]
-    , SA.markerEnd markerRef
+        edge.midpoint
+    bezierParabola = {p0: sourcePos, p1: midpointGraphSpace, p2: targetPos}
+    haloParabolaPos = parallelParabola edgeHaloOffset bezierParabola
+    haloParabolaNeg = parallelParabola (- edgeHaloOffset) bezierParabola
+    bezierControlPoint = bezierControlPointFromParabolaPoints bezierParabola
+    bezierControlPointHaloPos = bezierControlPointFromParabolaPoints haloParabolaPos
+    bezierControlPointHaloNeg = bezierControlPointFromParabolaPoints haloParabolaNeg
+  pure $ Tuple edgeKey $
+    SE.g
+    []
+    -- Edge halo for drawing edge-mapping edges
+    [ SE.path
+      [ SA.class_ edgeHaloClasses
+      , SA.d [ SVGT.Abs (SVGT.M haloParabolaPos.p0.x haloParabolaPos.p0.y)
+             , SVGT.Abs (SVGT.Q bezierControlPointHaloPos.x bezierControlPointHaloPos.y haloParabolaPos.p2.x haloParabolaPos.p2.y)
+             ]
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ EdgeDrawStart renderPane (EdgeSource edge.id) e
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeHaloId (GraphElement edge.graphId) edge.id
+      , HE.onMouseLeave \_ -> Just $ Hover Nothing
+      ]
+    , SE.path
+      [ SA.class_ edgeHaloClasses
+      , SA.d [ SVGT.Abs (SVGT.M haloParabolaNeg.p0.x haloParabolaNeg.p0.y)
+             , SVGT.Abs (SVGT.Q bezierControlPointHaloNeg.x bezierControlPointHaloNeg.y haloParabolaNeg.p2.x haloParabolaNeg.p2.y)
+             ]
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ EdgeDrawStart renderPane (EdgeSource edge.id) e
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeHaloId (GraphElement edge.graphId) edge.id
+      , HE.onMouseLeave \_ -> Just $ Hover Nothing
+      ]
+    -- Edge line
+    , SE.path
+      [ SA.class_ edgeClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , SA.markerEnd markerRef
+      ]
+    -- Edge border for grabbing and dragging
+    , SE.path
+      [ SA.class_ edgeBorderClasses
+      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
+             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
+             ]
+      , HE.onMouseDown \e -> Just
+                             $ StopPropagation (ME.toEvent e)
+                             $ EdgeDragStart edge.graphId edge.id edge.midpoint e
+      , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId (GraphElement edge.graphId) edge.id
+      , HE.onMouseLeave \_ -> Just $ Hover Nothing
+      , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
+                               $ AppDeleteEdge renderPane.graphId edge
+      ]
     ]
+
 
 renderEdgeTextField :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
 renderEdgeTextField state renderPane edge = do
@@ -234,7 +390,7 @@ renderEdgeTextField state renderPane edge = do
   sourceNode <- state ^? _graphAtId edge.graphId <<< _nodes <<< at edge.source <<< traversed
   let
     GraphSpacePoint2D midpoint =
-      edgeSpaceToGraphSpace
+      graphEdgeSpaceToGraphSpace
         sourceNode.position
         targetNode.position
         edge.midpoint
@@ -261,40 +417,6 @@ renderEdgeTextField state renderPane edge = do
       , fitContentDynamic : true
       }
       (Just <<< EdgeTextInput sourceNode.graphId edge.id)
-    ]
-
-renderEdgeBorder :: AppState -> GraphView -> Edge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
-renderEdgeBorder state renderPane edge = do
-  targetNode <- state ^? _graphAtId edge.graphId <<< _nodes <<< at edge.target
-  GraphSpacePoint2D sourcePos <- edgeSourcePosition state edge.graphId edge.source renderPane
-  GraphSpacePoint2D targetPos <- edgeTargetPosition state edge.graphId edge.target renderPane
-  let
-    edgeBorderClasses =
-      joinWith " " $ Array.catMaybes
-      [ Just "edgeBorder"
-      , if state.hoveredElementId == (Just $ EdgeBorderId edge.id)
-        then Just "hover"
-        else Nothing
-      ]
-    GraphSpacePoint2D midpointGraphSpace =
-      edgeSpaceToGraphSpace
-        (GraphSpacePoint2D sourcePos)
-        (GraphSpacePoint2D targetPos)
-        edge.midpoint
-    bezierControlPoint = bezierControlPointFromParabolaPoints sourcePos midpointGraphSpace targetPos
-  pure $ Tuple (show edge.id <> "_border_" <> show renderPane.graphId) $
-    SE.path
-    [ SA.class_ edgeBorderClasses
-    , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
-           , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
-           ]
-    , HE.onMouseDown \e -> Just
-                           $ StopPropagation (ME.toEvent e)
-                           $ EdgeDragStart edge.graphId edge.id edge.midpoint e
-    , HE.onMouseEnter \_ -> Just $ Hover $ Just $ EdgeBorderId edge.id
-    , HE.onMouseLeave \_ -> Just $ Hover Nothing
-    , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
-                                  $ AppDeleteEdge renderPane.graphId edge
     ]
 
 renderDrawingEdge :: AppState -> GraphView -> DrawingEdge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
@@ -388,8 +510,6 @@ renderSingleGraph state renderPane graph =
 
     keyedEdgeTextFields   = Array.mapMaybe (renderEdgeTextField state renderPane) edges
 
-    keyedEdgeBorders      = Array.mapMaybe (renderEdgeBorder state renderPane) edges
-
     drawingEdges          = state.drawingEdges # Map.values # Array.fromFoldable
 
     keyedDrawingEdges     = Array.mapMaybe (renderDrawingEdge state renderPane) drawingEdges
@@ -435,7 +555,6 @@ renderSingleGraph state renderPane graph =
          <> keyedNodeMappingEdges
          <> keyedEdgeMappingEdges
          <> keyedEdges
-         <> keyedEdgeBorders
          <> keyedDrawingEdges
          <> keyedNodes
          <> keyedEdgeTextFields

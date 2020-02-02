@@ -74,4 +74,20 @@ svgDefs = SE.defs []
                              ]
                       ]
             ]
+          , SE.marker
+            [ SA.id "arrow-to-edge"
+            , SA.markerWidth $ show 10.0
+            , SA.markerHeight $ show 10.0
+            , SA.refX $ show 8.0
+            , SA.refY $ show 5.0
+            , SA.orient SVGT.AutoOrient
+            , SA.markerUnits SVGT.UserSpaceOnUse
+            ]
+            [ SE.path [ SA.d [ SVGT.Abs (SVGT.M 0.0 0.0)
+                             , SVGT.Abs (SVGT.L 0.0 10.0)
+                             , SVGT.Abs (SVGT.L 8.0 5.0)
+                             , SVGT.Abs SVGT.Z
+                             ]
+                      ]
+            ]
           ]

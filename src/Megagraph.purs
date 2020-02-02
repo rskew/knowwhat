@@ -39,6 +39,8 @@ type EdgeId = UUID
 
 type Point2D = { x :: Number, y :: Number }
 
+type Point2DPolar = { angle :: Number, radius :: Number }
+
 -- | A position in graph space, as distinct from a point on the page/window
 newtype GraphSpacePoint2D = GraphSpacePoint2D Point2D
 
@@ -77,18 +79,36 @@ instance decodePageSpacePoint2D :: Decode PageSpacePoint2D where
 -- | This makes is simple to represent the curve of the edge
 -- | in a way that's invariant to rotation, and preserves the deviation from
 -- | the midpoint when elongated.
-newtype EdgeSpacePoint2D = EdgeSpacePoint2D { angle :: Number, radius :: Number }
+newtype GraphEdgeSpacePoint2D = GraphEdgeSpacePoint2D { angle :: Number, radius :: Number }
 
-derive newtype instance showEdgeSpacePoint2D :: Show EdgeSpacePoint2D
+derive newtype instance showGraphEdgeSpacePoint2D :: Show GraphEdgeSpacePoint2D
 
-derive newtype instance eqEdgeSpacePoint2D :: Eq EdgeSpacePoint2D
+derive newtype instance eqGraphEdgeSpacePoint2D :: Eq GraphEdgeSpacePoint2D
 
-derive instance genericEdgeSpacePoint2D :: Generic EdgeSpacePoint2D _
+derive newtype instance ordGraphEdgeSpacePoint2D :: Ord GraphEdgeSpacePoint2D
 
-instance encodeEdgeSpacePoint2D :: Encode EdgeSpacePoint2D where
+derive instance genericGraphEdgeSpacePoint2D :: Generic GraphEdgeSpacePoint2D _
+
+instance encodeGraphEdgeSpacePoint2D :: Encode GraphEdgeSpacePoint2D where
   encode x = x # genericEncode defaultOptions
 
-instance decodeEdgeSpacePoint2D :: Decode EdgeSpacePoint2D where
+instance decodeGraphEdgeSpacePoint2D :: Decode GraphEdgeSpacePoint2D where
+  decode x = x # genericDecode defaultOptions
+
+newtype PageEdgeSpacePoint2D = PageEdgeSpacePoint2D { angle :: Number, radius :: Number }
+
+derive newtype instance showPageEdgeSpacePoint2D :: Show PageEdgeSpacePoint2D
+
+derive newtype instance eqPageEdgeSpacePoint2D :: Eq PageEdgeSpacePoint2D
+
+derive newtype instance ordPageEdgeSpacePoint2D :: Ord PageEdgeSpacePoint2D
+
+derive instance genericPageEdgeSpacePoint2D :: Generic PageEdgeSpacePoint2D _
+
+instance encodePageEdgeSpacePoint2D :: Encode PageEdgeSpacePoint2D where
+  encode x = x # genericEncode defaultOptions
+
+instance decodePageEdgeSpacePoint2D :: Decode PageEdgeSpacePoint2D where
   decode x = x # genericDecode defaultOptions
 
 pageSpaceToGraphSpace :: GraphView -> PageSpacePoint2D -> GraphSpacePoint2D
@@ -112,35 +132,50 @@ graphSpaceToPageSpace pane (GraphSpacePoint2D graphPosition) =
                        , y : (graphPosition.y / pane.zoom) + pane.boundingRect.top  + origin.y
                        }
 
-edgeSpaceToGraphSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> EdgeSpacePoint2D -> GraphSpacePoint2D
-edgeSpaceToGraphSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (EdgeSpacePoint2D edgeSpacePoint) =
+graphEdgeSpaceToGraphSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> GraphEdgeSpacePoint2D -> GraphSpacePoint2D
+graphEdgeSpaceToGraphSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (GraphEdgeSpacePoint2D edgeSpacePoint) =
+  GraphSpacePoint2D $ edgePolarToSourceTargetCartesian sourcePos targetPos edgeSpacePoint
+
+edgePolarToSourceTargetCartesian :: Point2D -> Point2D -> Point2DPolar -> Point2D
+edgePolarToSourceTargetCartesian sourcePos targetPos polarPoint =
   let
     sourceTargetVector = targetPos - sourcePos
-    edgeMidpoint = { x : (targetPos.x + sourcePos.x) / 2.0
-                   , y : (targetPos.y + sourcePos.y) / 2.0
-                   }
-    edgeAngle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
+    midpoint = { x : (targetPos.x + sourcePos.x) / 2.0
+               , y : (targetPos.y + sourcePos.y) / 2.0
+               }
+    angle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
   in
-    GraphSpacePoint2D
-    { x : Math.cos (edgeSpacePoint.angle + edgeAngle) * edgeSpacePoint.radius + edgeMidpoint.x
-    , y : Math.sin (edgeSpacePoint.angle + edgeAngle) * edgeSpacePoint.radius + edgeMidpoint.y
+    { x : Math.cos (polarPoint.angle + angle) * polarPoint.radius + midpoint.x
+    , y : Math.sin (polarPoint.angle + angle) * polarPoint.radius + midpoint.y
     }
 
-graphSpaceToEdgeSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> GraphSpacePoint2D -> EdgeSpacePoint2D
-graphSpaceToEdgeSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (GraphSpacePoint2D graphSpacePoint) =
+graphSpaceToGraphEdgeSpace :: GraphSpacePoint2D -> GraphSpacePoint2D -> GraphSpacePoint2D -> GraphEdgeSpacePoint2D
+graphSpaceToGraphEdgeSpace (GraphSpacePoint2D sourcePos) (GraphSpacePoint2D targetPos) (GraphSpacePoint2D graphSpacePoint) =
+  GraphEdgeSpacePoint2D $ sourceTargetCartesianToEdgePolar sourcePos targetPos graphSpacePoint
+
+sourceTargetCartesianToEdgePolar :: Point2D -> Point2D -> Point2D -> Point2DPolar
+sourceTargetCartesianToEdgePolar sourcePos targetPos point =
   let
     sourceTargetVector = targetPos - sourcePos
-    edgeMidpoint = { x : (targetPos.x + sourcePos.x) / 2.0
-                   , y : (targetPos.y + sourcePos.y) / 2.0
-                   }
-    edgeAngle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
-    positionRelativeToEdgeMidpoint = graphSpacePoint - edgeMidpoint
-    totalAngle = Math.atan2 positionRelativeToEdgeMidpoint.y positionRelativeToEdgeMidpoint.x
-    norm point = Math.sqrt (point.x * point.x + point.y * point.y)
+    midpoint = { x : (targetPos.x + sourcePos.x) / 2.0
+               , y : (targetPos.y + sourcePos.y) / 2.0
+               }
+    sourceTargetAngle = Math.atan2 sourceTargetVector.y sourceTargetVector.x
+    positionRelativeToMidpoint = point - midpoint
+    totalAngle = Math.atan2 positionRelativeToMidpoint.y positionRelativeToMidpoint.x
+    norm point2D = Math.sqrt (point2D.x * point2D.x + point2D.y * point2D.y)
   in
-    EdgeSpacePoint2D { angle : totalAngle - edgeAngle
-                     , radius : norm positionRelativeToEdgeMidpoint
-                     }
+    { angle : totalAngle - sourceTargetAngle
+    , radius : norm positionRelativeToMidpoint
+    }
+
+pageEdgeSpaceToPageSpace :: PageSpacePoint2D -> PageSpacePoint2D -> PageEdgeSpacePoint2D -> PageSpacePoint2D
+pageEdgeSpaceToPageSpace (PageSpacePoint2D sourcePos) (PageSpacePoint2D targetPos) (PageEdgeSpacePoint2D pageEdgeSpacePoint) =
+  PageSpacePoint2D $ edgePolarToSourceTargetCartesian sourcePos targetPos pageEdgeSpacePoint
+
+pageSpaceToPageEdgeSpace :: PageSpacePoint2D -> PageSpacePoint2D -> PageSpacePoint2D -> PageEdgeSpacePoint2D
+pageSpaceToPageEdgeSpace (PageSpacePoint2D sourcePos) (PageSpacePoint2D targetPos) (PageSpacePoint2D pageSpacePoint) =
+  PageEdgeSpacePoint2D $ sourceTargetCartesianToEdgePolar sourcePos targetPos pageSpacePoint
 
 type EdgeMetadata
   = { id      :: EdgeId
@@ -157,7 +192,7 @@ type Edge
     , graphId  :: GraphId
     , source   :: NodeId
     , target   :: NodeId
-    , midpoint :: EdgeSpacePoint2D
+    , midpoint :: GraphEdgeSpacePoint2D
     , text     :: String
     , isValid  :: Boolean
     }
@@ -166,7 +201,7 @@ freshEdge :: EdgeMetadata -> Edge
 freshEdge edgeMetadata =
   Builder.build (Builder.merge edgeMetadata)
   $ { text     : ""
-    , midpoint : EdgeSpacePoint2D { angle : 0.0, radius : 0.0 }
+    , midpoint : GraphEdgeSpacePoint2D { angle : 0.0, radius : 0.0 }
     , isValid  : true
     }
 
@@ -249,20 +284,25 @@ emptyGraph id
 
 type MappingId = UUID
 
+-- | For mapping edges, the midpoint is interpreted in page-space coords,
+-- | rather than graph-space coords like the normal edges.
 type NodeMappingEdge
-  = { id :: EdgeId
-    , mappingId :: MappingId
+  = { id         :: EdgeId
+    , mappingId  :: MappingId
     , sourceNode :: NodeId
     , targetNode :: NodeId
+    , midpoint   :: PageEdgeSpacePoint2D
     }
 
+-- | For mapping edges, the midpoint is interpreted in page-space coords,
+-- | rather than graph-space coords like the normal edges.
 type EdgeMappingEdge
-  = { id :: EdgeId
-    , mappingId :: MappingId
+  = { id         :: EdgeId
+    , mappingId  :: MappingId
     , sourceEdge :: EdgeId
     , targetEdge :: EdgeId
+    , midpoint   :: PageEdgeSpacePoint2D
     }
-
 
 -- | all ((==) mapping.sourceGraph) (mapping.nodeMappingEdges <#> _.sourceNode.graphId)
 -- | all ((==) mapping.targetGraph) (mapping.nodeMappingEdges <#> _.targetNode.graphId)
@@ -273,8 +313,8 @@ type Mapping
     , name :: String
     , sourceGraph :: GraphId
     , targetGraph :: GraphId
-    , nodeMappingEdges :: Set NodeMappingEdge
-    , edgeMappingEdges :: Set EdgeMappingEdge
+    , nodeMappingEdges :: Map EdgeId NodeMappingEdge
+    , edgeMappingEdges :: Map EdgeId EdgeMappingEdge
     }
 
 emptyMapping :: MappingId -> GraphId -> GraphId -> Mapping
@@ -283,8 +323,8 @@ emptyMapping id sourceId targetId
     , name : ""
     , sourceGraph : sourceId
     , targetGraph : targetId
-    , nodeMappingEdges : Set.empty
-    , edgeMappingEdges : Set.empty
+    , nodeMappingEdges : Map.empty
+    , edgeMappingEdges : Map.empty
     }
 
 type GraphView
@@ -363,10 +403,10 @@ _boundingRect = prop (SProxy :: SProxy "boundingRect")
 _height :: Lens' WHE.DOMRect Number
 _height = prop (SProxy :: SProxy "height")
 
-_nodeMappingEdges :: Lens' Mapping (Set NodeMappingEdge)
+_nodeMappingEdges :: Lens' Mapping (Map EdgeId NodeMappingEdge)
 _nodeMappingEdges = prop (SProxy :: SProxy "nodeMappingEdges")
 
-_edgeMappingEdges :: Lens' Mapping (Set EdgeMappingEdge)
+_edgeMappingEdges :: Lens' Mapping (Map EdgeId EdgeMappingEdge)
 _edgeMappingEdges = prop (SProxy :: SProxy "edgeMappingEdges")
 
 _source :: Lens' Edge NodeId
@@ -374,6 +414,9 @@ _source = prop (SProxy :: SProxy "source")
 
 _target :: Lens' Edge NodeId
 _target = prop (SProxy :: SProxy "target")
+
+_subgraph :: Lens' Node (Maybe GraphId)
+_subgraph = prop (SProxy :: SProxy "subgraph")
 
 
 ------
@@ -454,7 +497,7 @@ updateNodeText nodeId newText = _nodeText nodeId .~ newText
 updateEdgeText :: EdgeId -> String -> Graph -> Graph
 updateEdgeText edgeId newText = updateEdgeData _{ text = newText } edgeId
 
-updateEdgeMidpoint :: EdgeId -> EdgeSpacePoint2D -> Graph -> Graph
+updateEdgeMidpoint :: EdgeId -> GraphEdgeSpacePoint2D -> Graph -> Graph
 updateEdgeMidpoint edgeId newMidpoint =
   updateEdgeData _{ midpoint = newMidpoint } edgeId
 
@@ -480,19 +523,27 @@ deletePathEquation pathEquation =
 
 insertNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
 insertNodeMappingEdge nodeMappingEdge =
-  _nodeMappingEdges %~ Set.insert nodeMappingEdge
+  _nodeMappingEdges %~ Map.insert nodeMappingEdge.id nodeMappingEdge
 
-deleteNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
-deleteNodeMappingEdge nodeMappingEdge =
-  _nodeMappingEdges %~ Set.delete nodeMappingEdge
+deleteNodeMappingEdge :: EdgeId -> Mapping -> Mapping
+deleteNodeMappingEdge nodeMappingEdgeId =
+  _nodeMappingEdges %~ Map.delete nodeMappingEdgeId
 
 insertEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
 insertEdgeMappingEdge edgeMappingEdge =
-  _edgeMappingEdges %~ Set.insert edgeMappingEdge
+  _edgeMappingEdges %~ Map.insert edgeMappingEdge.id edgeMappingEdge
 
-deleteEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
-deleteEdgeMappingEdge edgeMappingEdge =
-  _edgeMappingEdges %~ Set.delete edgeMappingEdge
+deleteEdgeMappingEdge :: EdgeId -> Mapping -> Mapping
+deleteEdgeMappingEdge edgeMappingEdgeId =
+  _edgeMappingEdges %~ Map.delete edgeMappingEdgeId
+
+updateNodeMappingEdgeMidpoint :: EdgeId -> PageEdgeSpacePoint2D -> Mapping -> Mapping
+updateNodeMappingEdgeMidpoint nodeMappingEdgeId newMidpoint =
+  _nodeMappingEdges <<< at nodeMappingEdgeId <<< traversed %~ _{ midpoint = newMidpoint }
+
+updateEdgeMappingEdgeMidpoint :: EdgeId -> PageEdgeSpacePoint2D -> Mapping -> Mapping
+updateEdgeMappingEdgeMidpoint edgeMappingEdgeId newMidpoint =
+  _edgeMappingEdges <<< at edgeMappingEdgeId <<< traversed %~ _{ midpoint = newMidpoint }
 
 
 ------

@@ -2,19 +2,14 @@ module AppOperation where
 
 import Prelude
 
-import AppState (GraphState, MappingState, MegagraphState)
+import AppState (GraphState, MappingState, MegagraphState, MegagraphElement(..))
 import Data.Array as Array
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (GraphId, MappingId)
 import MegagraphOperation (MegagraphUpdate, encodeGraphAsMegagraphUpdate, encodeMappingAsMegagraphUpdate)
 
-
-data MegagraphElement
-  = GraphElement GraphId
-  | MappingElement MappingId GraphId GraphId
 
 data HistoryUpdate
   = Insert MegagraphUpdate
@@ -37,12 +32,6 @@ newtype AppOperation
     , undoneUpdate  :: HistoryUpdate
     }
 
-derive instance genericMegagraphComponent :: Generic MegagraphElement _
-instance decodeMegagraphComponent :: Decode MegagraphElement where
-  decode = genericDecode defaultOptions
-instance encodeMegagraphComponent :: Encode MegagraphElement where
-  encode = genericEncode defaultOptions
-
 derive instance genericHistoryUpdate :: Generic HistoryUpdate _
 instance decodeHistoryUpdate :: Decode HistoryUpdate where
   decode = genericDecode defaultOptions
@@ -54,14 +43,6 @@ instance decodeAppOperation :: Decode AppOperation where
   decode = genericDecode defaultOptions
 instance encodeAppOperation :: Encode AppOperation where
   encode = genericEncode defaultOptions
-
-instance showMegagraphComponent :: Show MegagraphElement where
-  show = case _ of
-    GraphElement graphId -> "GraphComponent " <> show graphId
-    MappingElement mappingId from to -> "MappingComponent "
-                                        <> show mappingId
-                                        <> " from: " <> show from
-                                        <> " to: " <> show to
 
 instance showHistoryUpdate :: Show HistoryUpdate where
   show = case _ of

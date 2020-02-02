@@ -3,13 +3,13 @@ module GraphComponent.Types where
 import Prelude
 
 import AppOperation (AppOperation)
-import AppState (DrawingEdgeId, HoveredElementId, Shape)
+import AppState (DrawingEdgeId, EdgeSourceElement, HoveredElementId, Shape)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Data.Maybe (Maybe)
 import Data.Symbol (SProxy(..))
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
-import Megagraph (Edge, EdgeId, EdgeMetadata, EdgeSpacePoint2D, Focus, GraphId, GraphSpacePoint2D, GraphView, Node, NodeId, PageSpacePoint2D)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, Focus, GraphEdgeSpacePoint2D, GraphId, GraphSpacePoint2D, GraphView, Mapping, MappingId, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D, PageSpacePoint2D)
 import Web.Event.Event as WE
 import Web.File.FileReader as FileReader
 import Web.UIEvent.KeyboardEvent as KE
@@ -28,9 +28,13 @@ data Action
   | BackgroundDragMove Drag.DragEvent GraphId PageSpacePoint2D H.SubscriptionId
   | NodeDragStart GraphId NodeId GraphSpacePoint2D ME.MouseEvent
   | NodeDragMove Drag.DragEvent GraphId NodeId GraphSpacePoint2D H.SubscriptionId
-  | EdgeDragStart GraphId EdgeId EdgeSpacePoint2D ME.MouseEvent
-  | EdgeDragMove Drag.DragEvent GraphId EdgeId EdgeSpacePoint2D H.SubscriptionId
-  | EdgeDrawStart GraphView DrawingEdgeId ME.MouseEvent
+  | EdgeDragStart GraphId EdgeId GraphEdgeSpacePoint2D ME.MouseEvent
+  | EdgeDragMove Drag.DragEvent GraphId EdgeId GraphEdgeSpacePoint2D H.SubscriptionId
+  | NodeMappingEdgeDragStart MappingId NodeMappingEdge ME.MouseEvent
+  | NodeMappingEdgeDragMove Drag.DragEvent Mapping EdgeId PageEdgeSpacePoint2D H.SubscriptionId
+  | EdgeMappingEdgeDragStart MappingId EdgeMappingEdge ME.MouseEvent
+  | EdgeMappingEdgeDragMove Drag.DragEvent Mapping EdgeId PageEdgeSpacePoint2D H.SubscriptionId
+  | EdgeDrawStart GraphView EdgeSourceElement ME.MouseEvent
   | EdgeDrawMove Drag.DragEvent GraphId DrawingEdgeId H.SubscriptionId
   | NodeTextInput GraphId NodeId SVGContentEditable.Message
   | EdgeTextInput GraphId EdgeId SVGContentEditable.Message
@@ -39,7 +43,12 @@ data Action
   | AppDeleteNode Node
   | AppCreateEdge GraphId EdgeMetadata
   | AppDeleteEdge GraphId Edge
-  | FocusOn GraphId (Maybe Focus)
+  | AppCreateNodeMappingEdge EdgeId NodeId GraphId NodeId GraphId
+  | AppDeleteNodeMappingEdge MappingId EdgeId
+  | AppCreateEdgeMappingEdge EdgeId EdgeId GraphId EdgeId GraphId
+  | AppDeleteEdgeMappingEdge MappingId EdgeId
+  | UpdateGraphFocus GraphId (Maybe Focus)
+  | UpdateMappingFocus MappingId (Maybe EdgeId)
   | DeleteFocus GraphId
   | Hover (Maybe HoveredElementId)
   | Zoom GraphId WhE.WheelEvent

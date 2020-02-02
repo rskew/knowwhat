@@ -3,8 +3,8 @@ module Interpreter where
 
 import Prelude
 
-import AppOperation (AppOperation(..), HistoryUpdate(..), MegagraphElement(..))
-import AppState (MegagraphState, _graph, _graphState, _graphs, _mapping, _mappingState, _mappings, _pane, emptyGraphState, emptyMappingState)
+import AppOperation (AppOperation(..), HistoryUpdate(..))
+import AppState (MegagraphElement(..), MegagraphState, _graph, _graphState, _graphs, _mapping, _mappingState, _mappings, _pane, emptyGraphState, emptyMappingState)
 import Data.Array as Array
 import Data.Foldable (foldl)
 import Data.Lens ((%~), (?~), (^?), traversed)
@@ -13,7 +13,7 @@ import Data.Lens.Record (prop)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Symbol (SProxy(..))
-import Megagraph (Graph, Mapping, _boundingRect, _height, connectSubgraph, deleteEdge, deleteEdgeMappingEdge, deleteNode, deleteNodeMappingEdge, deletePathEquation, insertEdgeMappingEdge, insertNewEdge, insertNewNode, insertNodeMappingEdge, insertPathEquation, moveNode, setTitleValidity, updateEdgeMidpoint, updateEdgeText, updateNodeText, updateTitle)
+import Megagraph (Graph, Mapping, _boundingRect, _height, connectSubgraph, deleteEdge, deleteEdgeMappingEdge, deleteNode, deleteNodeMappingEdge, deletePathEquation, insertEdgeMappingEdge, insertNewEdge, insertNewNode, insertNodeMappingEdge, insertPathEquation, moveNode, setTitleValidity, updateEdgeMappingEdgeMidpoint, updateEdgeMidpoint, updateEdgeText, updateNodeMappingEdgeMidpoint, updateNodeText, updateTitle)
 import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, collapseMegagraphOperations)
 
 --import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
@@ -43,11 +43,15 @@ interpretMappingOperation = case _ of
   InsertNodeMappingEdge nodeMappingEdge ->
     insertNodeMappingEdge nodeMappingEdge
   DeleteNodeMappingEdge nodeMappingEdge ->
-    deleteNodeMappingEdge nodeMappingEdge
+    deleteNodeMappingEdge nodeMappingEdge.id
   InsertEdgeMappingEdge edgeMappingEdge ->
     insertEdgeMappingEdge edgeMappingEdge
   DeleteEdgeMappingEdge edgeMappingEdge ->
-    deleteEdgeMappingEdge edgeMappingEdge
+    deleteEdgeMappingEdge edgeMappingEdge.id
+  MoveNodeMappingEdgeMidpoint id from to ->
+    updateNodeMappingEdgeMidpoint id to
+  MoveEdgeMappingEdgeMidpoint id from to ->
+    updateEdgeMappingEdgeMidpoint id to
 
 interpretMegagraphOperation :: MegagraphOperation -> MegagraphState -> MegagraphState
 interpretMegagraphOperation = case _ of

@@ -2,6 +2,8 @@ module AppState where
 
 import Prelude
 
+import Data.Array as Array
+import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', Traversal', lens, traversed)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
@@ -9,6 +11,9 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Symbol (SProxy(..))
+import Data.UUID (UUID)
+import Foreign.Class (class Encode, class Decode)
+import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
 import Megagraph (Edge, EdgeId, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, NodeId, PageSpacePoint2D, Point2D, emptyGraph, emptyMapping, freshPane)
 import MegagraphOperation (MegagraphUpdate)
 import Web.HTML.HTMLElement as WHE
@@ -41,12 +46,14 @@ emptyGraphState graphId rect
 
 type MappingState
   = { mapping :: Mapping
+    , focus   :: Maybe EdgeId
     , history :: Array MegagraphUpdate
     , undone  :: Array MegagraphUpdate
     }
 
 emptyMappingState :: MappingId -> GraphId -> GraphId -> MappingState
 emptyMappingState mappingId from to = { mapping : emptyMapping mappingId from to
+                                      , focus : Nothing
                                       , history : []
                                       , undone : []
                                       }
@@ -94,33 +101,59 @@ type Shape
 edgeIdStr :: Edge -> String
 edgeIdStr edge = show edge.source <> "_" <> show edge.target
 
+data EdgeSourceElement
+  = NodeSource NodeId
+  | EdgeSource EdgeId
+
+derive instance eqEdgeSourceElement :: Eq EdgeSourceElement
+
+instance showEdgeSourceElement :: Show EdgeSourceElement where
+  show = case _ of
+    NodeSource nodeId -> "EdgeSourceElement NodeSource " <> show nodeId
+    EdgeSource edgeId -> "EdgeSourceElement EdgeSource " <> show edgeId
+
 type DrawingEdge
-  = { source         :: NodeId
+  = { source         :: EdgeSourceElement
     , sourcePosition :: PageSpacePoint2D
     , sourceGraph    :: GraphId
     , pointPosition  :: PageSpacePoint2D
     , targetGraph    :: GraphId
     }
 
-type DrawingEdgeId = NodeId
+type DrawingEdgeId = UUID
 
-drawingEdgeKey :: DrawingEdgeId -> String
-drawingEdgeKey id = "DrawingEdge_" <> show id
+data MegagraphElement
+  = GraphElement GraphId
+  | MappingElement MappingId GraphId GraphId
+
+derive instance eqMegagraphElement :: Eq MegagraphElement
+
+derive instance genericMegagraphElement :: Generic MegagraphElement _
+instance decodeMegagraphElement :: Decode MegagraphElement where
+  decode = genericDecode defaultOptions
+instance encodeMegagraphElement :: Encode MegagraphElement where
+  encode = genericEncode defaultOptions
+
+instance showMegagraphElement :: Show MegagraphElement where
+  show = case _ of
+    GraphElement graphId -> "GraphElement " <> show graphId
+    MappingElement mappingId source target ->
+      "MappingElement " <> show mappingId <> " from: " <> show source <> " to: " <> show target
 
 data HoveredElementId
-  = NodeHaloId NodeId
-  | NodeBorderId NodeId
-  | EdgeHaloId EdgeId
-  | EdgeBorderId EdgeId
+  = NodeHaloId   GraphId          NodeId
+  | NodeBorderId GraphId          NodeId
+  | EdgeHaloId   MegagraphElement EdgeId
+  | EdgeBorderId MegagraphElement EdgeId
 
-derive instance eqGraphElementId :: Eq HoveredElementId
+derive instance eqHoveredElementId :: Eq HoveredElementId
 
 instance showHoveredElementId :: Show HoveredElementId where
    show = case _ of
-     NodeHaloId nodeId   -> "NodeHaloId " <> show nodeId
-     NodeBorderId nodeId -> "NodeBorderId " <> show nodeId
-     EdgeHaloId edgeId   -> "EdgeHaloId " <> show edgeId
-     EdgeBorderId edgeId -> "EdgeBorderId " <> show edgeId
+     NodeHaloId   graphId nodeId -> "NodeHaloId in graph: " <> show graphId <> " node: " <> show nodeId
+     NodeBorderId graphId nodeId -> "NodeBorderId in graph: " <> show graphId <> " node: " <> show nodeId
+     EdgeHaloId   graphId edgeId -> "EdgeHaloId in graph: " <> show graphId <> " edge: " <> show edgeId
+     EdgeBorderId graphId edgeId -> "EdgeBorderId in graph: " <> show graphId <> "  edge: " <> show edgeId
 
 ------
 -- Lenses
@@ -170,6 +203,12 @@ _mappingState mappingId =
 _mapping :: Lens' MappingState Mapping
 _mapping = prop (SProxy :: SProxy "mapping")
 
+_mappingAtId :: MappingId -> Traversal' AppState Mapping
+_mappingAtId mappingId = _megagraph <<< _mappingState mappingId <<< traversed <<< _mapping
+
+_mappingFocus :: Lens' MappingState (Maybe EdgeId)
+_mappingFocus = prop (SProxy :: SProxy "focus")
+
 _graph :: Lens' GraphState Graph
 _graph = prop (SProxy :: SProxy "graph")
 
@@ -196,3 +235,18 @@ _coerceToGraphSpace = lens GraphSpacePoint2D (\_ (GraphSpacePoint2D pos) -> pos)
 
 _focusedPane :: Lens' AppState (Maybe GraphId)
 _focusedPane = prop (SProxy :: SProxy "focusedPane")
+
+
+------
+-- Utils
+
+-- | There is only a sinlge mapping present n in the state between any two graphs,
+-- | so mappings can be found uniquely by their source and target graphs.
+lookupMapping :: GraphId -> GraphId -> AppState -> Maybe Mapping
+lookupMapping sourceGraphId targetGraphId state =
+  state.megagraph.mappings
+  # Map.values >>> Array.fromFoldable
+  <#> _.mapping
+  # Array.filter (\mapping -> mapping.sourceGraph == sourceGraphId
+                           && mapping.targetGraph == targetGraphId)
+  # Array.head

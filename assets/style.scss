@@ -8,6 +8,8 @@
     --node-border-color: #00000033;
     --focused-color: #ffcc00;
     --highlighted-color: #0088ffbb;
+    --node-mapping-edge-color: #8833ff;
+    --edge-mapping-edge-color: #ff3388;
     --invalid-color: #ff6666bb;
     --text-field-border-color: #aaaaaacc;
     --text-field-background-color: #ffffffbb;
@@ -154,6 +156,10 @@ foreignObject {
     opacity: 0.0;
 }
 
+.nodeHalo.hovered {
+    opacity: 1.0;
+}
+
 .nodeHalo.focused {
     stroke: var(--focused-color);
     opacity: 1.0;
@@ -172,11 +178,16 @@ foreignObject {
 .edge {
     stroke: var(--edge-color);
     stroke-width: 1.5px;
-    fill: transparent;
+    fill: none;
 }
 
-.edge.mappingEdge {
-    stroke: var(--highlighted-color);
+.edge.nodeMappingEdge {
+    stroke: var(--node-mapping-edge-color);
+    stroke-width: 4.5px;
+}
+
+.edge.edgeMappingEdge {
+    stroke: var(--edge-mapping-edge-color);
     stroke-width: 4.5px;
 }
 
@@ -194,16 +205,42 @@ foreignObject {
     stroke: var(--node-border-color);
     stroke-width: 25px;
     opacity: 0.0;
-    fill: transparent;
+    fill: none;
 }
 
-.edgeBorder.hover {
+.edgeBorder.hovered {
     opacity: 1.0;
 }
 
 .edgeBorder.invalid {
     stroke: var(--invalid-color);
     stroke-width: 25px;
+}
+
+.edgeHalo {
+    fill: var(--transparent-white-color);
+    stroke: var(--node-border-color);
+    stroke-width: 25;
+    opacity: 0.0;
+}
+
+.edgeHalo.hovered {
+    opacity: 1.0;
+}
+
+.edgeHalo.focused {
+    stroke: var(--focused-color);
+    opacity: 1.0;
+}
+
+.edgeHalo.ready {
+    stroke: var(--highlighted-color);
+    opacity: 1.0;
+}
+
+.edgeHalo.invalid {
+    stroke: var(--invalid-color);
+    opacity: 1.0;
 }
 
 .drawingEdge {

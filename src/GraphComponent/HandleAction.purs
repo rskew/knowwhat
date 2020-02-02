@@ -2,9 +2,9 @@ module GraphComponent.HandleAction where
 
 import Prelude
 
-import AppOperation (AppOperation(..), HistoryUpdate(..), MegagraphElement(..), encodeMegagraphStateAsAppOperations)
+import AppOperation (AppOperation(..), HistoryUpdate(..), encodeMegagraphStateAsAppOperations)
 import AppOperation.Utils (removeEdgeMappingEdgesOp, removeEdgeOp, removeNodeMappingEdgesOp, removeNodeOp)
-import AppState (AppState, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _graph, _graphAtId, _graphs, _mappings, _megagraph, _paneAtId)
+import AppState (AppState, EdgeSourceElement(..), HoveredElementId(..), MegagraphElement(..), _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _graph, _graphAtId, _graphs, _mappingAtId, _mappingFocus, _mappingState, _mappings, _megagraph, _paneAtId, lookupMapping)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except (runExcept)
@@ -13,13 +13,13 @@ import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
-import Data.Lens ((%~), (.~), (^?), (^..), traversed)
+import Data.Lens ((%~), (.~), (^?), (^.), (^..), traversed)
 import Data.Lens.At (at)
-import Data.List as List
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.String (joinWith)
 import Data.Traversable (sequence)
+import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
 import Data.UUID as UUID
 import Effect (Effect)
@@ -29,14 +29,14 @@ import Foreign (F, renderForeignError)
 import Foreign as Foreign
 import Foreign.Generic (encodeJSON, decodeJSON)
 import GraphComponent.Types (Action(..), Message(..), Query(..), Slots, _edgeTextField, _nodeTextField, _titleTextField)
-import GraphComponent.Utils (drawingEdgeWithinNodeHalo, mouseEventPosition, nodesWithTextUpdate)
+import GraphComponent.Utils (mouseEventPosition, nodesWithTextUpdate)
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
 import Halogen.Query.EventSource as ES
 import Interpreter (interpretAppOperation)
 import Math as Math
-import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageSpacePoint2D(..), _edge, _focus, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, edgeSpaceToGraphSpace, graphSpaceToEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, pageSpaceToGraphSpace)
-import MegagraphOperation (GraphOperation(..), MegagraphOperation(..), invertMegagraphUpdate)
+import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdges, _focus, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import MegagraphOperation (GraphOperation(..), MappingOperation(..), MegagraphOperation(..), invertMegagraphUpdate)
 import UI.Constants (zoomScaling)
 import UI.Panes (arrangePanes, insertPane, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Utils (tupleApply)
@@ -124,7 +124,7 @@ handleAction = case _ of
           appOp = undoableGraphOp node.graphId $ UpdateNodeText nodeId node.text text
         in do
           interpretAndSend appOp
-          handleAction $ FocusOn node.graphId $ Just $ FocusNode node.id
+          handleAction $ UpdateGraphFocus node.graphId $ Just $ FocusNode node.id
 
   EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
     state <- H.get
@@ -135,7 +135,7 @@ handleAction = case _ of
           appOp = undoableGraphOp graphId $ UpdateEdgeText edge.id edge.text text
         in do
           interpretAndSend appOp
-          handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
+          handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeId []
 
   TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
     state <- H.get
@@ -148,7 +148,7 @@ handleAction = case _ of
           interpretAndSend appOp
 
   BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
-    handleAction $ FocusOn graphId Nothing
+    handleAction $ UpdateGraphFocus graphId Nothing
     H.subscribe' \subscriptionId ->
       Drag.dragEventSource mouseEvent
         \e -> BackgroundDragMove e graphId initialGraphOrigin subscriptionId
@@ -170,7 +170,7 @@ handleAction = case _ of
     H.subscribe' \subscriptionId ->
       Drag.dragEventSource mouseEvent
         \e -> NodeDragMove e graphId nodeId initialNodePos subscriptionId
-    handleAction $ FocusOn graphId $ Just $ FocusNode nodeId
+    handleAction $ UpdateGraphFocus graphId $ Just $ FocusNode nodeId
 
   NodeDragMove (Drag.Move _ dragData) graphId nodeId (GraphSpacePoint2D initialNodePos) _ -> do
     state <- H.get
@@ -197,11 +197,105 @@ handleAction = case _ of
   NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
     H.unsubscribe subscriptionId
 
+  NodeMappingEdgeDragStart mappingId initialNodeMappingEdge mouseEvent -> do
+    state <- H.get
+    case Map.lookup mappingId state.megagraph.mappings <#> _.mapping of
+      Nothing -> pure unit
+      Just mapping ->
+        H.subscribe' \subscriptionId -> Drag.dragEventSource mouseEvent \e ->
+          NodeMappingEdgeDragMove e mapping initialNodeMappingEdge.id initialNodeMappingEdge.midpoint subscriptionId
+    handleAction $ UpdateMappingFocus mappingId $ Just initialNodeMappingEdge.id
+
+  NodeMappingEdgeDragMove (Drag.Move _ dragData) mapping nodeMappingEdgeId initialMidpoint _ -> do
+    state <- H.get
+    case do
+      currentNodeMappingEdge <- mapping ^. _nodeMappingEdges <<< at nodeMappingEdgeId
+      sourcePos <- state ^? _graphAtId mapping.sourceGraph <<< _position currentNodeMappingEdge.sourceNode
+      sourcePane <- state ^? _paneAtId mapping.sourceGraph
+      targetPos <- state ^? _graphAtId mapping.targetGraph <<< _position currentNodeMappingEdge.targetNode
+      targetPane <- state ^? _paneAtId mapping.targetGraph
+      let
+        sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePos
+        targetPosPageSpace = graphSpaceToPageSpace targetPane targetPos
+        PageSpacePoint2D initialMidpointCartesian =
+          pageEdgeSpaceToPageSpace sourcePosPageSpace targetPosPageSpace initialMidpoint
+        newMidpointCartesian =
+          PageSpacePoint2D { x : initialMidpointCartesian.x + dragData.offsetX
+                           , y : initialMidpointCartesian.y + dragData.offsetY
+                           }
+        newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        op = [ MappingElementOperation mapping.id
+               $ MoveNodeMappingEdgeMidpoint nodeMappingEdgeId currentNodeMappingEdge.midpoint newMidpoint
+             ]
+        appOp = AppOperation { target : MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+                             , op : op
+                             , historyUpdate : Insert op
+                             , undoneUpdate : NoOp
+                             }
+      pure appOp
+    of
+      Nothing -> pure unit
+      Just appOp -> interpretAndSend appOp
+
+  NodeMappingEdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+    H.unsubscribe subscriptionId
+
+  EdgeMappingEdgeDragStart mappingId initialEdgeMappingEdge mouseEvent -> do
+    state <- H.get
+    case Map.lookup mappingId state.megagraph.mappings <#> _.mapping of
+      Nothing -> pure unit
+      Just mapping ->
+        H.subscribe' \subscriptionId -> Drag.dragEventSource mouseEvent \e ->
+          EdgeMappingEdgeDragMove e mapping initialEdgeMappingEdge.id initialEdgeMappingEdge.midpoint subscriptionId
+    handleAction $ UpdateMappingFocus mappingId $ Just initialEdgeMappingEdge.id
+
+  EdgeMappingEdgeDragMove (Drag.Move _ dragData) mapping edgeMappingEdgeId initialMidpoint _ -> do
+    state <- H.get
+    case do
+      currentEdgeMappingEdge <- mapping ^. _edgeMappingEdges <<< at edgeMappingEdgeId
+      sourceGraph <- state ^? _graphAtId mapping.sourceGraph
+      sourceEdge <- lookupEdgeById currentEdgeMappingEdge.sourceEdge sourceGraph
+      sourcePane <- state ^? _paneAtId mapping.sourceGraph
+      sourceEdgeSourcePos <- sourceGraph ^? _position sourceEdge.source
+      sourceEdgeTargetPos <- sourceGraph ^? _position sourceEdge.target
+      targetGraph <- state ^? _graphAtId mapping.targetGraph
+      targetEdge <- lookupEdgeById currentEdgeMappingEdge.targetEdge targetGraph
+      targetPane <- state ^? _paneAtId mapping.targetGraph
+      targetEdgeSourcePos <- targetGraph ^? _position targetEdge.source
+      targetEdgeTargetPos <- targetGraph ^? _position targetEdge.target
+      let
+        sourcePos = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos sourceEdge.midpoint
+        targetPos = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos targetEdge.midpoint
+        sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePos
+        targetPosPageSpace = graphSpaceToPageSpace targetPane targetPos
+        PageSpacePoint2D initialMidpointCartesian =
+          pageEdgeSpaceToPageSpace sourcePosPageSpace targetPosPageSpace initialMidpoint
+        newMidpointCartesian =
+          PageSpacePoint2D { x : initialMidpointCartesian.x + dragData.offsetX
+                           , y : initialMidpointCartesian.y + dragData.offsetY
+                           }
+        newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        op = [ MappingElementOperation mapping.id
+               $ MoveEdgeMappingEdgeMidpoint edgeMappingEdgeId currentEdgeMappingEdge.midpoint newMidpoint
+             ]
+        appOp = AppOperation { target : MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+                             , op : op
+                             , historyUpdate : Insert op
+                             , undoneUpdate : NoOp
+                             }
+      pure appOp
+    of
+      Nothing -> pure unit
+      Just appOp -> interpretAndSend appOp
+
+  EdgeMappingEdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+    H.unsubscribe subscriptionId
+
   EdgeDragStart graphId edgeId initialMidpoint mouseEvent -> do
     H.subscribe' \subscriptionId ->
       Drag.dragEventSource mouseEvent
-        \e -> EdgeDragMove e graphId edgeId initialMidpoint subscriptionId
-    handleAction $ FocusOn graphId $ Just $ FocusEdge edgeId []
+      \e -> EdgeDragMove e graphId edgeId initialMidpoint subscriptionId
+    handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeId []
 
   EdgeDragMove (Drag.Move _ dragData) graphId edgeId initialMidpoint _ -> do
     state <- H.get
@@ -215,13 +309,13 @@ handleAction = case _ of
         dragOffsetGraphSpace = { x : dragData.offsetX * pane.zoom
                                , y : dragData.offsetY * pane.zoom
                                }
-        GraphSpacePoint2D initialMidpointGraphSpace = edgeSpaceToGraphSpace sourcePos targetPos initialMidpoint
+        GraphSpacePoint2D initialMidpointGraphSpace = graphEdgeSpaceToGraphSpace sourcePos targetPos initialMidpoint
         newMidpointGraphSpace =
           GraphSpacePoint2D
             { x : initialMidpointGraphSpace.x + dragOffsetGraphSpace.x
             , y : initialMidpointGraphSpace.y + dragOffsetGraphSpace.y
             }
-        newMidpoint = graphSpaceToEdgeSpace sourcePos targetPos newMidpointGraphSpace
+        newMidpoint = graphSpaceToGraphEdgeSpace sourcePos targetPos newMidpointGraphSpace
       pure $ undoableGraphOp graphId $ MoveEdgeMidpoint edge.id edge.midpoint newMidpoint
     of
       Nothing -> pure unit
@@ -231,23 +325,40 @@ handleAction = case _ of
   EdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
     H.unsubscribe subscriptionId
 
-  EdgeDrawStart pane drawingEdgeId mouseEvent -> do
+  EdgeDrawStart pane sourceElement mouseEvent -> do
     state <- H.get
-    case state ^? _graphAtId pane.graphId <<< _nodes <<< at drawingEdgeId <<< traversed of
+    case
+      case sourceElement of
+        NodeSource nodeId -> do
+          node <- state ^? _graphAtId pane.graphId <<< _nodes <<< at nodeId <<< traversed
+          pure node.position
+        EdgeSource edgeId -> do
+          graph <- state ^? _graphAtId pane.graphId
+          edge <- lookupEdgeById edgeId graph
+          sourceNode <- Map.lookup edge.source graph.nodes
+          targetNode <- Map.lookup edge.target graph.nodes
+          pure $ graphEdgeSpaceToGraphSpace sourceNode.position targetNode.position edge.midpoint
+    of
       Nothing -> pure unit
-      Just source -> do
+      Just sourcePosition ->
         let
           mousePosition = mouseEventPosition mouseEvent
-          sourcePosition = source.position # graphSpaceToPageSpace pane
-        H.modify_ $ (_drawingEdges %~ Map.insert drawingEdgeId { sourcePosition : sourcePosition
-                                                               , source         : drawingEdgeId
-                                                               , sourceGraph    : pane.graphId
-                                                               , pointPosition  : mousePosition
-                                                               , targetGraph    : pane.graphId
-                                                               })
-        handleAction $ FocusOn pane.graphId $ Just $ FocusNode drawingEdgeId
-        H.subscribe' \subscriptionId ->
-          Drag.dragEventSource mouseEvent $ \e -> EdgeDrawMove e pane.graphId drawingEdgeId subscriptionId
+          sourcePositionPageSpace = graphSpaceToPageSpace pane sourcePosition
+          drawingEdge = { source         : sourceElement
+                        , sourcePosition : sourcePositionPageSpace
+                        , sourceGraph    : pane.graphId
+                        , pointPosition  : mousePosition
+                        , targetGraph    : pane.graphId
+                        }
+        in do
+          drawingEdgeId <- H.liftEffect UUID.genUUID
+          H.modify_ $ _drawingEdges %~ Map.insert drawingEdgeId drawingEdge
+          handleAction $ UpdateGraphFocus pane.graphId $ Just case sourceElement of
+            NodeSource nodeId -> FocusNode nodeId
+            EdgeSource edgeId -> FocusEdge edgeId []
+          H.subscribe' \subscriptionId ->
+            Drag.dragEventSource mouseEvent
+            $ \e -> EdgeDrawMove e pane.graphId drawingEdgeId subscriptionId
 
   -- | Check which pane the point of the drawing edge is in and update
   -- | the drawingEdgeState so it can be drawn properly in both panes
@@ -262,33 +373,45 @@ handleAction = case _ of
         H.modify_ $ (_drawingEdgePosition drawingEdgeId .~ edgePageTargetPosition)
                     >>> (_drawingEdgeTargetGraph drawingEdgeId .~ targetPane.graphId)
 
+  -- Create:
+  -- - a new edge if the source is a node and the drawn edge is dropped
+  --   within the halo of another node of the same graph,
+  -- - a new nodeMappingEdge of the source is a node and the drawn edge
+  --   is dropped within the halo of a node from a different graph,
+  -- - a new edgeMappingEdge if the source is an edge and the drawn edge
+  --   is dropped within the halo of an edge from a different graph
   EdgeDrawMove (Drag.Done _) graphId drawingEdgeId subscriptionId -> do
-    -- Create a new edge if the drawn edge is dropped within the
-    -- halo of another node.
-    state <- H.get
     newEdgeId <- H.liftEffect UUID.genUUID
     let
-      maybeNewEdgeMetadata = do
-        drawingEdgeState <- Map.lookup drawingEdgeId state.drawingEdges
-        targetPane <- state ^? _paneAtId drawingEdgeState.targetGraph
-        targetGraph <- state ^? _graphAtId drawingEdgeState.targetGraph
-        drawingEdgeTarget <-
-          Map.values targetGraph.nodes
-            # List.filter (\node -> node.id /= drawingEdgeId)
-            # List.filter (drawingEdgeWithinNodeHalo drawingEdgeState targetPane)
-            # List.head
-        pure { id : newEdgeId
-             , graphId : drawingEdgeTarget.graphId
-             , source      : drawingEdgeState.source
-             , target      : drawingEdgeTarget.id
-             }
+      createEdgeBetweenNodes sourceNodeId sourceGraphId targetNodeId targetGraphId =
+        if sourceGraphId == targetGraphId
+        then handleAction $ AppCreateEdge sourceGraphId {id: newEdgeId, graphId : sourceGraphId, source: sourceNodeId, target: targetNodeId}
+        else handleAction $ AppCreateNodeMappingEdge newEdgeId sourceNodeId sourceGraphId targetNodeId targetGraphId
+      createEdgeBetweenEdges sourceEdgeId sourceGraphId targetEdgeId targetGraphId =
+        if sourceGraphId == targetGraphId
+        then pure unit
+        else handleAction $ AppCreateEdgeMappingEdge newEdgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId
+    state <- H.get
+    case do
+      drawingEdge <- Map.lookup drawingEdgeId state.drawingEdges
+      hoveredElementId <- state.hoveredElementId
+      pure $ Tuple drawingEdge hoveredElementId
+    of
+      Nothing -> pure unit
+      Just (Tuple drawingEdge hoveredElementId) ->
+        case drawingEdge.source, hoveredElementId of
+          NodeSource sourceNodeId, NodeHaloId targetGraphId targetNodeId ->
+            createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
+          NodeSource sourceNodeId, NodeBorderId targetGraphId targetNodeId ->
+            createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
+          EdgeSource sourceEdgeId, EdgeHaloId (GraphElement targetGraphId) targetEdgeId ->
+            createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
+          EdgeSource sourceEdgeId, EdgeBorderId (GraphElement targetGraphId) targetEdgeId ->
+            createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
+          _, _ -> pure unit
     -- Remove the drawing edge
     H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
     H.unsubscribe subscriptionId
-    case maybeNewEdgeMetadata of
-      Nothing -> pure unit
-      Just newEdgeMetadata -> do
-        handleAction $ AppCreateEdge graphId newEdgeMetadata
 
   AppCreateNode pane mouseEvent -> do
     newNodeId <- H.liftEffect genUUID
@@ -305,15 +428,17 @@ handleAction = case _ of
                            , undoneUpdate : NoOp
                            }
     interpretAndSend appOp
-    handleAction $ FocusOn pane.graphId $ Just $ FocusNode newNodeId
+    handleAction $ UpdateGraphFocus pane.graphId $ Just $ FocusNode newNodeId
 
   AppDeleteNode node -> do
     state <- H.get
-    case Map.lookup node.graphId state.megagraph.graphs <#> _.graph of
+    case state ^? _graphAtId node.graphId of
       Nothing -> pure unit
       Just graph ->
         let
           allEdges = edgeArray graph
+                     # Array.filter (\edge ->
+                         edge.source == node.id || edge.target == node.id)
           focus = case Array.head allEdges of
             Just edge ->
               case edge.source == node.id, edge.target == node.id of
@@ -322,7 +447,7 @@ handleAction = case _ of
                 _, _ -> Nothing
             Nothing -> Nothing
         in do
-          handleAction $ FocusOn node.graphId focus
+          handleAction $ UpdateGraphFocus node.graphId focus
           state' <- H.get
           let
             removeEdgesOp = Array.concatMap (removeEdgeMappingEdgesOp state') allEdges
@@ -336,12 +461,15 @@ handleAction = case _ of
           interpretAndSend appOp
 
   AppCreateEdge graphId edgeMetadata ->
-    let
-      appOp = undoableGraphOp graphId
-              $ InsertEdge edgeMetadata
-    in do
-      interpretAndSend appOp
-      handleAction $ FocusOn graphId $ Just $ FocusEdge edgeMetadata.id []
+    if edgeMetadata.source == edgeMetadata.target
+    then pure unit
+    else
+      let
+        appOp = undoableGraphOp graphId
+                $ InsertEdge edgeMetadata
+      in do
+        interpretAndSend appOp
+        handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeMetadata.id []
 
   AppDeleteEdge graphId edge -> do
     state <- H.get
@@ -353,9 +481,57 @@ handleAction = case _ of
                            , undoneUpdate : NoOp
                            }
     interpretAndSend appOp
-    handleAction $ FocusOn edge.graphId $ Just $ FocusNode edge.source
+    handleAction $ UpdateGraphFocus edge.graphId $ Just $ FocusNode edge.source
 
-  FocusOn graphId newFocus -> do
+  AppCreateNodeMappingEdge edgeId sourceNodeId sourceGraphId targetNodeId targetGraphId -> do
+    state <- H.get
+    mappingId <- case lookupMapping sourceGraphId targetGraphId state of
+      Nothing -> H.liftEffect UUID.genUUID
+      Just mapping -> pure mapping.id
+    let
+      nodeMappingEdge = { id : edgeId
+                        , mappingId : mappingId
+                        , sourceNode : sourceNodeId
+                        , targetNode : targetNodeId
+                        , midpoint : PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0}
+                        }
+      op = [ MappingElementOperation mappingId $ InsertNodeMappingEdge nodeMappingEdge ]
+      appOp = AppOperation { target: MappingElement mappingId sourceGraphId targetGraphId
+                           , op : op
+                           , historyUpdate : Insert op
+                           , undoneUpdate : NoOp
+                           }
+    interpretAndSend appOp
+
+  AppDeleteNodeMappingEdge mappingId edgeId -> do
+    state <- H.get
+    H.modify_ $ _mappingAtId mappingId <<< _nodeMappingEdges <<< at edgeId .~ Nothing
+
+  AppCreateEdgeMappingEdge edgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId -> do
+    state <- H.get
+    mappingId <- case lookupMapping sourceGraphId targetGraphId state of
+      Nothing -> H.liftEffect UUID.genUUID
+      Just mapping -> pure $ mapping.id
+    let
+      edgeMappingEdge = { id : edgeId
+                        , mappingId : mappingId
+                        , sourceEdge : sourceEdgeId
+                        , targetEdge : targetEdgeId
+                        , midpoint : PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0}
+                        }
+      op = [ MappingElementOperation mappingId $ InsertEdgeMappingEdge edgeMappingEdge ]
+      appOp = AppOperation { target: MappingElement mappingId sourceGraphId targetGraphId
+                           , op : op
+                           , historyUpdate : Insert op
+                           , undoneUpdate : NoOp
+                           }
+    interpretAndSend appOp
+
+  AppDeleteEdgeMappingEdge mappingId edgeId -> do
+    state <- H.get
+    H.modify_ $ _mappingAtId mappingId <<< _edgeMappingEdges <<< at edgeId .~ Nothing
+
+  UpdateGraphFocus graphId newFocus -> do
     H.modify_
       $ (_paneAtId graphId <<< _focus .~ newFocus)
         >>> _{ focusedPane = Just graphId }
@@ -364,6 +540,9 @@ handleAction = case _ of
       Just (FocusEdge edgeId _) -> H.query _edgeTextField edgeId $ H.tell SVGContentEditable.Focus
       _                         -> pure $ Just unit
     pure unit
+
+  UpdateMappingFocus mappingId newMappingFocus -> do
+    H.modify_ $ _megagraph <<< _mappingState mappingId <<< traversed <<< _mappingFocus .~ newMappingFocus
 
   DeleteFocus graphId -> do
     state <- H.get
@@ -624,7 +803,7 @@ handleKeypress keyboardEvent = do
         "Escape" -> do
           state <- H.get
           for_ (Map.keys state.megagraph.graphs) \graphId -> do
-            handleAction $ FocusOn graphId Nothing
+            handleAction $ UpdateGraphFocus graphId Nothing
             handleAction $ UpdateContentEditableText graphId
 
         -- Close pane

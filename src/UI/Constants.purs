@@ -16,6 +16,9 @@ nodeBorderRadius = 28.0
 haloRadius :: Number
 haloRadius = 40.0
 
+edgeHaloOffset :: Number
+edgeHaloOffset = 25.0
+
 nodeTextBoxOffset :: Point2D
 nodeTextBoxOffset = { x : 20.0, y : - 10.0 }
 

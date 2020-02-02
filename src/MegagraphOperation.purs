@@ -8,24 +8,24 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (Edge, EdgeMappingEdge, EdgeMetadata, EdgeSpacePoint2D, Graph, GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeId, NodeMappingEdge, PathEquation, EdgeId, edgeArray)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, Graph, GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation, edgeArray)
 
 
 -- | An operation on a graph is stored with the before/after values of the updated field
 -- | to allow it to be inverted.
 data GraphOperation
-  -- GraphOp name   | target node/edge | pre-op state       | post-op state
+  -- GraphOp name   | target node/edge | pre-op state         | post-op state
   = InsertNode        NodeId
   | DeleteNode        NodeId
   | InsertEdge        EdgeMetadata
   | DeleteEdge        EdgeMetadata
-  | MoveNode          NodeId             GraphSpacePoint2D    GraphSpacePoint2D
-  | UpdateNodeText    NodeId             String               String
-  | UpdateEdgeText    EdgeId             String               String
-  | MoveEdgeMidpoint  EdgeId             EdgeSpacePoint2D     EdgeSpacePoint2D
-  | ConnectSubgraph   NodeId             (Maybe GraphId)      (Maybe GraphId)
-  | UpdateTitle                          String               String
-  | SetTitleValidity                     Boolean              Boolean
+  | MoveNode          NodeId             GraphSpacePoint2D      GraphSpacePoint2D
+  | UpdateNodeText    NodeId             String                 String
+  | UpdateEdgeText    EdgeId             String                 String
+  | MoveEdgeMidpoint  EdgeId             GraphEdgeSpacePoint2D  GraphEdgeSpacePoint2D
+  | ConnectSubgraph   NodeId             (Maybe GraphId)        (Maybe GraphId)
+  | UpdateTitle                          String                 String
+  | SetTitleValidity                     Boolean                Boolean
 
 data EquationOperation
   -- EquationOp name   | target graph | equation
@@ -33,11 +33,13 @@ data EquationOperation
   | DeletePathEquation   PathEquation
 
 data MappingOperation
-  -- MappingOp name       | element
-  = InsertNodeMappingEdge   NodeMappingEdge
-  | DeleteNodeMappingEdge   NodeMappingEdge
-  | InsertEdgeMappingEdge   EdgeMappingEdge
-  | DeleteEdgeMappingEdge   EdgeMappingEdge
+  -- MappingOp name            | element
+  = InsertNodeMappingEdge        NodeMappingEdge
+  | DeleteNodeMappingEdge        NodeMappingEdge
+  | InsertEdgeMappingEdge        EdgeMappingEdge
+  | DeleteEdgeMappingEdge        EdgeMappingEdge
+  | MoveNodeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
+  | MoveEdgeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
 
 data MegagraphOperation
   = GraphElementOperation GraphId GraphOperation
@@ -91,10 +93,12 @@ invertEquationOperation = case _ of
 
 invertMappingOperation :: MappingOperation -> MappingOperation
 invertMappingOperation = case _ of
-  InsertNodeMappingEdge nodeMappingEdge -> DeleteNodeMappingEdge nodeMappingEdge
-  DeleteNodeMappingEdge nodeMappingEdge -> InsertNodeMappingEdge nodeMappingEdge
-  InsertEdgeMappingEdge edgeMappingEdge -> DeleteEdgeMappingEdge edgeMappingEdge
-  DeleteEdgeMappingEdge edgeMappingEdge -> InsertEdgeMappingEdge edgeMappingEdge
+  InsertNodeMappingEdge nodeMappingEdge  -> DeleteNodeMappingEdge nodeMappingEdge
+  DeleteNodeMappingEdge nodeMappingEdge  -> InsertNodeMappingEdge nodeMappingEdge
+  InsertEdgeMappingEdge edgeMappingEdge  -> DeleteEdgeMappingEdge edgeMappingEdge
+  DeleteEdgeMappingEdge edgeMappingEdge  -> InsertEdgeMappingEdge edgeMappingEdge
+  MoveNodeMappingEdgeMidpoint id from to -> MoveNodeMappingEdgeMidpoint id to from
+  MoveEdgeMappingEdgeMidpoint id from to -> MoveEdgeMappingEdgeMidpoint id to from
 
 invertMegagraphOperation :: MegagraphOperation -> MegagraphOperation
 invertMegagraphOperation = case _ of
@@ -195,6 +199,10 @@ instance showMappingOperation :: Show MappingOperation where
       "InsertEdgeMappingEdge " <> show edgeMappingEdge
     DeleteEdgeMappingEdge edgeMappingEdge ->
       "DeleteEdgeMappingEdge " <> show edgeMappingEdge
+    MoveNodeMappingEdgeMidpoint id from to ->
+      "MoveNodeMappingEdgeMidpoint " <> show id <> " to: " <> show to <> " from: " <> show from
+    MoveEdgeMappingEdgeMidpoint id from to ->
+      "MoveEdgeMappingEdgeMidpoint " <> show id <> " to: " <> show to <> " from: " <> show from
 
 instance showMegagraphOperation :: Show MegagraphOperation where
   show = case _ of
@@ -220,6 +228,8 @@ encodeEdgeAsMegagraphUpdate edge =
   in
     [ GraphElementOperation edge.graphId $ InsertEdge edgeMetadata
     , GraphElementOperation edge.graphId $ UpdateEdgeText edge.id "" edge.text
+    , GraphElementOperation edge.graphId
+      $ MoveEdgeMidpoint edge.id (GraphEdgeSpacePoint2D {angle: 0.0, radius: 0.0}) edge.midpoint
     ]
 
 encodePathEquationAsMegagraphUpdate :: GraphId -> PathEquation -> MegagraphUpdate
@@ -238,11 +248,23 @@ encodeGraphAsMegagraphUpdate graph =
 
 encodeNodeMappingEdgeAsMegagraphUpdate :: NodeMappingEdge -> MegagraphUpdate
 encodeNodeMappingEdgeAsMegagraphUpdate nodeMappingEdge =
-  [ MappingElementOperation nodeMappingEdge.mappingId $ InsertNodeMappingEdge nodeMappingEdge ]
+  MappingElementOperation nodeMappingEdge.mappingId
+  <$> [ InsertNodeMappingEdge nodeMappingEdge
+      , MoveNodeMappingEdgeMidpoint
+          nodeMappingEdge.id
+          (PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0})
+          nodeMappingEdge.midpoint
+      ]
 
 encodeEdgeMappingEdgeAsMegagraphUpdate :: EdgeMappingEdge -> MegagraphUpdate
 encodeEdgeMappingEdgeAsMegagraphUpdate edgeMappingEdge =
-  [ MappingElementOperation edgeMappingEdge.mappingId $ InsertEdgeMappingEdge edgeMappingEdge ]
+  MappingElementOperation edgeMappingEdge.mappingId
+  <$> [ InsertEdgeMappingEdge edgeMappingEdge
+      , MoveEdgeMappingEdgeMidpoint
+          edgeMappingEdge.id
+          (PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0})
+          edgeMappingEdge.midpoint
+      ]
 
 encodeMappingAsMegagraphUpdate :: Mapping -> MegagraphUpdate
 encodeMappingAsMegagraphUpdate mapping =
