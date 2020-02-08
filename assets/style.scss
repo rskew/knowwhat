@@ -7,9 +7,11 @@
     --node-color: #000000;
     --node-border-color: #00000033;
     --focused-color: #ffcc00;
+    --focused-source-color: #ffcc00;
+    --focused-target-color: #ff7700ff;
     --highlighted-color: #0088ffbb;
-    --node-mapping-edge-color: #8833ff;
-    --edge-mapping-edge-color: #ff3388;
+    --node-mapping-edge-color: #0088ffff;
+    --edge-mapping-edge-color: #ff7700ff;
     --invalid-color: #ff6666bb;
     --text-field-border-color: #aaaaaacc;
     --text-field-background-color: #ffffffbb;
@@ -67,6 +69,14 @@ input {
 
 .pane.focused {
     border: var(--pane-border-width) solid var(--focused-color);
+}
+
+.pane.focusedSource {
+    border: var(--pane-border-width) solid var(--focused-source-color);
+}
+
+.pane.focusedTarget {
+    border: var(--pane-border-width) solid var(--focused-target-color);
 }
 
 svg {
@@ -183,12 +193,12 @@ foreignObject {
 
 .edge.nodeMappingEdge {
     stroke: var(--node-mapping-edge-color);
-    stroke-width: 4.5px;
+    stroke-width: 1.5px;
 }
 
 .edge.edgeMappingEdge {
     stroke: var(--edge-mapping-edge-color);
-    stroke-width: 4.5px;
+    stroke-width: 1.5px;
 }
 
 .edge.invalid {
@@ -199,6 +209,7 @@ foreignObject {
 .edge.focused {
     stroke: var(--focused-color);
     stroke-width: 3px;
+    fill: none;
 }
 
 .edgeBorder {
@@ -218,10 +229,10 @@ foreignObject {
 }
 
 .edgeHalo {
-    fill: var(--transparent-white-color);
     stroke: var(--node-border-color);
     stroke-width: 25;
     opacity: 0.0;
+    fill: none;
 }
 
 .edgeHalo.hovered {

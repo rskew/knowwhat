@@ -48,3 +48,6 @@ invalidIndicatorOffset = { x : 2.0, y : 2.0 }
 
 invalidIndicatorSize :: Number
 invalidIndicatorSize = 10.0
+
+edgeMappingEdgeBeginMarkerRadius :: Number
+edgeMappingEdgeBeginMarkerRadius = 3.0

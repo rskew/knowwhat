@@ -3,7 +3,7 @@ module GraphComponent.Types where
 import Prelude
 
 import AppOperation (AppOperation)
-import AppState (DrawingEdgeId, EdgeSourceElement, HoveredElementId, Shape)
+import AppState (DrawingEdgeId, EdgeSourceElement, HoveredElementId, MegagraphElement, Shape)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Data.Maybe (Maybe)
 import Data.Symbol (SProxy(..))
@@ -41,20 +41,21 @@ data Action
   | TitleTextInput GraphId SVGContentEditable.Message
   | AppCreateNode GraphView ME.MouseEvent
   | AppDeleteNode Node
-  | AppCreateEdge GraphId EdgeMetadata
-  | AppDeleteEdge GraphId Edge
+  | AppCreateEdge EdgeMetadata
+  | AppDeleteEdge Edge
   | AppCreateNodeMappingEdge EdgeId NodeId GraphId NodeId GraphId
   | AppDeleteNodeMappingEdge MappingId EdgeId
   | AppCreateEdgeMappingEdge EdgeId EdgeId GraphId EdgeId GraphId
   | AppDeleteEdgeMappingEdge MappingId EdgeId
-  | UpdateGraphFocus GraphId (Maybe Focus)
-  | UpdateMappingFocus MappingId (Maybe EdgeId)
-  | DeleteFocus GraphId
-  | Hover (Maybe HoveredElementId)
+  | UpdateFocus (Maybe Focus)
+  | UpdateFocusPane MegagraphElement
+  | DeleteFocus
+  | Hover HoveredElementId
+  | UnHover HoveredElementId
   | Zoom GraphId WhE.WheelEvent
   | CenterGraphOriginAndZoom
-  | Undo GraphId
-  | Redo GraphId
+  | Undo MegagraphElement
+  | Redo MegagraphElement
   | RemovePane GraphId
   | FetchLocalFile WE.Event
   | LoadLocalFile FileReader.FileReader H.SubscriptionId WE.Event

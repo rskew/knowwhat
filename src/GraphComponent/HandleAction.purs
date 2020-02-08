@@ -4,7 +4,7 @@ import Prelude
 
 import AppOperation (AppOperation(..), HistoryUpdate(..), encodeMegagraphStateAsAppOperations)
 import AppOperation.Utils (removeEdgeMappingEdgesOp, removeEdgeOp, removeNodeMappingEdgesOp, removeNodeOp)
-import AppState (AppState, EdgeSourceElement(..), HoveredElementId(..), MegagraphElement(..), _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _graph, _graphAtId, _graphs, _mappingAtId, _mappingFocus, _mappingState, _mappings, _megagraph, _paneAtId, lookupMapping)
+import AppState (AppState, EdgeSourceElement(..), HoveredElementId(..), MegagraphElement(..), _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _graph, _graphAtId, _graphs, _hoveredElements, _keyHoldState, _mappingAtId, _mappings, _megagraph, _paneAtId, _spaceDown, lookupMapping)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except (runExcept)
@@ -17,9 +17,9 @@ import Data.Lens ((%~), (.~), (^?), (^.), (^..), traversed)
 import Data.Lens.At (at)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.Set as Set
 import Data.String (joinWith)
 import Data.Traversable (sequence)
-import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
 import Data.UUID as UUID
 import Effect (Effect)
@@ -35,8 +35,8 @@ import Halogen.Component.Utils.Drag as Drag
 import Halogen.Query.EventSource as ES
 import Interpreter (interpretAppOperation)
 import Math as Math
-import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdges, _focus, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
-import MegagraphOperation (GraphOperation(..), MappingOperation(..), MegagraphOperation(..), invertMegagraphUpdate)
+import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edgeMappingEdges, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import MegagraphOperation (GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, invertMegagraphUpdate)
 import UI.Constants (zoomScaling)
 import UI.Panes (arrangePanes, insertPane, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Utils (tupleApply)
@@ -124,7 +124,7 @@ handleAction = case _ of
           appOp = undoableGraphOp node.graphId $ UpdateNodeText nodeId node.text text
         in do
           interpretAndSend appOp
-          handleAction $ UpdateGraphFocus node.graphId $ Just $ FocusNode node.id
+          handleAction $ UpdateFocus $ Just $ FocusNode node.graphId node.id
 
   EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
     state <- H.get
@@ -135,7 +135,7 @@ handleAction = case _ of
           appOp = undoableGraphOp graphId $ UpdateEdgeText edge.id edge.text text
         in do
           interpretAndSend appOp
-          handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeId []
+          handleAction $ UpdateFocus $ Just $ FocusEdge graphId edgeId
 
   TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
     state <- H.get
@@ -148,10 +148,28 @@ handleAction = case _ of
           interpretAndSend appOp
 
   BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
-    handleAction $ UpdateGraphFocus graphId Nothing
-    H.subscribe' \subscriptionId ->
-      Drag.dragEventSource mouseEvent
-        \e -> BackgroundDragMove e graphId initialGraphOrigin subscriptionId
+    state <- H.get
+    if state.keyHoldState.controlDown
+    -- ctrl-click to select the mapping from the current focused pane
+    -- to the clicked pane
+    then do
+      handleAction $ UpdateFocus Nothing
+      let
+        newMappingFocus sourceGraphId targetGraphId = do
+          case lookupMapping sourceGraphId targetGraphId state of
+            Nothing -> pure unit
+            Just mapping ->
+              handleAction $ UpdateFocusPane $ MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+      case state.focusedPane of
+        Just (GraphElement sourceGraphId) -> newMappingFocus sourceGraphId graphId
+        Just (MappingElement mappingId sourceGraphId targetGraphId) -> newMappingFocus sourceGraphId graphId
+        _ -> handleAction $ UpdateFocusPane $ GraphElement graphId
+    else do
+      handleAction $ UpdateFocus Nothing
+      handleAction $ UpdateFocusPane $ GraphElement graphId
+      H.subscribe' \subscriptionId ->
+        Drag.dragEventSource mouseEvent
+          \e -> BackgroundDragMove e graphId initialGraphOrigin subscriptionId
 
   BackgroundDragMove (Drag.Move _ dragData) graphId (PageSpacePoint2D initialGraphOrigin) _ -> do
     state <- H.get
@@ -170,7 +188,7 @@ handleAction = case _ of
     H.subscribe' \subscriptionId ->
       Drag.dragEventSource mouseEvent
         \e -> NodeDragMove e graphId nodeId initialNodePos subscriptionId
-    handleAction $ UpdateGraphFocus graphId $ Just $ FocusNode nodeId
+    handleAction $ UpdateFocus $ Just $ FocusNode graphId nodeId
 
   NodeDragMove (Drag.Move _ dragData) graphId nodeId (GraphSpacePoint2D initialNodePos) _ -> do
     state <- H.get
@@ -204,7 +222,7 @@ handleAction = case _ of
       Just mapping ->
         H.subscribe' \subscriptionId -> Drag.dragEventSource mouseEvent \e ->
           NodeMappingEdgeDragMove e mapping initialNodeMappingEdge.id initialNodeMappingEdge.midpoint subscriptionId
-    handleAction $ UpdateMappingFocus mappingId $ Just initialNodeMappingEdge.id
+    handleAction $ UpdateFocus $ Just $ FocusNodeMappingEdge mappingId initialNodeMappingEdge.id
 
   NodeMappingEdgeDragMove (Drag.Move _ dragData) mapping nodeMappingEdgeId initialMidpoint _ -> do
     state <- H.get
@@ -247,7 +265,7 @@ handleAction = case _ of
       Just mapping ->
         H.subscribe' \subscriptionId -> Drag.dragEventSource mouseEvent \e ->
           EdgeMappingEdgeDragMove e mapping initialEdgeMappingEdge.id initialEdgeMappingEdge.midpoint subscriptionId
-    handleAction $ UpdateMappingFocus mappingId $ Just initialEdgeMappingEdge.id
+    handleAction $ UpdateFocus $ Just $ FocusEdgeMappingEdge mappingId initialEdgeMappingEdge.id
 
   EdgeMappingEdgeDragMove (Drag.Move _ dragData) mapping edgeMappingEdgeId initialMidpoint _ -> do
     state <- H.get
@@ -295,7 +313,7 @@ handleAction = case _ of
     H.subscribe' \subscriptionId ->
       Drag.dragEventSource mouseEvent
       \e -> EdgeDragMove e graphId edgeId initialMidpoint subscriptionId
-    handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeId []
+    handleAction $ UpdateFocus $ Just $ FocusEdge graphId edgeId
 
   EdgeDragMove (Drag.Move _ dragData) graphId edgeId initialMidpoint _ -> do
     state <- H.get
@@ -353,9 +371,9 @@ handleAction = case _ of
         in do
           drawingEdgeId <- H.liftEffect UUID.genUUID
           H.modify_ $ _drawingEdges %~ Map.insert drawingEdgeId drawingEdge
-          handleAction $ UpdateGraphFocus pane.graphId $ Just case sourceElement of
-            NodeSource nodeId -> FocusNode nodeId
-            EdgeSource edgeId -> FocusEdge edgeId []
+          handleAction $ UpdateFocus $ Just case sourceElement of
+            NodeSource nodeId -> FocusNode pane.graphId nodeId
+            EdgeSource edgeId -> FocusEdge pane.graphId edgeId
           H.subscribe' \subscriptionId ->
             Drag.dragEventSource mouseEvent
             $ \e -> EdgeDrawMove e pane.graphId drawingEdgeId subscriptionId
@@ -385,20 +403,13 @@ handleAction = case _ of
     let
       createEdgeBetweenNodes sourceNodeId sourceGraphId targetNodeId targetGraphId =
         if sourceGraphId == targetGraphId
-        then handleAction $ AppCreateEdge sourceGraphId {id: newEdgeId, graphId : sourceGraphId, source: sourceNodeId, target: targetNodeId}
+        then handleAction $ AppCreateEdge {id: newEdgeId, graphId : sourceGraphId, source: sourceNodeId, target: targetNodeId}
         else handleAction $ AppCreateNodeMappingEdge newEdgeId sourceNodeId sourceGraphId targetNodeId targetGraphId
       createEdgeBetweenEdges sourceEdgeId sourceGraphId targetEdgeId targetGraphId =
         if sourceGraphId == targetGraphId
         then pure unit
         else handleAction $ AppCreateEdgeMappingEdge newEdgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId
-    state <- H.get
-    case do
-      drawingEdge <- Map.lookup drawingEdgeId state.drawingEdges
-      hoveredElementId <- state.hoveredElementId
-      pure $ Tuple drawingEdge hoveredElementId
-    of
-      Nothing -> pure unit
-      Just (Tuple drawingEdge hoveredElementId) ->
+      createEdgeIfSourceTargetAreCompatible drawingEdge hoveredElementId =
         case drawingEdge.source, hoveredElementId of
           NodeSource sourceNodeId, NodeHaloId targetGraphId targetNodeId ->
             createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
@@ -409,6 +420,11 @@ handleAction = case _ of
           EdgeSource sourceEdgeId, EdgeBorderId (GraphElement targetGraphId) targetEdgeId ->
             createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
           _, _ -> pure unit
+    state <- H.get
+    case Map.lookup drawingEdgeId state.drawingEdges of
+      Nothing -> pure unit
+      Just drawingEdge ->
+        for_ state.hoveredElements \hoveredElementId -> createEdgeIfSourceTargetAreCompatible drawingEdge hoveredElementId
     -- Remove the drawing edge
     H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
     H.unsubscribe subscriptionId
@@ -428,7 +444,7 @@ handleAction = case _ of
                            , undoneUpdate : NoOp
                            }
     interpretAndSend appOp
-    handleAction $ UpdateGraphFocus pane.graphId $ Just $ FocusNode newNodeId
+    handleAction $ UpdateFocus $ Just $ FocusNode pane.graphId newNodeId
 
   AppDeleteNode node -> do
     state <- H.get
@@ -442,12 +458,12 @@ handleAction = case _ of
           focus = case Array.head allEdges of
             Just edge ->
               case edge.source == node.id, edge.target == node.id of
-                true, false -> Just $ FocusNode edge.target
-                false, true -> Just $ FocusNode edge.source
+                true, false -> Just $ FocusNode edge.graphId edge.target
+                false, true -> Just $ FocusNode edge.graphId edge.source
                 _, _ -> Nothing
             Nothing -> Nothing
         in do
-          handleAction $ UpdateGraphFocus node.graphId focus
+          handleAction $ UpdateFocus focus
           state' <- H.get
           let
             removeEdgesOp = Array.concatMap (removeEdgeMappingEdgesOp state') allEdges
@@ -460,28 +476,28 @@ handleAction = case _ of
                                  }
           interpretAndSend appOp
 
-  AppCreateEdge graphId edgeMetadata ->
+  AppCreateEdge edgeMetadata ->
     if edgeMetadata.source == edgeMetadata.target
     then pure unit
     else
       let
-        appOp = undoableGraphOp graphId
+        appOp = undoableGraphOp edgeMetadata.graphId
                 $ InsertEdge edgeMetadata
       in do
         interpretAndSend appOp
-        handleAction $ UpdateGraphFocus graphId $ Just $ FocusEdge edgeMetadata.id []
+        handleAction $ UpdateFocus $ Just $ FocusEdge edgeMetadata.graphId edgeMetadata.id
 
-  AppDeleteEdge graphId edge -> do
+  AppDeleteEdge edge -> do
     state <- H.get
     let
       op = removeEdgeMappingEdgesOp state edge <> removeEdgeOp edge
-      appOp = AppOperation { target : GraphElement graphId
+      appOp = AppOperation { target : GraphElement edge.graphId
                            , op : op
                            , historyUpdate : Insert op
                            , undoneUpdate : NoOp
                            }
     interpretAndSend appOp
-    handleAction $ UpdateGraphFocus edge.graphId $ Just $ FocusNode edge.source
+    handleAction $ UpdateFocus $ Just $ FocusNode edge.graphId edge.source
 
   AppCreateNodeMappingEdge edgeId sourceNodeId sourceGraphId targetNodeId targetGraphId -> do
     state <- H.get
@@ -531,34 +547,52 @@ handleAction = case _ of
     state <- H.get
     H.modify_ $ _mappingAtId mappingId <<< _edgeMappingEdges <<< at edgeId .~ Nothing
 
-  UpdateGraphFocus graphId newFocus -> do
-    H.modify_
-      $ (_paneAtId graphId <<< _focus .~ newFocus)
-        >>> _{ focusedPane = Just graphId }
+  UpdateFocus newFocus -> do
+    H.modify_ _{ focus = newFocus }
     _   <- case newFocus of
-      Just (FocusNode nodeId)   -> H.query _nodeTextField nodeId $ H.tell SVGContentEditable.Focus
-      Just (FocusEdge edgeId _) -> H.query _edgeTextField edgeId $ H.tell SVGContentEditable.Focus
+      Just (FocusNode _ nodeId)   -> H.query _nodeTextField nodeId $ H.tell SVGContentEditable.Focus
+      Just (FocusEdge _ edgeId) -> H.query _edgeTextField edgeId $ H.tell SVGContentEditable.Focus
       _                         -> pure $ Just unit
-    pure unit
-
-  UpdateMappingFocus mappingId newMappingFocus -> do
-    H.modify_ $ _megagraph <<< _mappingState mappingId <<< traversed <<< _mappingFocus .~ newMappingFocus
-
-  DeleteFocus graphId -> do
     state <- H.get
-    case Map.lookup graphId state.megagraph.graphs >>= _.view.focus of
-      Nothing -> pure unit
-      Just (FocusNode nodeId) ->
-        case state ^? _graphAtId graphId <<< _nodes <<< at nodeId <<< traversed of
+    case newFocus of
+      Just (FocusNode graphId _) -> handleAction $ UpdateFocusPane $ GraphElement graphId
+      Just (FocusEdge graphId _) -> handleAction $ UpdateFocusPane $ GraphElement graphId
+      Just (FocusNodeMappingEdge mappingId _) ->
+        case state ^? _mappingAtId mappingId of
           Nothing -> pure unit
-          Just node -> handleAction $ AppDeleteNode node
-      Just (FocusEdge edgeId _) ->
-        case state ^? _graphAtId graphId <<< _edge edgeId <<< traversed of
+          Just mapping -> handleAction $ UpdateFocusPane $ MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+      Just (FocusEdgeMappingEdge mappingId _) ->
+        case state ^? _mappingAtId mappingId of
           Nothing -> pure unit
-          Just edge -> handleAction $ AppDeleteEdge graphId edge
+          Just mapping -> handleAction $ UpdateFocusPane $ MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+      _ -> pure unit
 
-  Hover maybeElementId -> do
-    H.modify_ $ _{ hoveredElementId = maybeElementId }
+  UpdateFocusPane megagraphElement ->
+    H.modify_ _{ focusedPane = Just megagraphElement }
+
+  DeleteFocus -> do
+    state <- H.get
+    let maybeAction = case state.focus of
+          Just (FocusNode graphId nodeId) -> do
+            node <- state ^? _graphAtId graphId <<< _nodes <<< at nodeId <<< traversed
+            pure $ AppDeleteNode node
+          Just (FocusEdge graphId edgeId) -> do
+            edge <- state ^? _graphAtId graphId >>= lookupEdgeById edgeId
+            pure $ AppDeleteEdge edge
+          Just (FocusNodeMappingEdge mappingId nodeMappingEdgeId) ->
+            pure $ AppDeleteNodeMappingEdge mappingId nodeMappingEdgeId
+          Just (FocusEdgeMappingEdge mappingId edgeMappingEdgeId) ->
+            pure $ AppDeleteEdgeMappingEdge mappingId edgeMappingEdgeId
+          Nothing -> Nothing
+    case maybeAction of
+      Nothing -> pure unit
+      Just action -> handleAction action
+
+  Hover elementId -> do
+    H.modify_ $ _hoveredElements %~ Set.insert elementId
+
+  UnHover hoveredElementId -> do
+    H.modify_ $ _hoveredElements %~ Set.delete hoveredElementId
 
   -- | Zoom in/out holding the mouse position invariant
   Zoom graphId wheelEvent -> do
@@ -579,51 +613,51 @@ handleAction = case _ of
   CenterGraphOriginAndZoom -> do
     state <- H.get
     case state.focusedPane of
-      Nothing -> pure unit
-      Just graphId ->
+      Just (GraphElement graphId) ->
         H.modify_ $ _paneAtId graphId %~
           ((_origin .~ PageSpacePoint2D { x : 0.0, y : 0.0 })
            >>>
            (_zoom .~ 1.0))
+      _ -> pure unit
 
-  Undo graphId -> do
+  Undo (GraphElement graphId) -> do
     state <- H.get
     case Map.lookup graphId state.megagraph.graphs
          >>= (_.history >>> Array.uncons) of
       Nothing -> pure unit
-      Just {head, tail} ->
-        let
-          reversedLastOp = invertMegagraphUpdate head
-          appOp = AppOperation { target : GraphElement graphId
-                               , op : reversedLastOp
-                               , historyUpdate : Pop
-                               , undoneUpdate : Insert head
-                               }
-        in do
-          interpretAndSend appOp
-          handleAction $ UpdateContentEditableText graphId
+      Just {head, tail} -> do
+        undoOp head (GraphElement graphId)
+        handleAction $ UpdateContentEditableText graphId
 
-  Redo graphId -> do
+  Undo (MappingElement mappingId sourceGraph targetGraph) -> do
+    state <- H.get
+    case Map.lookup mappingId state.megagraph.mappings
+         >>= (_.history >>> Array.uncons) of
+      Nothing -> pure unit
+      Just {head, tail} -> undoOp head (MappingElement mappingId sourceGraph targetGraph)
+
+  Redo (GraphElement graphId) -> do
     state <- H.get
     case Map.lookup graphId state.megagraph.graphs
          >>= (_.undone >>> Array.uncons) of
       Nothing -> pure unit
-      Just {head, tail} ->
-        let
-          appOp = AppOperation { target : GraphElement graphId
-                               , op : head
-                               , historyUpdate : Insert head
-                               , undoneUpdate : Pop
-                               }
-        in do
-          interpretAndSend appOp
-          handleAction $ UpdateContentEditableText graphId
+      Just {head, tail} -> do
+        redoOp head (GraphElement graphId)
+        handleAction $ UpdateContentEditableText graphId
+
+  Redo (MappingElement mappingId sourceGraph targetGraph) -> do
+    state <- H.get
+    case Map.lookup mappingId state.megagraph.mappings
+         >>= (_.undone >>> Array.uncons) of
+      Nothing -> pure unit
+      Just {head, tail} -> redoOp head (MappingElement mappingId sourceGraph targetGraph)
 
   RemovePane graphId -> do
     H.modify_ $ _megagraph %~
       (_graphs %~ Map.delete graphId)
       >>>
-      (_mappings %~ Map.filter (_.mapping >>> mappingTouchesGraph))
+      (_mappings %~ Map.filter (_.mapping >>> not mappingTouchesGraph))
+    H.modify_ arrangePanes
       where
         mappingTouchesGraph mapping =
           mapping.sourceGraph == graphId
@@ -631,6 +665,7 @@ handleAction = case _ of
           mapping.targetGraph == graphId
 
   FetchLocalFile changeEvent -> unit <$ runMaybeT do
+    lift $ H.liftEffect $ Console.log "in FetchLocalFile"
     target <- MaybeT $ pure $ WE.target changeEvent
     inputElement <- MaybeT $ pure $ WHIE.fromEventTarget target
     files <- MaybeT $ H.liftEffect $ WHIE.files inputElement
@@ -645,6 +680,7 @@ handleAction = case _ of
         pure mempty
 
   LoadLocalFile fileReader subscriptionId event -> do
+    H.liftEffect $ Console.log "in LoadLocalFile"
     -- state <- H.get
     foreignJSON <- H.liftEffect $ FileReader.result fileReader
     case
@@ -707,6 +743,29 @@ undoableGraphOp graphId graphOp =
                  , undoneUpdate : NoOp
                  }
 
+undoOp :: MegagraphUpdate -> MegagraphElement -> H.HalogenM AppState Action Slots Message Aff Unit
+undoOp op target =
+  let
+    reversedLastOp = invertMegagraphUpdate op
+    appOp = AppOperation { target : target
+                         , op : reversedLastOp
+                         , historyUpdate : Pop
+                         , undoneUpdate : Insert op
+                         }
+  in do
+    interpretAndSend appOp
+
+redoOp :: MegagraphUpdate -> MegagraphElement -> H.HalogenM AppState Action Slots Message Aff Unit
+redoOp op target =
+  let
+    appOp = AppOperation { target : target
+                         , op : op
+                         , historyUpdate : Insert op
+                         , undoneUpdate : Pop
+                         }
+  in do
+    interpretAndSend appOp
+
 interpretAndSend :: AppOperation -> H.HalogenM AppState Action Slots Message Aff Unit
 interpretAndSend op = do
   H.raise $ SendOperation op
@@ -719,9 +778,13 @@ interpretAndSend op = do
 handleKeyup :: KE.KeyboardEvent -> H.HalogenM AppState Action Slots Message Aff Unit
 handleKeyup keyboardEvent =
       case KE.key keyboardEvent of
+        "Control" -> do
+          state <- H.get
+          H.modify_ $ _keyHoldState <<< _controlDown .~ false
+
         " " -> do
           state <- H.get
-          H.modify_ _{ keyHoldState = state.keyHoldState { spaceDown = false} }
+          H.modify_ $ _keyHoldState <<< _spaceDown .~ false
 
         _ -> pure unit
 
@@ -729,102 +792,111 @@ handleKeypress :: KE.KeyboardEvent -> H.HalogenM AppState Action Slots Message A
 handleKeypress keyboardEvent = do
       H.liftEffect $ Console.log $ show $ KE.key keyboardEvent
       case KE.key keyboardEvent of
-        " " -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "Control" -> do
           H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
           state <- H.get
-          H.modify_ _{ keyHoldState = state.keyHoldState { spaceDown = true } }
+          H.modify_ $ _keyHoldState <<< _controlDown .~ true
+
+        " " -> do
+          state <- H.get
+          if not state.keyHoldState.controlDown then pure unit else do
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+            H.modify_ $ _keyHoldState <<< _spaceDown .~ true
 
         -- Undo
-        "z" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
+        "z" -> do
           state <- H.get
-          case state.focusedPane of
-            Nothing -> pure unit
-            Just graphId -> handleAction $ Undo graphId
+          if not state.keyHoldState.controlDown then pure unit else do
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+            case state.focusedPane of
+              Nothing -> pure unit
+              Just megagraphElement -> handleAction $ Undo megagraphElement
 
         -- Redo
-        "y" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
+        "y" -> do
           state <- H.get
-          case state.focusedPane of
-            Nothing -> pure unit
-            Just graphId -> handleAction $ Redo graphId
+          if not state.keyHoldState.controlDown then pure unit else do
+            H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
+            case state.focusedPane of
+              Nothing -> pure unit
+              Just megagraphElement -> handleAction $ Redo megagraphElement
 
-        "l" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-          -- Load saved graph from local JSON file
-          H.liftEffect loadFile
-
-        "s" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        "l" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
+          if not state.keyHoldState.controlDown then pure unit else do
+            H.liftEffect $ Console.log "in handleKeypress for 'l'"
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+            -- Load saved graph from local JSON file
+            H.liftEffect loadFile
+
+        "s" -> do
+          state <- H.get
+          if state.keyHoldState.controlDown
+          then do
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
             -- Save current graph to local JSON file
             handleAction $ SaveLocalFile
           else
-            -- connect focused node to Subgraph with same title as node text
-            -- TODO
-            pure unit
-            --case focusNode state of
-            --  Nothing -> pure unit
-            --  Just node ->
-            --    let
-            --      op = AppOperation node.graphId $ connectSubgraphIfTitleExists node.id node.text
-            --    in
-            --      H.raise $ SendOperation op
+              -- connect focused node to Subgraph with same title as node text
+              -- TODO
+              pure unit
+              --case focusNode state of
+              --  Nothing -> pure unit
+              --  Just node ->
+              --    let
+              --      op = AppOperation node.graphId $ connectSubgraphIfTitleExists node.id node.text
+              --    in
+              --      H.raise $ SendOperation op
 
-        "o" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
-          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        "o" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then do
-            -- Return to graph origin and reset zoom
-            handleAction CenterGraphOriginAndZoom
-          else
-            -- Open subgraph in new pane
-            -- TODO
-            pure unit
-            --if state.keyHoldState.spaceDown
-            --then unit <$ runMaybeT do
-            --  subgraphId <- MaybeT $ pure $ focusNodeSubgraph state
-            --  lift $ H.raise $ SendOperation $ AppOperation subgraphId $ insertPane subgraphId
-            --else
-            --  pure unit
+          if not state.keyHoldState.controlDown then pure unit else do
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+            if not state.keyHoldState.spaceDown
+            then do
+              -- Return to graph origin and reset zoom
+              handleAction CenterGraphOriginAndZoom
+            else
+              -- Open subgraph in new pane
+              -- TODO
+              pure unit
+              --if state.keyHoldState.spaceDown
+              --then unit <$ runMaybeT do
+              --  subgraphId <- MaybeT $ pure $ focusNodeSubgraph state
+              --  lift $ H.raise $ SendOperation $ AppOperation subgraphId $ insertPane subgraphId
+              --else
+              --  pure unit
 
         -- Delete node/edge currently in focus
         "Delete" -> do
           state <- H.get
           case state.focusedPane of
             Nothing -> pure unit
-            Just graphId -> handleAction $ DeleteFocus graphId
+            Just graphId -> handleAction DeleteFocus
 
         -- Unfocus
         "Escape" -> do
           state <- H.get
           for_ (Map.keys state.megagraph.graphs) \graphId -> do
-            handleAction $ UpdateGraphFocus graphId Nothing
+            handleAction $ UpdateFocus Nothing
             handleAction $ UpdateContentEditableText graphId
 
         -- Close pane
-        "c" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "c" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
-            pure unit
-          else unit <$ runMaybeT do
-            lift $ H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            graphId <- MaybeT $ pure $ state.focusedPane
-            lift $ handleAction $ RemovePane graphId
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
+            unit <$ runMaybeT do
+              lift $ H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+              focusedElement <- MaybeT $ pure $ state.focusedPane
+              case focusedElement of
+                GraphElement graphId -> lift $ handleAction $ RemovePane graphId
+                _ -> pure unit
 
         -- new Graph
         -- TODO: if current selection is non-empty, push it down into the new subgraph
-        "g" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "g" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
-            pure unit
-          else
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
             -- TODO
             pure unit
             --case Tuple (focusNode state) (focusNode state >>= _.subgraph) of
@@ -849,12 +921,9 @@ handleKeypress keyboardEvent = do
         --"h" -> H.modify_ $ _graphAtId %~ toggleHighlightFocus
 
         -- jump Down into the subgraph of the focused node
-        "d" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "d" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
-            pure unit
-          else
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
             -- TODO
             pure unit
             --case Tuple state.focusedPane (focusNodeSubgraph state) of
@@ -870,12 +939,9 @@ handleKeypress keyboardEvent = do
 
         -- jump Up to the graphs that have nodes that point to the current graph
         -- as a subgraph
-        "u" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "u" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
-            pure unit
-          else do
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
             -- TODO
             pure unit
             --H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
@@ -884,12 +950,9 @@ handleKeypress keyboardEvent = do
             --  lift $ interpretAndSend $ AppOperation focusedGraphId $ openGraphsWithSubgraph focusedGraphId
 
         -- load the Knowledge navigator
-        "k" -> if not (KE.ctrlKey keyboardEvent) then pure unit else do
+        "k" -> do
           state <- H.get
-          if not state.keyHoldState.spaceDown
-          then
-            pure unit
-          else do
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
             -- TODO
             pure unit
             --H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent

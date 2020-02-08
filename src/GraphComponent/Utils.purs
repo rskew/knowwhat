@@ -10,7 +10,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Math as Math
-import Megagraph (Edge, Focus(..), GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, pageSpaceToGraphSpace)
+import Megagraph (Edge, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, pageSpaceToGraphSpace)
 import MegagraphOperation (GraphOperation(..), MegagraphOperation(..))
 import UI.Constants (haloRadius)
 import Web.UIEvent.MouseEvent as ME
@@ -55,22 +55,6 @@ nodesWithTextUpdate (AppOperation {target, op, historyUpdate, undoneUpdate}) =
       graphAndNodeId (GraphElementOperation graphId (UpdateNodeText nodeId _ _)) =
         Just $ Tuple graphId nodeId
       graphAndNodeId _ = Nothing
-
-focusNode :: AppState -> Maybe Node
-focusNode state = do
-  graphId    <- state.focusedPane
-  graphState <- Map.lookup graphId state.megagraph.graphs
-  focus      <- graphState.view.focus
-  nodeId     <- case focus of
-    FocusNode nodeId -> Just nodeId
-    _ -> Nothing
-  Map.lookup nodeId graphState.graph.nodes
-
-focusNodeSubgraph :: AppState -> Maybe GraphId
-focusNodeSubgraph state = do
-  node <- focusNode state
-  subgraphId <- node.subgraph
-  pure subgraphId
 
 type Parabola
   = { p0 :: Point2D

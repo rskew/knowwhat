@@ -10,11 +10,13 @@ import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Symbol (SProxy(..))
 import Data.UUID (UUID)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (Edge, EdgeId, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, NodeId, PageSpacePoint2D, Point2D, emptyGraph, emptyMapping, freshPane)
+import Megagraph (Edge, EdgeId, Focus, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, NodeId, PageSpacePoint2D, Point2D, emptyGraph, emptyMapping, freshPane)
 import MegagraphOperation (MegagraphUpdate)
 import Web.HTML.HTMLElement as WHE
 
@@ -26,7 +28,8 @@ appStateVersion = "0.0.0.0.0.0.0.1"
 -- Types
 
 type KeyHoldState
-  = { spaceDown :: Boolean
+  = { spaceDown   :: Boolean
+    , controlDown :: Boolean
     }
 
 type GraphState
@@ -46,14 +49,12 @@ emptyGraphState graphId rect
 
 type MappingState
   = { mapping :: Mapping
-    , focus   :: Maybe EdgeId
     , history :: Array MegagraphUpdate
     , undone  :: Array MegagraphUpdate
     }
 
 emptyMappingState :: MappingId -> GraphId -> GraphId -> MappingState
 emptyMappingState mappingId from to = { mapping : emptyMapping mappingId from to
-                                      , focus : Nothing
                                       , history : []
                                       , undone : []
                                       }
@@ -78,8 +79,9 @@ type AppState
   = { megagraph          :: MegagraphState
     , windowBoundingRect :: WHE.DOMRect
     , drawingEdges       :: Map DrawingEdgeId DrawingEdge
-    , hoveredElementId   :: Maybe HoveredElementId
-    , focusedPane        :: Maybe GraphId
+    , hoveredElements    :: Set HoveredElementId
+    , focus              :: Maybe Focus
+    , focusedPane        :: Maybe MegagraphElement
     , keyHoldState       :: KeyHoldState
     }
 
@@ -88,9 +90,10 @@ emptyAppState rect
   = { megagraph          : emptyMegagraph
     , windowBoundingRect : rect
     , drawingEdges       : Map.empty
-    , hoveredElementId   : Nothing
+    , hoveredElements    : Set.empty
+    , focus              : Nothing
     , focusedPane        : Nothing
-    , keyHoldState       : { spaceDown : false }
+    , keyHoldState       : { spaceDown : false, controlDown : false }
     }
 
 type Shape
@@ -128,6 +131,8 @@ data MegagraphElement
 
 derive instance eqMegagraphElement :: Eq MegagraphElement
 
+derive instance ordMegagraphElement :: Ord MegagraphElement
+
 derive instance genericMegagraphElement :: Generic MegagraphElement _
 instance decodeMegagraphElement :: Decode MegagraphElement where
   decode = genericDecode defaultOptions
@@ -148,6 +153,8 @@ data HoveredElementId
 
 derive instance eqHoveredElementId :: Eq HoveredElementId
 
+derive instance ordHoveredElementId :: Ord HoveredElementId
+
 instance showHoveredElementId :: Show HoveredElementId where
    show = case _ of
      NodeHaloId   graphId nodeId -> "NodeHaloId in graph: " <> show graphId <> " node: " <> show nodeId
@@ -155,20 +162,9 @@ instance showHoveredElementId :: Show HoveredElementId where
      EdgeHaloId   graphId edgeId -> "EdgeHaloId in graph: " <> show graphId <> " edge: " <> show edgeId
      EdgeBorderId graphId edgeId -> "EdgeBorderId in graph: " <> show graphId <> "  edge: " <> show edgeId
 
+
 ------
 -- Lenses
-
---_graphView :: GraphId -> Lens' AppState (Maybe GraphView)
---_graphView graphId =
---  prop (SProxy :: SProxy "graphData")
---  <<< prop (SProxy :: SProxy "panes")
---  <<< at graphId
-
---_focus :: GraphId -> Traversal' AppState (Maybe Focus)
---_focus graphId =
---  _graphView graphId
---  <<< traversed
---  <<< prop (SProxy :: SProxy "focus")
 
 _drawingEdges :: Lens' AppState (Map DrawingEdgeId DrawingEdge)
 _drawingEdges = prop (SProxy :: SProxy "drawingEdges")
@@ -206,9 +202,6 @@ _mapping = prop (SProxy :: SProxy "mapping")
 _mappingAtId :: MappingId -> Traversal' AppState Mapping
 _mappingAtId mappingId = _megagraph <<< _mappingState mappingId <<< traversed <<< _mapping
 
-_mappingFocus :: Lens' MappingState (Maybe EdgeId)
-_mappingFocus = prop (SProxy :: SProxy "focus")
-
 _graph :: Lens' GraphState Graph
 _graph = prop (SProxy :: SProxy "graph")
 
@@ -233,8 +226,20 @@ _coerceToGraphSpace = lens GraphSpacePoint2D (\_ (GraphSpacePoint2D pos) -> pos)
 --_undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
 --_undone = prop (SProxy :: SProxy "undone")
 
-_focusedPane :: Lens' AppState (Maybe GraphId)
+_focusedPane :: Lens' AppState (Maybe MegagraphElement)
 _focusedPane = prop (SProxy :: SProxy "focusedPane")
+
+_hoveredElements :: Lens' AppState (Set HoveredElementId)
+_hoveredElements = prop (SProxy :: SProxy "hoveredElements")
+
+_keyHoldState :: Lens' AppState KeyHoldState
+_keyHoldState = prop (SProxy :: SProxy "keyHoldState")
+
+_spaceDown :: Lens' KeyHoldState Boolean
+_spaceDown = prop (SProxy :: SProxy "spaceDown")
+
+_controlDown :: Lens' KeyHoldState Boolean
+_controlDown = prop (SProxy :: SProxy "controlDown")
 
 
 ------

@@ -25,6 +25,7 @@ You can edit this file as you like.
     , "quickcheck"
     , "run"
     , "simple-json"
+    , "spec"
     , "strings"
     , "uuid"
     , "web-socket"

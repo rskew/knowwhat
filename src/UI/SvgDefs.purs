@@ -6,6 +6,7 @@ import Halogen as H
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Types as SVGT
+import UI.Constants (edgeMappingEdgeBeginMarkerRadius)
 
 
 svgDefs :: forall action slots m. H.ComponentHTML action slots m
@@ -89,5 +90,20 @@ svgDefs = SE.defs []
                              , SVGT.Abs SVGT.Z
                              ]
                       ]
+            ]
+          , SE.marker
+            [ SA.id "edge-mapping-edge-begin"
+            , SA.markerWidth $ show $ 2.0 * edgeMappingEdgeBeginMarkerRadius
+            , SA.markerHeight $ show $ 2.0 * edgeMappingEdgeBeginMarkerRadius
+            , SA.refX $ show edgeMappingEdgeBeginMarkerRadius
+            , SA.refY $ show edgeMappingEdgeBeginMarkerRadius
+            , SA.orient SVGT.AutoOrient
+            , SA.markerUnits SVGT.UserSpaceOnUse
+            ]
+            [ SE.circle
+              [ SA.r $ show edgeMappingEdgeBeginMarkerRadius
+              , SA.cx $ show edgeMappingEdgeBeginMarkerRadius
+              , SA.cy $ show edgeMappingEdgeBeginMarkerRadius
+              ]
             ]
           ]

@@ -2,7 +2,7 @@ module UI.Panes where
 
 import Prelude
 
-import AppState (AppState, GraphState, _focusedPane, _graphState, _graphs, _megagraph, _pane, _windowBoundingRect)
+import AppState (AppState, GraphState, MegagraphElement(..), _focusedPane, _graphState, _graphs, _megagraph, _pane, _windowBoundingRect)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Lens ((.~), (%~), (?~))
@@ -36,7 +36,7 @@ insertPane graphId state =
                                             , history : []
                                             , undone : []
                                             }
-    # _focusedPane ?~ graphId
+    # _focusedPane ?~ GraphElement graphId
     # arrangePanes
 
 arrangePanes :: AppState -> AppState

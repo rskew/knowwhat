@@ -147,6 +147,24 @@ collapseGraphOperation nextOp prevOp =
     UpdateTitle middleTitle lastTitle,
     UpdateTitle firstTitle  middleTitle' ->
       Just $ UpdateTitle firstTitle lastTitle
+
+    _, _ -> Nothing
+
+collapseMappingOperation :: MappingOperation -> MappingOperation -> Maybe MappingOperation
+collapseMappingOperation nextOp prevOp =
+  case nextOp, prevOp of
+    MoveNodeMappingEdgeMidpoint nextEdgeId  middlePos lastPos,
+    MoveNodeMappingEdgeMidpoint firstEdgeId firstPos  middlePos' ->
+      if nextEdgeId == firstEdgeId
+      then Just $ MoveNodeMappingEdgeMidpoint firstEdgeId firstPos lastPos
+      else Nothing
+
+    MoveEdgeMappingEdgeMidpoint nextEdgeId  middlePos lastPos,
+    MoveEdgeMappingEdgeMidpoint firstEdgeId firstPos  middlePos' ->
+      if nextEdgeId == firstEdgeId
+      then Just $ MoveEdgeMappingEdgeMidpoint firstEdgeId firstPos lastPos
+      else Nothing
+
     _, _ -> Nothing
 
 collapseMegagraphOperations :: MegagraphOperation -> MegagraphOperation -> Maybe MegagraphOperation
@@ -155,6 +173,12 @@ collapseMegagraphOperations = case _, _ of
     if graphIdA == graphIdB
     then collapseGraphOperation opA opB <#> GraphElementOperation graphIdA
     else Nothing
+
+  MappingElementOperation mappingIdA opA, MappingElementOperation mappingIdB opB ->
+    if mappingIdA == mappingIdB
+    then collapseMappingOperation opA opB <#> MappingElementOperation mappingIdA
+    else Nothing
+
   _, _ -> Nothing
 
 instance showGraphOperation :: Show GraphOperation where
@@ -213,24 +237,31 @@ instance showMegagraphOperation :: Show MegagraphOperation where
     MappingElementOperation mappingId mappingOp ->
       "MappingElementOperation on mapping " <> show mappingId <> " " <> show mappingOp
 
-encodeNodeAsMegagraphUpdate :: Node -> MegagraphUpdate
-encodeNodeAsMegagraphUpdate node =
-  [ GraphElementOperation node.graphId $ InsertNode node.id
-  , GraphElementOperation node.graphId $ MoveNode node.id (GraphSpacePoint2D {x: 0.0, y: 0.0}) node.position
-  , GraphElementOperation node.graphId $ UpdateNodeText node.id "" node.text
-  , GraphElementOperation node.graphId $ ConnectSubgraph node.id Nothing node.subgraph
+encodeNodeAsGraphOperations :: Node -> Array GraphOperation
+encodeNodeAsGraphOperations node =
+  [ InsertNode node.id
+  , MoveNode node.id (GraphSpacePoint2D {x: 0.0, y: 0.0}) node.position
+  , UpdateNodeText node.id "" node.text
+  , ConnectSubgraph node.id Nothing node.subgraph
   ]
 
-encodeEdgeAsMegagraphUpdate :: Edge -> MegagraphUpdate
-encodeEdgeAsMegagraphUpdate edge =
+encodeNodeAsMegagraphUpdate :: Node -> MegagraphUpdate
+encodeNodeAsMegagraphUpdate node =
+  GraphElementOperation node.graphId <$> encodeNodeAsGraphOperations node
+
+encodeEdgeAsGraphOperations :: Edge -> Array GraphOperation
+encodeEdgeAsGraphOperations edge =
   let
     edgeMetadata = {id: edge.id, graphId: edge.graphId, source: edge.source, target: edge.target}
   in
-    [ GraphElementOperation edge.graphId $ InsertEdge edgeMetadata
-    , GraphElementOperation edge.graphId $ UpdateEdgeText edge.id "" edge.text
-    , GraphElementOperation edge.graphId
-      $ MoveEdgeMidpoint edge.id (GraphEdgeSpacePoint2D {angle: 0.0, radius: 0.0}) edge.midpoint
-    ]
+   [ InsertEdge edgeMetadata
+   , UpdateEdgeText edge.id "" edge.text
+   , MoveEdgeMidpoint edge.id (GraphEdgeSpacePoint2D {angle: 0.0, radius: 0.0}) edge.midpoint
+   ]
+
+encodeEdgeAsMegagraphUpdate :: Edge -> MegagraphUpdate
+encodeEdgeAsMegagraphUpdate edge =
+  GraphElementOperation edge.graphId <$> encodeEdgeAsGraphOperations edge
 
 encodePathEquationAsMegagraphUpdate :: GraphId -> PathEquation -> MegagraphUpdate
 encodePathEquationAsMegagraphUpdate graphId pathEquation =

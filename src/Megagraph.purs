@@ -224,9 +224,11 @@ freshNode graphId id
     , isValid  : true
     }
 
-data Focus =
-  FocusNode NodeId
-  | FocusEdge EdgeId (Array EdgeId)
+data Focus
+  = FocusNode GraphId NodeId
+  | FocusEdge GraphId EdgeId
+  | FocusNodeMappingEdge MappingId EdgeId
+  | FocusEdgeMappingEdge MappingId EdgeId
 
 derive instance eqFocus :: Eq Focus
 derive instance ordFocus :: Ord Focus
