@@ -33,10 +33,12 @@ import GraphComponent.Utils (mouseEventPosition, nodesWithTextUpdate)
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
 import Halogen.Query.EventSource as ES
-import Interpreter (interpretAppOperation)
+import HasuraQuery (renderMutation, renderQuery)
+import Interpreter (interpretAppOperation, preprocessAppOperation)
 import Math as Math
-import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edgeMappingEdges, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edgeMappingEdges, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphOperation (GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, invertMegagraphUpdate)
+import Query (graphFetchQuery)
 import UI.Constants (zoomScaling)
 import UI.Panes (arrangePanes, insertPane, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Utils (tupleApply)
@@ -139,11 +141,11 @@ handleAction = case _ of
 
   TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
     state <- H.get
-    case state ^? _graphAtId graphId <<< _title of
+    case state ^? _graphAtId graphId of
       Nothing -> pure unit
-      Just oldTitle ->
+      Just graph ->
         let
-          appOp = undoableGraphOp graphId $ UpdateTitle oldTitle.text newTitleText
+          appOp = undoableGraphOp graphId $ UpdateTitle graph.title.text newTitleText
         in
           interpretAndSend appOp
 
@@ -208,8 +210,8 @@ handleAction = case _ of
           Nothing -> pure unit
           Just node ->
             let
-              appOp = undoableGraphOp graphId $ MoveNode node.id node.position newNodePos
-            in
+              appOp = undoableGraphOp graphId $ MoveNode node.id (nodePosition node) newNodePos
+            in do
               interpretAndSend appOp
 
   NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
@@ -228,9 +230,9 @@ handleAction = case _ of
     state <- H.get
     case do
       currentNodeMappingEdge <- mapping ^. _nodeMappingEdges <<< at nodeMappingEdgeId
-      sourcePos <- state ^? _graphAtId mapping.sourceGraph <<< _position currentNodeMappingEdge.sourceNode
+      sourcePos <- state ^? _graphAtId mapping.sourceGraph <<< _nodes <<< at currentNodeMappingEdge.sourceNode <<< traversed <<< _position
       sourcePane <- state ^? _paneAtId mapping.sourceGraph
-      targetPos <- state ^? _graphAtId mapping.targetGraph <<< _position currentNodeMappingEdge.targetNode
+      targetPos <- state ^? _graphAtId mapping.targetGraph <<< _nodes <<< at currentNodeMappingEdge.targetNode <<< traversed <<< _position
       targetPane <- state ^? _paneAtId mapping.targetGraph
       let
         sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePos
@@ -274,16 +276,16 @@ handleAction = case _ of
       sourceGraph <- state ^? _graphAtId mapping.sourceGraph
       sourceEdge <- lookupEdgeById currentEdgeMappingEdge.sourceEdge sourceGraph
       sourcePane <- state ^? _paneAtId mapping.sourceGraph
-      sourceEdgeSourcePos <- sourceGraph ^? _position sourceEdge.source
-      sourceEdgeTargetPos <- sourceGraph ^? _position sourceEdge.target
+      sourceEdgeSourcePos <- sourceGraph ^? _nodes <<< at sourceEdge.source <<< traversed <<< _position
+      sourceEdgeTargetPos <- sourceGraph ^? _nodes <<< at sourceEdge.target <<< traversed <<< _position
       targetGraph <- state ^? _graphAtId mapping.targetGraph
       targetEdge <- lookupEdgeById currentEdgeMappingEdge.targetEdge targetGraph
       targetPane <- state ^? _paneAtId mapping.targetGraph
-      targetEdgeSourcePos <- targetGraph ^? _position targetEdge.source
-      targetEdgeTargetPos <- targetGraph ^? _position targetEdge.target
+      targetEdgeSourcePos <- targetGraph ^? _nodes <<< at targetEdge.source <<< traversed <<< _position
+      targetEdgeTargetPos <- targetGraph ^? _nodes <<< at targetEdge.target <<< traversed <<< _position
       let
-        sourcePos = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos sourceEdge.midpoint
-        targetPos = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos targetEdge.midpoint
+        sourcePos = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos (edgeMidpoint sourceEdge)
+        targetPos = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos (edgeMidpoint targetEdge)
         sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePos
         targetPosPageSpace = graphSpaceToPageSpace targetPane targetPos
         PageSpacePoint2D initialMidpointCartesian =
@@ -320,8 +322,8 @@ handleAction = case _ of
     case do
       graph <- state ^? _graphAtId graphId
       edge <- lookupEdgeById edgeId graph
-      sourcePos <- graph ^? _position edge.source
-      targetPos <- graph ^? _position edge.target
+      sourcePos <- graph ^? _nodes <<< at edge.source <<< traversed <<< _position
+      targetPos <- graph ^? _nodes <<< at edge.target <<< traversed <<< _position
       pane <- state ^? _paneAtId graphId
       let
         dragOffsetGraphSpace = { x : dragData.offsetX * pane.zoom
@@ -334,11 +336,11 @@ handleAction = case _ of
             , y : initialMidpointGraphSpace.y + dragOffsetGraphSpace.y
             }
         newMidpoint = graphSpaceToGraphEdgeSpace sourcePos targetPos newMidpointGraphSpace
-      pure $ undoableGraphOp graphId $ MoveEdgeMidpoint edge.id edge.midpoint newMidpoint
+        appOp = undoableGraphOp graphId $ MoveEdgeMidpoint edge.id (edgeMidpoint edge) newMidpoint
+      pure $ interpretAndSend appOp
     of
       Nothing -> pure unit
-      Just appOp ->
-        interpretAndSend appOp
+      Just thingsToDo -> thingsToDo
 
   EdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
     H.unsubscribe subscriptionId
@@ -349,13 +351,13 @@ handleAction = case _ of
       case sourceElement of
         NodeSource nodeId -> do
           node <- state ^? _graphAtId pane.graphId <<< _nodes <<< at nodeId <<< traversed
-          pure node.position
+          pure (nodePosition node)
         EdgeSource edgeId -> do
           graph <- state ^? _graphAtId pane.graphId
           edge <- lookupEdgeById edgeId graph
           sourceNode <- Map.lookup edge.source graph.nodes
           targetNode <- Map.lookup edge.target graph.nodes
-          pure $ graphEdgeSpaceToGraphSpace sourceNode.position targetNode.position edge.midpoint
+          pure $ graphEdgeSpaceToGraphSpace (nodePosition sourceNode) (nodePosition targetNode) (edgeMidpoint edge)
     of
       Nothing -> pure unit
       Just sourcePosition ->
@@ -665,7 +667,6 @@ handleAction = case _ of
           mapping.targetGraph == graphId
 
   FetchLocalFile changeEvent -> unit <$ runMaybeT do
-    lift $ H.liftEffect $ Console.log "in FetchLocalFile"
     target <- MaybeT $ pure $ WE.target changeEvent
     inputElement <- MaybeT $ pure $ WHIE.fromEventTarget target
     files <- MaybeT $ H.liftEffect $ WHIE.files inputElement
@@ -680,7 +681,6 @@ handleAction = case _ of
         pure mempty
 
   LoadLocalFile fileReader subscriptionId event -> do
-    H.liftEffect $ Console.log "in LoadLocalFile"
     -- state <- H.get
     foreignJSON <- H.liftEffect $ FileReader.result fileReader
     case
@@ -728,8 +728,9 @@ handleQuery = case _ of
 
   ReceiveOperation op a -> do
     state <- H.get
-    H.modify_ $ _megagraph %~ interpretAppOperation op
+    H.modify_ $ _megagraph %~ interpretAppOperation (preprocessAppOperation op state.megagraph)
     for_ (nodesWithTextUpdate op) (handleAction <<< tupleApply UpdateNodeContentEditableText)
+    H.modify_ arrangePanes
     pure $ Just a
 
 undoableGraphOp :: GraphId -> GraphOperation -> AppOperation
@@ -768,8 +769,13 @@ redoOp op target =
 
 interpretAndSend :: AppOperation -> H.HalogenM AppState Action Slots Message Aff Unit
 interpretAndSend op = do
-  H.raise $ SendOperation op
-  H.modify_ $ _megagraph %~ interpretAppOperation op
+  state <- H.get
+  let
+    preprocessedOp = preprocessAppOperation op state.megagraph
+    -- query = renderMutation $ appOperationToQuery preprocessedOp
+  -- H.liftEffect $ Console.log $ query
+  -- H.raise $ SendOperation $ query
+  H.modify_ $ _megagraph %~ interpretAppOperation preprocessedOp
 
 
 ------
@@ -824,10 +830,14 @@ handleKeypress keyboardEvent = do
         "l" -> do
           state <- H.get
           if not state.keyHoldState.controlDown then pure unit else do
-            H.liftEffect $ Console.log "in handleKeypress for 'l'"
             H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
             -- Load saved graph from local JSON file
-            H.liftEffect loadFile
+            -- TODO revert experiment
+            -- H.liftEffect loadFile
+            case UUID.parseUUID "dcb54f3a-f3a5-46f5-a1b0-b933d0592235" of
+              Nothing -> pure unit
+              Just graphId ->
+                H.raise $ SendOperation $ renderQuery $ graphFetchQuery graphId
 
         "s" -> do
           state <- H.get

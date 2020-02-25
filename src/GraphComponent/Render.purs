@@ -23,7 +23,7 @@ import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import Megagraph (Edge, EdgeMappingEdge, Focus(..), Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, Node, NodeMappingEdge, PageSpacePoint2D(..), _nodes, _position, _subgraph, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
+import Megagraph (Edge, EdgeMappingEdge, Focus(..), Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, Node, NodeMappingEdge, PageSpacePoint2D(..), _nodes, _position, _subgraph, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, nodePosition, edgeMidpoint)
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
@@ -128,14 +128,14 @@ renderGraphNode state pane node =
         , SA.r $ show nodeBorderRadius
         , HE.onMouseDown \e -> Just
                                $ StopPropagation (ME.toEvent e)
-                               $ NodeDragStart node.graphId node.id node.position e
+                               $ NodeDragStart node.graphId node.id (nodePosition node) e
         , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
                                  $ AppDeleteNode node
         , HE.onMouseEnter \_ -> Just $ Hover $ NodeBorderId node.graphId node.id
         , HE.onMouseLeave \_ -> Just $ UnHover $ NodeBorderId node.graphId node.id
         ]
       ] <> textBoxHTML nodeTextBoxOffset
-    GraphSpacePoint2D nodePos = node.position
+    GraphSpacePoint2D nodePos = nodePosition node
     shiftedNodeHTML = SE.g
                [ SA.transform [ SVGT.Translate nodePos.x nodePos.y ] ]
                graphNodeHTML
@@ -155,7 +155,7 @@ renderGhostNode state renderPane node =
                           then groupNodeRadius
                           else nodeRadius
           ]
-        GraphSpacePoint2D nodePos = node.position # graphSpaceToPageSpace nativePane # pageSpaceToGraphSpace renderPane
+        GraphSpacePoint2D nodePos = (nodePosition node) # graphSpaceToPageSpace nativePane # pageSpaceToGraphSpace renderPane
         nodeHTML = SE.g
                    [ SA.transform [ SVGT.Translate nodePos.x nodePos.y ] ]
                    [ graphNodeHTML ]
@@ -223,16 +223,16 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
   sourceGraph <- state ^? _graphAtId mapping.sourceGraph
   sourceEdge <- lookupEdgeById edgeMappingEdge.sourceEdge sourceGraph
   sourcePane <- state ^? _paneAtId mapping.sourceGraph
-  sourceEdgeSourcePos <- sourceGraph ^? _position sourceEdge.source
-  sourceEdgeTargetPos <- sourceGraph ^? _position sourceEdge.target
+  sourceEdgeSourcePos <- sourceGraph ^? _nodes <<< at sourceEdge.source <<< traversed <<< _position
+  sourceEdgeTargetPos <- sourceGraph ^? _nodes <<< at sourceEdge.target <<< traversed <<< _position
   targetGraph <- state ^? _graphAtId mapping.targetGraph
   targetEdge <- lookupEdgeById edgeMappingEdge.targetEdge targetGraph
   targetPane <- state ^? _paneAtId mapping.targetGraph
-  targetEdgeSourcePos <- targetGraph ^? _position targetEdge.source
-  targetEdgeTargetPos <- targetGraph ^? _position targetEdge.target
+  targetEdgeSourcePos <- targetGraph ^? _nodes <<< at targetEdge.source <<< traversed <<< _position
+  targetEdgeTargetPos <- targetGraph ^? _nodes <<< at targetEdge.target <<< traversed <<< _position
   let
-    sourcePosGraphSpace = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos sourceEdge.midpoint
-    targetPosGraphSpace = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos targetEdge.midpoint
+    sourcePosGraphSpace = graphEdgeSpaceToGraphSpace sourceEdgeSourcePos sourceEdgeTargetPos (edgeMidpoint sourceEdge)
+    targetPosGraphSpace = graphEdgeSpaceToGraphSpace targetEdgeSourcePos targetEdgeTargetPos (edgeMidpoint targetEdge)
     sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePosGraphSpace
     targetPosPageSpace = graphSpaceToPageSpace targetPane targetPosGraphSpace
     focused = state.focus == Just (FocusEdgeMappingEdge mapping.id edgeMappingEdge.id)
@@ -330,7 +330,7 @@ renderEdge state renderPane edge = do
       graphEdgeSpaceToGraphSpace
         (GraphSpacePoint2D sourcePos)
         (GraphSpacePoint2D targetPos)
-        edge.midpoint
+        (edgeMidpoint edge)
     bezierParabola = {p0: sourcePos, p1: midpointGraphSpace, p2: targetPos}
     haloParabolaPos = parallelParabola edgeHaloOffset bezierParabola
     haloParabolaNeg = parallelParabola (- edgeHaloOffset) bezierParabola
@@ -379,7 +379,7 @@ renderEdge state renderPane edge = do
              ]
       , HE.onMouseDown \e -> Just
                              $ StopPropagation (ME.toEvent e)
-                             $ EdgeDragStart edge.graphId edge.id edge.midpoint e
+                             $ EdgeDragStart edge.graphId edge.id (edgeMidpoint edge) e
       , HE.onMouseEnter \_ -> Just $ Hover $ EdgeBorderId (GraphElement edge.graphId) edge.id
       , HE.onMouseLeave \_ -> Just $ UnHover $ EdgeBorderId (GraphElement edge.graphId) edge.id
       , HE.onDoubleClick \e -> Just $ StopPropagation (ME.toEvent e)
@@ -395,9 +395,9 @@ renderEdgeTextField state renderPane edge = do
   let
     GraphSpacePoint2D midpoint =
       graphEdgeSpaceToGraphSpace
-        sourceNode.position
-        targetNode.position
-        edge.midpoint
+        (nodePosition sourceNode)
+        (nodePosition targetNode)
+        (edgeMidpoint edge)
     focused = state.focus == Just (FocusEdge edge.graphId edge.id)
   if not focused && (edge.text == "")
   then Nothing

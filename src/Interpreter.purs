@@ -7,14 +7,17 @@ import AppOperation (AppOperation(..), HistoryUpdate(..))
 import AppState (MegagraphElement(..), MegagraphState, _graph, _graphState, _graphs, _mapping, _mappingState, _mappings, _pane, emptyGraphState, emptyMappingState)
 import Data.Array as Array
 import Data.Foldable (foldl)
-import Data.Lens ((%~), (?~), (^?), traversed)
+import Data.Lens ((%~), (^?), (.~), traversed)
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Symbol (SProxy(..))
-import Megagraph (Graph, Mapping, _boundingRect, _height, connectSubgraph, deleteEdge, deleteEdgeMappingEdge, deleteNode, deleteNodeMappingEdge, deletePathEquation, insertEdgeMappingEdge, insertNewEdge, insertNewNode, insertNodeMappingEdge, insertPathEquation, moveNode, setTitleValidity, updateEdgeMappingEdgeMidpoint, updateEdgeMidpoint, updateEdgeText, updateNodeMappingEdgeMidpoint, updateNodeText, updateTitle)
-import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, collapseMegagraphOperations)
+import Data.UUID as UUID
+import HasuraQuery (GraphQLMutation, emptyMutation)
+import Megagraph (Graph, GraphEdgeSpacePoint2D(..), GraphSpacePoint2D(..), Mapping, _boundingRect, _height, _nodes, _text, _title, connectSubgraph, deleteEdge, deleteEdgeMappingEdge, deleteNode, deleteNodeMappingEdge, deletePathEquation, freshEdge, freshNode, insertEdgeMappingEdge, insertNewEdge, insertNewNode, insertNodeMappingEdge, insertPathEquation, moveNode, setTitleValidity, updateEdgeMappingEdgeMidpoint, updateEdgeMidpoint, updateEdgeText, updateNodeMappingEdgeMidpoint, updateNodeText, updateTitle)
+import MegagraphOperation (CreateOperation(..), EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, collapseMegagraphOperations)
+import Query (GraphSchema, edgeDeleteQuery, edgeUpdateQuery, edgeUpsertQuery, graphUpsertQuery, nodeDeleteQuery, nodeUpdateQuery, nodeUpsertQuery)
 
 --import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
 
@@ -53,6 +56,20 @@ interpretMappingOperation = case _ of
   MoveEdgeMappingEdgeMidpoint id from to ->
     updateEdgeMappingEdgeMidpoint id to
 
+interpretCreateOperation :: CreateOperation -> MegagraphState -> MegagraphState
+interpretCreateOperation = case _ of
+  CreateGraph graphId title -> \megagraph ->
+    let
+      megagraphHeight = fromMaybe 0.0 (megagraph ^? _graphs <<< traversed <<< _pane <<< _boundingRect <<< _height)
+      newRect = { height : megagraphHeight, bottom : megagraphHeight, width : 0.0, top : 0.0, left : 0.0, right : 0.0 }
+      newGraphState = emptyGraphState graphId newRect
+    in
+      megagraph # _graphs %~ Map.insert graphId (newGraphState # _graph <<< _title <<< _text .~ title)
+  DeleteGraph graphId title -> identity
+  CreateMapping mappingId from to ->
+    _mappings %~ Map.insert mappingId (emptyMappingState mappingId from to)
+  DeleteMapping mappingId from to -> identity
+
 interpretMegagraphOperation :: MegagraphOperation -> MegagraphState -> MegagraphState
 interpretMegagraphOperation = case _ of
   GraphElementOperation graphId graphOp ->
@@ -61,6 +78,8 @@ interpretMegagraphOperation = case _ of
     _graphState graphId <<< traversed <<< _graph %~ interpretEquationOperation equationOp
   MappingElementOperation mappingId mappingOp ->
     _mappingState mappingId <<< traversed <<< _mapping %~ interpretMappingOperation mappingOp
+  CreateElementOperation createOp ->
+    interpretCreateOperation createOp
 
 collapseHistory :: MegagraphUpdate -> MegagraphUpdate -> Maybe MegagraphUpdate
 collapseHistory opA opB =
@@ -72,17 +91,23 @@ collapseHistory opA opB =
       else Nothing
     _, _ -> Nothing
 
-interpretAppOperation :: AppOperation -> MegagraphState -> MegagraphState
-interpretAppOperation (AppOperation {op, target, historyUpdate, undoneUpdate}) megagraph =
+preprocessAppOperation :: AppOperation -> MegagraphState -> AppOperation
+preprocessAppOperation (AppOperation appOp) megagraph =
   let
     megagraphHeight = fromMaybe 0.0 (megagraph ^? _graphs <<< traversed <<< _pane <<< _boundingRect <<< _height)
     newRect = { height : megagraphHeight, bottom : megagraphHeight, width : 0.0, top : 0.0, left : 0.0, right : 0.0 }
     createTargetIfNotExists (GraphElement graphId) = case Map.lookup graphId megagraph.graphs of
       Just _ -> identity
-      Nothing -> _graphs <<< at graphId ?~ emptyGraphState graphId newRect
+      Nothing -> Array.cons (CreateElementOperation $ CreateGraph graphId (UUID.toString graphId))
     createTargetIfNotExists (MappingElement mappingId from to) = case Map.lookup mappingId megagraph.mappings of
       Just _ -> identity
-      Nothing -> _mappings <<< at mappingId ?~ emptyMappingState mappingId from to
+      Nothing -> Array.cons (CreateElementOperation $ CreateMapping mappingId from to)
+  in
+    AppOperation (appOp {op = appOp.op # createTargetIfNotExists appOp.target})
+
+interpretAppOperation :: AppOperation -> MegagraphState -> MegagraphState
+interpretAppOperation (AppOperation {op, target, historyUpdate, undoneUpdate}) megagraph =
+  let
     applyMegagraphUpdate = \op' megagraph' -> foldl (flip interpretMegagraphOperation) megagraph' op'
     historyUpdater = case _ of
       Insert op'' -> \history -> fromMaybe (Array.cons op'' history) do
@@ -103,7 +128,6 @@ interpretAppOperation (AppOperation {op, target, historyUpdate, undoneUpdate}) m
         (_mappingState mappingId <<< traversed <<< prop (SProxy :: SProxy "undone") %~ historyUpdater undoneUpdate)
   in
     megagraph
-    # createTargetIfNotExists target
     # applyMegagraphUpdate op
     # updateComponentHistory target
 
@@ -120,3 +144,53 @@ interpretAppOperation (AppOperation {op, target, historyUpdate, undoneUpdate}) m
 --                        # Array.head of
 --        Nothing -> appState
 --        Just nextPane -> appState { focusedPane = Just nextPane.graphId }
+
+
+------
+-- Hasura graphQL query translation
+
+-- TODO
+--megagraphOperationToQuery :: MegagraphState -> MegagraphOperation -> Maybe (GraphQLMutation GraphSchema)
+--megagraphOperationToQuery megagraph =
+--  let
+--    lookupNode = \nodeId -> megagraph # _graph <<< _nodes <<< at nodeId
+--  in case _ of
+--    GraphElementOperation graphId graphOp ->
+--      case graphOp of
+--        InsertNode nodeId                                    -> Just $ nodeUpsertQuery (freshNode graphId nodeId)
+--        UpsertNode from to                                   -> Just $ nodeUpsertQuery to
+--        DeleteNode nodeId                                    -> Just $ nodeDeleteQuery nodeId
+--        InsertEdge edgeMetadata                              -> Just $ edgeUpsertQuery (freshEdge edgeMetadata)
+--        UpsertEdge from to                                   -> Just $ edgeUpsertQuery to
+--        DeleteEdge edgeMetadata                              -> Just $ edgeDeleteQuery edgeMetadata.id
+--        MoveNode nodeId _ (GraphSpacePoint2D to) ->
+--          lookupNode >>= (pure <<< nodeUpsertQuery <<< _{positionX = to.x, positionY = to.y})
+--        UpdateNodeText nodeId _ to                           -> nodeUpdateQuery {id : nodeId, text: to}
+--        UpdateEdgeText edgeId _ to                           -> edgeUpdateQuery {id: edgeId, text: to}
+--        MoveEdgeMidpoint edgeId _ (GraphEdgeSpacePoint2D to) -> edgeUpdateQuery {id: edgeId, midpointAngle: to.angle, midpointRadius: to.radius}
+--        UpdateTitle _ to                                     -> graphUpsertQuery {id: graphId, title: to}
+--        SetTitleValidity _ new                               -> emptyMutation
+--        ConnectSubgraph nodeId _ new                         -> nodeUpdateQuery {id: nodeId, subgraph: new}
+--    GraphElementEquationOperation graphId equationOp ->
+--      case equationOp of -- TODO
+--        InsertPathEquation pathEquation -> emptyMutation
+--        DeletePathEquation pathEquation -> emptyMutation
+--    MappingElementOperation mappingId mappingOp ->
+--      case mappingOp of -- TODO
+--        InsertNodeMappingEdge nodeMappingEdge -> emptyMutation
+--        DeleteNodeMappingEdge nodeMappingEdge -> emptyMutation
+--        InsertEdgeMappingEdge edgeMappingEdge -> emptyMutation
+--        DeleteEdgeMappingEdge edgeMappingEdge -> emptyMutation
+--        MoveNodeMappingEdgeMidpoint id from to -> emptyMutation
+--        MoveEdgeMappingEdgeMidpoint id from to -> emptyMutation
+--    CreateElementOperation createOp ->
+--      case createOp of
+--        CreateGraph graphId title -> graphUpsertQuery {id: graphId, title: title}
+--        DeleteGraph graphId title -> emptyMutation
+--        -- TODO
+--        CreateMapping mappingId from to -> emptyMutation
+--        DeleteMapping mappingId from to -> emptyMutation
+
+--appOperationToQuery :: AppOperation -> GraphQLMutation GraphSchema
+--appOperationToQuery (AppOperation appOp) =
+--  foldl (<>) emptyMutation $ megagraphOperationToQuery <$> appOp.op

@@ -3,14 +3,14 @@ module GraphComponent.Utils where
 import Prelude
 
 import AppOperation (AppOperation(..))
-import AppState (AppState, DrawingEdge, edgeIdStr)
+import AppState (AppState, DrawingEdge)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Math as Math
-import Megagraph (Edge, GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, pageSpaceToGraphSpace)
+import Megagraph (GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
 import MegagraphOperation (GraphOperation(..), MegagraphOperation(..))
 import UI.Constants (haloRadius)
 import Web.UIEvent.MouseEvent as ME
@@ -33,16 +33,13 @@ drawingEdgeWithinNodeHalo drawingEdgeState pane node =
   let
     pointPositionGraphSpace = drawingEdgeState.pointPosition # pageSpaceToGraphSpace pane
   in
-    haloRadius > euclideanDistance node.position pointPositionGraphSpace
-
-edgeTextFieldIdStr :: Edge -> String
-edgeTextFieldIdStr edge = edgeIdStr edge <> "textField"
+    haloRadius > euclideanDistance (nodePosition node) pointPositionGraphSpace
 
 lookupNodePositionInPane :: AppState -> GraphId -> NodeId -> GraphView -> Maybe GraphSpacePoint2D
 lookupNodePositionInPane state graphId nodeId renderPane = do
   graphState <- Map.lookup graphId state.megagraph.graphs
   node <- Map.lookup nodeId graphState.graph.nodes
-  pure $ node.position # graphSpaceToPageSpace graphState.view # pageSpaceToGraphSpace renderPane
+  pure $ (nodePosition node) # graphSpaceToPageSpace graphState.view # pageSpaceToGraphSpace renderPane
 
 -- | Utility to indicate if an operation received from the server updates a node's
 -- | text, in which case the contenteditable field needs to be refreshed.

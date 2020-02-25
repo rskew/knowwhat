@@ -7,9 +7,10 @@ module Megagraph where
 import Prelude
 
 import Data.Array as Array
+import Data.Foldable (foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
-import Data.Lens (Lens', Traversal', traversed, (.~), (?~), (%~))
+import Data.Lens (Lens', Traversal', lens, traversed, (%~), (.~), (?~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.List as List
@@ -187,41 +188,47 @@ type EdgeMetadata
 -- | Invariants:
 -- | edge.source.graphId == edge.graphId
 -- | edge.target.graphId == edge.graphId
-type Edge
-  = { id       :: EdgeId
-    , graphId  :: GraphId
-    , source   :: NodeId
-    , target   :: NodeId
-    , midpoint :: GraphEdgeSpacePoint2D
-    , text     :: String
-    , isValid  :: Boolean
-    }
+type EdgeRow
+  = ( id             :: EdgeId
+    , graphId        :: GraphId
+    , source         :: NodeId
+    , target         :: NodeId
+    , midpointAngle  :: Number
+    , midpointRadius :: Number
+    , text           :: String
+    , isValid        :: Boolean
+    )
+type Edge = Record EdgeRow
 
 freshEdge :: EdgeMetadata -> Edge
 freshEdge edgeMetadata =
   Builder.build (Builder.merge edgeMetadata)
-  $ { text     : ""
-    , midpoint : GraphEdgeSpacePoint2D { angle : 0.0, radius : 0.0 }
-    , isValid  : true
+  $ { text           : ""
+    , midpointAngle  : 0.0
+    , midpointRadius : 0.0
+    , isValid        : true
     }
 
-type Node
-  = { id       :: NodeId
-    , graphId  :: GraphId
-    , subgraph :: Maybe GraphId
-    , position :: GraphSpacePoint2D
-    , text     :: String
-    , isValid  :: Boolean
-    }
+type NodeRow
+  = ( id        :: NodeId
+    , graphId   :: GraphId
+    , subgraph  :: Maybe GraphId
+    , positionX :: Number
+    , positionY :: Number
+    , text      :: String
+    , isValid   :: Boolean
+    )
+type Node = Record NodeRow
 
 freshNode :: GraphId -> NodeId -> Node
 freshNode graphId id
-  = { id       : id
-    , graphId  : graphId
-    , subgraph : Nothing
-    , position : GraphSpacePoint2D { x : 0.0, y : 0.0 }
-    , text     : ""
-    , isValid  : true
+  = { id        : id
+    , graphId   : graphId
+    , subgraph  : Nothing
+    , positionX : 0.0
+    , positionY : 0.0
+    , text      : ""
+    , isValid   : true
     }
 
 data Focus
@@ -371,14 +378,14 @@ _idMap = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "idMap")
 _edge :: EdgeId -> Lens' Graph (Maybe Edge)
 _edge edgeId = _idMap <<< at edgeId
 
-_position :: NodeId -> Traversal' Graph GraphSpacePoint2D
-_position nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "position")
+_position :: Lens' Node GraphSpacePoint2D
+_position = lens nodePosition updateNodePosition
 
 _nodeText :: NodeId -> Traversal' Graph String
 _nodeText nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "text")
 
 _nodeSubgraph :: NodeId -> Traversal' Graph (Maybe GraphId)
-_nodeSubgraph nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "subgraph")
+_nodeSubgraph nodeId = _nodes <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "subgraph")
 
 _pathEquations :: Lens' Graph (Set PathEquation)
 _pathEquations = prop (SProxy :: SProxy "pathEquations")
@@ -466,9 +473,14 @@ insertNewEdge edgeMetadata graph =
                     }
           }
 
--- why would I even want this?
---batchInsertEdges :: Graph -> Array Edge -> Graph
---batchInsertEdges = foldr (\edge -> insertEdgeImpl edge.id >>> updateEdgeData (const edge) edge.id)
+batchInsertEdges :: Array Edge -> Graph -> Graph
+batchInsertEdges edges graph = foldr insertEdge graph edges
+
+insertEdge :: Edge -> Graph -> Graph
+insertEdge edge =
+  insertNewEdge (edgeToMetadata edge)
+  >>>
+  updateEdgeData (const edge) edge.id
 
 updateEdgeData :: (Edge -> Edge) -> EdgeId -> Graph -> Graph
 updateEdgeData updater edgeId graph =
@@ -490,8 +502,16 @@ deleteEdge edgeId graph =
       # (_targetSource <<< at edge.target <<< traversed <<< at edge.source <<< traversed <<< at edge.id .~ Nothing)
       # (_idMap <<< at edge.id .~ Nothing)
 
+nodePosition :: Node -> GraphSpacePoint2D
+nodePosition node = GraphSpacePoint2D { x : node.positionX, y : node.positionY }
+
+updateNodePosition :: Node -> GraphSpacePoint2D -> Node
+updateNodePosition node (GraphSpacePoint2D newPos) =
+  node { positionX = newPos.x, positionY = newPos.y }
+
 moveNode :: NodeId -> GraphSpacePoint2D -> Graph -> Graph
-moveNode nodeId newPos = _position nodeId .~ newPos
+moveNode nodeId newPos =
+  prop (SProxy :: SProxy "nodes") <<< at nodeId %~ map (flip updateNodePosition newPos)
 
 updateNodeText :: NodeId -> String -> Graph -> Graph
 updateNodeText nodeId newText = _nodeText nodeId .~ newText
@@ -499,9 +519,12 @@ updateNodeText nodeId newText = _nodeText nodeId .~ newText
 updateEdgeText :: EdgeId -> String -> Graph -> Graph
 updateEdgeText edgeId newText = updateEdgeData _{ text = newText } edgeId
 
+edgeMidpoint :: Edge -> GraphEdgeSpacePoint2D
+edgeMidpoint edge = GraphEdgeSpacePoint2D { angle : edge.midpointAngle, radius : edge.midpointRadius }
+
 updateEdgeMidpoint :: EdgeId -> GraphEdgeSpacePoint2D -> Graph -> Graph
-updateEdgeMidpoint edgeId newMidpoint =
-  updateEdgeData _{ midpoint = newMidpoint } edgeId
+updateEdgeMidpoint edgeId (GraphEdgeSpacePoint2D newMidpoint) =
+  updateEdgeData _{ midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius } edgeId
 
 updateTitle :: String -> Graph -> Graph
 updateTitle newTitle =

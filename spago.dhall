@@ -6,6 +6,7 @@ You can edit this file as you like.
     "halogen-svg"
 , dependencies =
     [ "aff-coroutines"
+    , "argonaut"
     , "canvas"
     , "console"
     , "effect"
@@ -23,6 +24,7 @@ You can edit this file as you like.
     , "profunctor-lenses"
     , "psci-support"
     , "quickcheck"
+    , "record-extra"
     , "run"
     , "simple-json"
     , "spec"

@@ -17,7 +17,7 @@ import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
 import Effect.Unsafe (unsafePerformEffect)
 import Interpreter (interpretGraphOperation)
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), edgeToMetadata, emptyGraph, emptyMapping, freshEdge, freshNode, freshPane)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), edgeMidpoint, edgeToMetadata, emptyGraph, emptyMapping, freshEdge, freshNode, freshPane, nodePosition)
 import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), encodeEdgeAsGraphOperations, encodeNodeAsGraphOperations)
 import Test.QuickCheck (class Arbitrary, arbitrary)
 import Test.QuickCheck.Gen (Gen, arrayOf, elements, oneOf)
@@ -28,7 +28,7 @@ nodeGen graphId = do
   text  <- arbitrary :: Gen String
   x     <- arbitrary :: Gen Number
   y     <- arbitrary :: Gen Number
-  pure $ (freshNode graphId nodeId) { text = text, position = GraphSpacePoint2D { x : x, y : y } }
+  pure $ (freshNode graphId nodeId) { text = text, positionX = x, positionY = y }
 
 chooseNode :: Graph -> Gen (Maybe Node)
 chooseNode graph =
@@ -48,7 +48,8 @@ edgeGen nodes = do
                     , target  : targetNode.id
                     , graphId : sourceNode.graphId
                     })
-                    { midpoint = GraphEdgeSpacePoint2D { angle : angle, radius : radius }
+                    { midpointAngle = angle
+                    , midpointRadius = radius
                     }
 
 chooseEdge :: Graph -> Gen (Maybe Edge)
@@ -194,7 +195,7 @@ graphOperationGen graph = do
     , chooseNode graph >>= traverse \node -> do
         x <- arbitrary :: Gen Number
         y <- arbitrary :: Gen Number
-        pure $ MoveNode node.id node.position (GraphSpacePoint2D {x: x, y: y})
+        pure $ MoveNode node.id (nodePosition node) (GraphSpacePoint2D {x: x, y: y})
 
     , chooseNode graph >>= traverse \node -> do
         newText <- arbitrary :: Gen String
@@ -207,7 +208,7 @@ graphOperationGen graph = do
     , chooseEdge graph >>= traverse \edge -> do
         angle <- arbitrary :: Gen Number
         radius <- arbitrary :: Gen Number
-        pure $ MoveEdgeMidpoint edge.id edge.midpoint (GraphEdgeSpacePoint2D {angle: angle, radius: radius})
+        pure $ MoveEdgeMidpoint edge.id (edgeMidpoint edge) (GraphEdgeSpacePoint2D {angle: angle, radius: radius})
 
     , chooseNode graph >>= traverse \node -> do
         newSubgraph <- oneOf $ NonEmpty (pure Nothing) [ pure $ Just $ unsafePerformEffect UUID.genUUID ]

@@ -71,9 +71,9 @@ data Query a
   | ReceiveOperation AppOperation a
 
 data Message
-  = SendOperation AppOperation
+  = SendOperation String
 
-    -- Slot type for parent components using a child GraphComponent
+-- Slot type for parent components using a child GraphComponent
 type Slot = H.Slot Query Message
 
 type Slots =
