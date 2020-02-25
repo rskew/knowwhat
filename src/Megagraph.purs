@@ -440,6 +440,10 @@ insertNewNode nodeId graph =
              graph.nodes
         }
 
+updateNode :: Node -> Graph -> Graph
+updateNode node graph =
+  graph # _nodes %~ Map.insert node.id node
+
 deleteNode :: NodeId -> Graph -> Graph
 deleteNode nodeId graph =
   graph { nodes = Map.delete nodeId graph.nodes }
@@ -474,10 +478,10 @@ insertNewEdge edgeMetadata graph =
           }
 
 batchInsertEdges :: Array Edge -> Graph -> Graph
-batchInsertEdges edges graph = foldr insertEdge graph edges
+batchInsertEdges edges graph = foldr updateEdge graph edges
 
-insertEdge :: Edge -> Graph -> Graph
-insertEdge edge =
+updateEdge :: Edge -> Graph -> Graph
+updateEdge edge =
   insertNewEdge (edgeToMetadata edge)
   >>>
   updateEdgeData (const edge) edge.id
@@ -546,16 +550,16 @@ deletePathEquation :: PathEquation -> Graph -> Graph
 deletePathEquation pathEquation =
   _pathEquations %~ Set.delete pathEquation
 
-insertNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
-insertNodeMappingEdge nodeMappingEdge =
+updateNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
+updateNodeMappingEdge nodeMappingEdge =
   _nodeMappingEdges %~ Map.insert nodeMappingEdge.id nodeMappingEdge
 
 deleteNodeMappingEdge :: EdgeId -> Mapping -> Mapping
 deleteNodeMappingEdge nodeMappingEdgeId =
   _nodeMappingEdges %~ Map.delete nodeMappingEdgeId
 
-insertEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
-insertEdgeMappingEdge edgeMappingEdge =
+updateEdgeMappingEdge :: EdgeMappingEdge -> Mapping -> Mapping
+updateEdgeMappingEdge edgeMappingEdge =
   _edgeMappingEdges %~ Map.insert edgeMappingEdge.id edgeMappingEdge
 
 deleteEdgeMappingEdge :: EdgeId -> Mapping -> Mapping

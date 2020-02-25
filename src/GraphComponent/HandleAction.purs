@@ -16,10 +16,11 @@ import Data.Foldable (for_)
 import Data.Lens ((%~), (.~), (^?), (^.), (^..), traversed)
 import Data.Lens.At (at)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Traversable (sequence)
+import Data.Tuple (Tuple(..))
 import Data.UUID (genUUID)
 import Data.UUID as UUID
 import Effect (Effect)
@@ -117,35 +118,50 @@ handleAction = case _ of
         _ <- H.query _nodeTextField node.id $ H.tell $ SVGContentEditable.SetText node.text
         pure unit
 
-  NodeTextInput graphId nodeId (SVGContentEditable.TextUpdate text) -> do
+  NodeTextInput graphId nodeId text -> do
     state <- H.get
     case state ^? _graphAtId graphId <<< _nodes <<< at nodeId <<< traversed of
       Nothing -> pure unit
       Just node ->
         let
-          appOp = undoableGraphOp node.graphId $ UpdateNodeText nodeId node.text text
+          appOp = AppOperation
+                  { target: GraphElement graphId
+                  , op: [GraphElementOperation graphId $ UpdateNodeText nodeId node.text text]
+                  , historyUpdate: NoOp
+                  , undoneUpdate: NoOp
+                  }
         in do
           interpretAndSend appOp
           handleAction $ UpdateFocus $ Just $ FocusNode node.graphId node.id
 
-  EdgeTextInput graphId edgeId (SVGContentEditable.TextUpdate text) -> do
+  EdgeTextInput graphId edgeId text -> do
     state <- H.get
     case lookupEdgeById edgeId =<< (state ^? _graphAtId graphId) of
       Nothing -> pure unit
       Just edge ->
         let
-          appOp = undoableGraphOp graphId $ UpdateEdgeText edge.id edge.text text
+          appOp = AppOperation
+                  { target: GraphElement graphId
+                  , op: [GraphElementOperation graphId $ UpdateEdgeText edgeId edge.text text]
+                  , historyUpdate: NoOp
+                  , undoneUpdate: NoOp
+                  }
         in do
           interpretAndSend appOp
           handleAction $ UpdateFocus $ Just $ FocusEdge graphId edgeId
 
-  TitleTextInput graphId (SVGContentEditable.TextUpdate newTitleText) -> do
+  TitleTextInput graphId newTitleText -> do
     state <- H.get
     case state ^? _graphAtId graphId of
       Nothing -> pure unit
       Just graph ->
         let
-          appOp = undoableGraphOp graphId $ UpdateTitle graph.title.text newTitleText
+          appOp = AppOperation
+                  { target: GraphElement graphId
+                  , op: [GraphElementOperation graphId $ UpdateTitle graph.title.text newTitleText]
+                  , historyUpdate: NoOp
+                  , undoneUpdate: NoOp
+                  }
         in
           interpretAndSend appOp
 
@@ -201,7 +217,7 @@ handleAction = case _ of
           dragOffsetGraphSpace = { x : dragData.offsetX * pane.zoom
                                  , y : dragData.offsetY * pane.zoom
                                  }
-          newNodePos =
+          GraphSpacePoint2D newNodePos =
             GraphSpacePoint2D
               { x : initialNodePos.x + dragOffsetGraphSpace.x
               , y : initialNodePos.y + dragOffsetGraphSpace.y
@@ -210,12 +226,34 @@ handleAction = case _ of
           Nothing -> pure unit
           Just node ->
             let
-              appOp = undoableGraphOp graphId $ MoveNode node.id (nodePosition node) newNodePos
+              op = GraphElementOperation graphId
+                   $ UpdateNode node (node {positionX = newNodePos.x, positionY = newNodePos.y})
+              appOp = AppOperation
+                      { target: GraphElement graphId
+                      , op: [op]
+                      , historyUpdate: NoOp
+                      , undoneUpdate: NoOp
+                      }
             in do
               interpretAndSend appOp
 
-  NodeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+  NodeDragMove (Drag.Done _) graphId nodeId (GraphSpacePoint2D initialNodePos) subscriptionId -> do
     H.unsubscribe subscriptionId
+    state <- H.get
+    case state ^? _graphAtId graphId <<< _nodes <<< at nodeId <<< traversed of
+      Nothing -> pure unit
+      Just node ->
+        let
+          op = GraphElementOperation graphId
+               $ UpdateNode (node {positionX = initialNodePos.x, positionY = initialNodePos.y}) node
+          appOp = AppOperation
+                  { target: GraphElement graphId
+                  , op: []
+                  , historyUpdate: Insert [op]
+                  , undoneUpdate: NoOp
+                  }
+        in
+          interpretAndSend appOp
 
   NodeMappingEdgeDragStart mappingId initialNodeMappingEdge mouseEvent -> do
     state <- H.get
@@ -249,7 +287,7 @@ handleAction = case _ of
              ]
         appOp = AppOperation { target : MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
                              , op : op
-                             , historyUpdate : Insert op
+                             , historyUpdate : NoOp
                              , undoneUpdate : NoOp
                              }
       pure appOp
@@ -257,8 +295,23 @@ handleAction = case _ of
       Nothing -> pure unit
       Just appOp -> interpretAndSend appOp
 
-  NodeMappingEdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+  NodeMappingEdgeDragMove (Drag.Done _) mapping nodeMappingEdgeId initialMidpoint subscriptionId -> do
     H.unsubscribe subscriptionId
+    state <- H.get
+    case state ^? _mappingAtId mapping.id <<< _nodeMappingEdges <<< at nodeMappingEdgeId <<< traversed of
+      Nothing -> pure unit
+      Just nodeMappingEdge ->
+        let
+          op = MappingElementOperation mapping.id
+               $ UpdateNodeMappingEdge (nodeMappingEdge {midpoint = initialMidpoint}) nodeMappingEdge
+          appOp = AppOperation
+                  { target: MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+                  , op: []
+                  , historyUpdate: Insert [op]
+                  , undoneUpdate: NoOp
+                  }
+        in
+          interpretAndSend appOp
 
   EdgeMappingEdgeDragStart mappingId initialEdgeMappingEdge mouseEvent -> do
     state <- H.get
@@ -596,6 +649,25 @@ handleAction = case _ of
   UnHover hoveredElementId -> do
     H.modify_ $ _hoveredElements %~ Set.delete hoveredElementId
 
+  FocusText giveStrForMegagraphUpdate ->
+    H.modify_ _{ textFocused = Just giveStrForMegagraphUpdate }
+
+  BlurText text -> do
+    state <- H.get
+    case do -- Maybe
+      giveStrForMegagraphUpdate <- state.textFocused
+      Tuple op target <- giveStrForMegagraphUpdate text
+      pure $ AppOperation { target : target
+                          , op : []
+                          , historyUpdate : Insert op
+                          , undoneUpdate : NoOp
+                          }
+    of
+      Nothing -> pure unit
+      Just appOp -> do
+        interpretAndSend appOp
+    H.modify_ _{ textFocused = Nothing }
+
   -- | Zoom in/out holding the mouse position invariant
   Zoom graphId wheelEvent -> do
     state <- H.get
@@ -812,7 +884,7 @@ handleKeypress keyboardEvent = do
         -- Undo
         "z" -> do
           state <- H.get
-          if not state.keyHoldState.controlDown then pure unit else do
+          if isJust state.textFocused || not state.keyHoldState.controlDown then pure unit else do
             H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
             case state.focusedPane of
               Nothing -> pure unit

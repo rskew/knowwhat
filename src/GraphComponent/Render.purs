@@ -24,6 +24,7 @@ import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Megagraph (Edge, EdgeMappingEdge, Focus(..), Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, Node, NodeMappingEdge, PageSpacePoint2D(..), _nodes, _position, _subgraph, edgeArray, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, nodePosition, edgeMidpoint)
+import MegagraphOperation (GraphOperation(..), MegagraphOperation(..))
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
@@ -102,7 +103,17 @@ renderGraphNode state pane node =
           , maxShape : maxTextFieldShape
           , fitContentDynamic : true
           }
-          (Just <<< NodeTextInput node.graphId node.id)
+          case _ of
+            SVGContentEditable.TextUpdate text -> Just $ NodeTextInput node.graphId node.id text
+            SVGContentEditable.Focused text -> Just $ FocusText \updateText ->
+              if text == updateText
+              then Nothing
+              else let
+                     op = [GraphElementOperation node.graphId $ UpdateNodeText node.id text updateText]
+                     target = GraphElement node.graphId
+                   in
+                     Just $ Tuple op target
+            SVGContentEditable.Blurred text -> Just $ BlurText text
         ]
       ]
     graphNodeHTML =
@@ -399,11 +410,13 @@ renderEdgeTextField state renderPane edge = do
         (nodePosition targetNode)
         (edgeMidpoint edge)
     focused = state.focus == Just (FocusEdge edge.graphId edge.id)
-  if not focused && (edge.text == "")
-  then Nothing
-  else Just $ Tuple (show edge.id <> "_textField_" <> show renderPane.graphId) $
+    hidden = if not focused && (edge.text == "")
+             then " hidden"
+             else ""
+  Just $ Tuple (show edge.id <> "_textField_" <> show renderPane.graphId) $
     SE.g
-    [ SA.transform [ SVGT.Translate
+    [ SA.class_ $ "edgeTextField" <> hidden
+    , SA.transform [ SVGT.Translate
                      (midpoint.x + edgeTextBoxOffset.x)
                      (midpoint.y + edgeTextBoxOffset.y)
                    ]
@@ -420,7 +433,17 @@ renderEdgeTextField state renderPane edge = do
       , maxShape : maxTextFieldShape
       , fitContentDynamic : true
       }
-      (Just <<< EdgeTextInput sourceNode.graphId edge.id)
+      case _ of
+        SVGContentEditable.TextUpdate text -> Just $ EdgeTextInput edge.graphId edge.id text
+        SVGContentEditable.Focused text -> Just $ FocusText \updateText ->
+          if text == updateText
+          then Nothing
+          else let
+                 op = [GraphElementOperation edge.graphId $ UpdateEdgeText edge.id text updateText]
+                 target = GraphElement edge.graphId
+               in
+                 Just $ Tuple op target
+        SVGContentEditable.Blurred text -> Just $ BlurText text
     ]
 
 renderDrawingEdge :: AppState -> GraphView -> DrawingEdge -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
@@ -461,7 +484,17 @@ renderTitle graphId titleText =
       , maxShape : maxTitleShape
       , fitContentDynamic : true
       }
-      (Just <<< TitleTextInput graphId)
+      case _ of
+        SVGContentEditable.TextUpdate text -> Just $ TitleTextInput graphId text
+        SVGContentEditable.Focused text -> Just $ FocusText \updateText ->
+          if text == updateText
+          then Nothing
+          else let
+                 op = [GraphElementOperation graphId $ UpdateTitle text updateText]
+                 target = GraphElement graphId
+               in
+                 Just $ Tuple op target
+        SVGContentEditable.Blurred text -> Just $ BlurText text
     ]
 
 renderTitleInvalidIndicator :: GraphId -> Tuple String (H.ComponentHTML Action Slots Aff)

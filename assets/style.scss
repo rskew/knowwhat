@@ -116,6 +116,10 @@ svg {
     color: var(--text-color);
 }
 
+.edgeTextField.hidden {
+    display: none;
+}
+
 foreignObject {
     overflow: visible;
 }

@@ -13,6 +13,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
+import Data.Tuple (Tuple)
 import Data.UUID (UUID)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
@@ -82,6 +83,7 @@ type AppState
     , hoveredElements    :: Set HoveredElementId
     , focus              :: Maybe Focus
     , focusedPane        :: Maybe MegagraphElement
+    , textFocused        :: Maybe (String -> Maybe (Tuple MegagraphUpdate MegagraphElement))
     , keyHoldState       :: KeyHoldState
     }
 
@@ -93,6 +95,7 @@ emptyAppState rect
     , hoveredElements    : Set.empty
     , focus              : Nothing
     , focusedPane        : Nothing
+    , textFocused        : Nothing
     , keyHoldState       : { spaceDown : false, controlDown : false }
     }
 

@@ -7,9 +7,11 @@ import AppState (DrawingEdgeId, EdgeSourceElement, HoveredElementId, MegagraphEl
 import ContentEditable.SVGComponent as SVGContentEditable
 import Data.Maybe (Maybe)
 import Data.Symbol (SProxy(..))
+import Data.Tuple (Tuple)
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
 import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, Focus, GraphEdgeSpacePoint2D, GraphId, GraphSpacePoint2D, GraphView, Mapping, MappingId, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D, PageSpacePoint2D)
+import MegagraphOperation (MegagraphUpdate)
 import Web.Event.Event as WE
 import Web.File.FileReader as FileReader
 import Web.UIEvent.KeyboardEvent as KE
@@ -36,9 +38,9 @@ data Action
   | EdgeMappingEdgeDragMove Drag.DragEvent Mapping EdgeId PageEdgeSpacePoint2D H.SubscriptionId
   | EdgeDrawStart GraphView EdgeSourceElement ME.MouseEvent
   | EdgeDrawMove Drag.DragEvent GraphId DrawingEdgeId H.SubscriptionId
-  | NodeTextInput GraphId NodeId SVGContentEditable.Message
-  | EdgeTextInput GraphId EdgeId SVGContentEditable.Message
-  | TitleTextInput GraphId SVGContentEditable.Message
+  | NodeTextInput GraphId NodeId String
+  | EdgeTextInput GraphId EdgeId String
+  | TitleTextInput GraphId String
   | AppCreateNode GraphView ME.MouseEvent
   | AppDeleteNode Node
   | AppCreateEdge EdgeMetadata
@@ -52,6 +54,8 @@ data Action
   | DeleteFocus
   | Hover HoveredElementId
   | UnHover HoveredElementId
+  | FocusText (String -> Maybe (Tuple MegagraphUpdate MegagraphElement))
+  | BlurText String
   | Zoom GraphId WhE.WheelEvent
   | CenterGraphOriginAndZoom
   | Undo MegagraphElement

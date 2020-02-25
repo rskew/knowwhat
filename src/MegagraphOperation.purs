@@ -16,10 +16,10 @@ import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, Graph, GraphEdgeS
 data GraphOperation
   -- GraphOp name   | target node/edge | pre-op state         | post-op state
   = InsertNode        NodeId
-  -- | UpsertNode                           Node                   Node
+  | UpdateNode                           Node                   Node
   | DeleteNode        NodeId
   | InsertEdge        EdgeMetadata
-  -- | UpsertEdge                           Edge                   Edge
+  | UpdateEdge                           Edge                   Edge
   | DeleteEdge        EdgeMetadata
   | MoveNode          NodeId             GraphSpacePoint2D      GraphSpacePoint2D
   | UpdateNodeText    NodeId             String                 String
@@ -37,8 +37,10 @@ data EquationOperation
 data MappingOperation
   -- MappingOp name            | element
   = InsertNodeMappingEdge        NodeMappingEdge
+  | UpdateNodeMappingEdge                        NodeMappingEdge      NodeMappingEdge
   | DeleteNodeMappingEdge        NodeMappingEdge
   | InsertEdgeMappingEdge        EdgeMappingEdge
+  | UpdateEdgeMappingEdge                        EdgeMappingEdge      EdgeMappingEdge
   | DeleteEdgeMappingEdge        EdgeMappingEdge
   | MoveNodeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
   | MoveEdgeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
@@ -56,9 +58,9 @@ data MegagraphOperation
   | CreateElementOperation CreateOperation
 
 -- | Operations can be grouped together into a single update.
--- | However, the interpreter converts each operation into an upsert before they
+-- | However, the interpreter converts each operation into an update before they
 -- | are actioned. If a single node or edge has multiple operations in a single
--- | update, they must be grouped into an upsert operation, or the earlier
+-- | update, they must be grouped into an update operation, or the earlier
 -- | operations will be ignored.
 type MegagraphUpdate = Array MegagraphOperation
 
@@ -96,8 +98,10 @@ invertGraphOperation :: GraphOperation -> GraphOperation
 invertGraphOperation = case _ of
   InsertNode       nodeId               -> DeleteNode       nodeId
   DeleteNode       nodeId               -> InsertNode       nodeId
+  UpdateNode                    from to -> UpdateNode                    to from
   InsertEdge       edgeMetadata         -> DeleteEdge       edgeMetadata
   DeleteEdge       edgeMetadata         -> InsertEdge       edgeMetadata
+  UpdateEdge                    from to -> UpdateEdge                    to from
   MoveNode         nodeId       from to -> MoveNode         nodeId       to  from
   UpdateNodeText   nodeId       from to -> UpdateNodeText   nodeId       to  from
   UpdateEdgeText   edgeMetadata from to -> UpdateEdgeText   edgeMetadata to  from
@@ -115,8 +119,10 @@ invertMappingOperation :: MappingOperation -> MappingOperation
 invertMappingOperation = case _ of
   InsertNodeMappingEdge nodeMappingEdge  -> DeleteNodeMappingEdge nodeMappingEdge
   DeleteNodeMappingEdge nodeMappingEdge  -> InsertNodeMappingEdge nodeMappingEdge
+  UpdateNodeMappingEdge          from to -> UpdateNodeMappingEdge          to from
   InsertEdgeMappingEdge edgeMappingEdge  -> DeleteEdgeMappingEdge edgeMappingEdge
   DeleteEdgeMappingEdge edgeMappingEdge  -> InsertEdgeMappingEdge edgeMappingEdge
+  UpdateEdgeMappingEdge          from to -> UpdateEdgeMappingEdge          to from
   MoveNodeMappingEdgeMidpoint id from to -> MoveNodeMappingEdgeMidpoint id to from
   MoveEdgeMappingEdgeMidpoint id from to -> MoveEdgeMappingEdgeMidpoint id to from
 
@@ -142,84 +148,20 @@ invertMegagraphUpdate :: MegagraphUpdate -> MegagraphUpdate
 invertMegagraphUpdate =
   Array.reverse <<< map invertMegagraphOperation
 
--- | Certain actions, if repeated, should be collapsed together for the sake of
--- | undoing them both at once. Examples:
--- | - dragging
--- | - updating a text field
-collapseGraphOperation :: GraphOperation -> GraphOperation -> Maybe GraphOperation
-collapseGraphOperation nextOp prevOp =
-  case nextOp, prevOp of
-    MoveNode nextNodeId  middlePos lastPos,
-    MoveNode firstNodeId firstPos  middlePos' ->
-      if nextNodeId == firstNodeId
-      then Just $ MoveNode firstNodeId firstPos lastPos
-      else Nothing
-
-    MoveEdgeMidpoint nextEdgeId  middlePos lastPos,
-    MoveEdgeMidpoint firstEdgeId firstPos  middlePos' ->
-      if nextEdgeId == firstEdgeId
-      then Just $ MoveEdgeMidpoint firstEdgeId firstPos lastPos
-      else Nothing
-
-    UpdateNodeText nextNodeId  middleText lastText,
-    UpdateNodeText firstNodeId firstText  middleText' ->
-      if nextNodeId == firstNodeId
-      then Just $ UpdateNodeText firstNodeId firstText lastText
-      else Nothing
-
-    UpdateEdgeText nextEdgeId  middleText lastText,
-    UpdateEdgeText firstEdgeId firstText  middleText' ->
-      if nextEdgeId == firstEdgeId
-      then Just $ UpdateEdgeText firstEdgeId firstText lastText
-      else Nothing
-
-    UpdateTitle middleTitle lastTitle,
-    UpdateTitle firstTitle  middleTitle' ->
-      Just $ UpdateTitle firstTitle lastTitle
-
-    _, _ -> Nothing
-
-collapseMappingOperation :: MappingOperation -> MappingOperation -> Maybe MappingOperation
-collapseMappingOperation nextOp prevOp =
-  case nextOp, prevOp of
-    MoveNodeMappingEdgeMidpoint nextEdgeId  middlePos lastPos,
-    MoveNodeMappingEdgeMidpoint firstEdgeId firstPos  middlePos' ->
-      if nextEdgeId == firstEdgeId
-      then Just $ MoveNodeMappingEdgeMidpoint firstEdgeId firstPos lastPos
-      else Nothing
-
-    MoveEdgeMappingEdgeMidpoint nextEdgeId  middlePos lastPos,
-    MoveEdgeMappingEdgeMidpoint firstEdgeId firstPos  middlePos' ->
-      if nextEdgeId == firstEdgeId
-      then Just $ MoveEdgeMappingEdgeMidpoint firstEdgeId firstPos lastPos
-      else Nothing
-
-    _, _ -> Nothing
-
-collapseMegagraphOperations :: MegagraphOperation -> MegagraphOperation -> Maybe MegagraphOperation
-collapseMegagraphOperations = case _, _ of
-  GraphElementOperation graphIdA opA, GraphElementOperation graphIdB opB ->
-    if graphIdA == graphIdB
-    then collapseGraphOperation opA opB <#> GraphElementOperation graphIdA
-    else Nothing
-
-  MappingElementOperation mappingIdA opA, MappingElementOperation mappingIdB opB ->
-    if mappingIdA == mappingIdB
-    then collapseMappingOperation opA opB <#> MappingElementOperation mappingIdA
-    else Nothing
-
-  _, _ -> Nothing
-
 instance showGraphOperation :: Show GraphOperation where
   show = case _ of
     InsertNode nodeId ->
       "InsertNode " <> show nodeId
     DeleteNode nodeId ->
       "DeleteNode " <> show nodeId
+    UpdateNode from to ->
+      "UpdateNode from: " <> show from <> " to: " <> show to
     InsertEdge edge ->
       "InsertEdge edge: " <> show edge
     DeleteEdge edge ->
       "DeleteEdge edge: " <> show edge
+    UpdateEdge from to ->
+      "UpdateEdge from: " <> show from <> " to: " <> show to
     MoveNode nodeId from to ->
       "MoveNode node: " <> show nodeId <> " from: " <> show from <> " to: " <> show to
     UpdateNodeText nodeId from to ->
@@ -248,10 +190,14 @@ instance showMappingOperation :: Show MappingOperation where
       "InsertNodeMappingEdge " <> show nodeMappingEdge
     DeleteNodeMappingEdge nodeMappingEdge ->
       "DeleteNodeMappingEdge " <> show nodeMappingEdge
+    UpdateNodeMappingEdge from to ->
+      "UpdateNodeMappingEdge from: " <> show from <> " to: " <> show to
     InsertEdgeMappingEdge edgeMappingEdge ->
       "InsertEdgeMappingEdge " <> show edgeMappingEdge
     DeleteEdgeMappingEdge edgeMappingEdge ->
       "DeleteEdgeMappingEdge " <> show edgeMappingEdge
+    UpdateEdgeMappingEdge from to ->
+      "UpdateEdgeMappingEdge from: " <> show from <> " to: " <> show to
     MoveNodeMappingEdgeMidpoint id from to ->
       "MoveNodeMappingEdgeMidpoint " <> show id <> " to: " <> show to <> " from: " <> show from
     MoveEdgeMappingEdgeMidpoint id from to ->
