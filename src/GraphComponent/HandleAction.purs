@@ -3,7 +3,6 @@ module GraphComponent.HandleAction where
 import Prelude
 
 import AppOperation (AppOperation(..), HistoryUpdate(..), encodeMegagraphStateAsAppOperations)
-import AppOperation.Utils (removeEdgeMappingEdgesOp, removeEdgeOp, removeNodeMappingEdgesOp, removeNodeOp)
 import AppState (AppState, EdgeSourceElement(..), HoveredElementId(..), MegagraphElement(..), _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _graph, _graphAtId, _graphs, _hoveredElements, _keyHoldState, _mappingAtId, _mappings, _megagraph, _paneAtId, _spaceDown, lookupMapping)
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
@@ -30,14 +29,14 @@ import Foreign (F, renderForeignError)
 import Foreign as Foreign
 import Foreign.Generic (encodeJSON, decodeJSON)
 import GraphComponent.Types (Action(..), Message(..), Query(..), Slots, _edgeTextField, _nodeTextField, _titleTextField)
-import GraphComponent.Utils (mouseEventPosition, nodesWithTextUpdate)
+import GraphComponent.Utils (mouseEventPosition, updatedNodes)
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
 import Halogen.Query.EventSource as ES
 import HasuraQuery (renderMutation, renderQuery)
-import Interpreter (interpretAppOperation, preprocessAppOperation)
+import Interpreter (appOperationToQuery, interpretAppOperation, preprocessAppOperation)
 import Math as Math
-import Megagraph (Focus(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edgeMappingEdges, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import Megagraph (Focus(..), GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdges, _nodeMappingEdges, _nodes, _origin, _position, _text, _title, _zoom, edgeArray, edgeMidpoint, freshEdge, freshNode, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphOperation (GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate, invertMegagraphUpdate)
 import Query (graphFetchQuery)
 import UI.Constants (zoomScaling)
@@ -124,9 +123,10 @@ handleAction = case _ of
       Nothing -> pure unit
       Just node ->
         let
+          op = [GraphElementOperation graphId $ UpdateNodes [node] [(node {text = text})]]
           appOp = AppOperation
                   { target: GraphElement graphId
-                  , op: [GraphElementOperation graphId $ UpdateNodeText nodeId node.text text]
+                  , op: op
                   , historyUpdate: NoOp
                   , undoneUpdate: NoOp
                   }
@@ -140,9 +140,10 @@ handleAction = case _ of
       Nothing -> pure unit
       Just edge ->
         let
+          op = [GraphElementOperation graphId $ UpdateEdges [edge] [(edge {text = text})]]
           appOp = AppOperation
                   { target: GraphElement graphId
-                  , op: [GraphElementOperation graphId $ UpdateEdgeText edgeId edge.text text]
+                  , op: op
                   , historyUpdate: NoOp
                   , undoneUpdate: NoOp
                   }
@@ -226,11 +227,11 @@ handleAction = case _ of
           Nothing -> pure unit
           Just node ->
             let
-              op = GraphElementOperation graphId
-                   $ UpdateNode node (node {positionX = newNodePos.x, positionY = newNodePos.y})
+              op = [GraphElementOperation graphId
+                    $ UpdateNodes [node] [(node {positionX = newNodePos.x, positionY = newNodePos.y})]]
               appOp = AppOperation
                       { target: GraphElement graphId
-                      , op: [op]
+                      , op: op
                       , historyUpdate: NoOp
                       , undoneUpdate: NoOp
                       }
@@ -244,12 +245,12 @@ handleAction = case _ of
       Nothing -> pure unit
       Just node ->
         let
-          op = GraphElementOperation graphId
-               $ UpdateNode (node {positionX = initialNodePos.x, positionY = initialNodePos.y}) node
+          op = [GraphElementOperation graphId
+                $ UpdateNodes [(node {positionX = initialNodePos.x, positionY = initialNodePos.y})] [node]]
           appOp = AppOperation
                   { target: GraphElement graphId
                   , op: []
-                  , historyUpdate: Insert [op]
+                  , historyUpdate: Insert op
                   , undoneUpdate: NoOp
                   }
         in
@@ -281,9 +282,10 @@ handleAction = case _ of
           PageSpacePoint2D { x : initialMidpointCartesian.x + dragData.offsetX
                            , y : initialMidpointCartesian.y + dragData.offsetY
                            }
-        newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        PageEdgeSpacePoint2D newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        updatedNodeMappingEdge = currentNodeMappingEdge {midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius}
         op = [ MappingElementOperation mapping.id
-               $ MoveNodeMappingEdgeMidpoint nodeMappingEdgeId currentNodeMappingEdge.midpoint newMidpoint
+               $ UpdateNodeMappingEdges [currentNodeMappingEdge] [updatedNodeMappingEdge]
              ]
         appOp = AppOperation { target : MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
                              , op : op
@@ -295,19 +297,21 @@ handleAction = case _ of
       Nothing -> pure unit
       Just appOp -> interpretAndSend appOp
 
-  NodeMappingEdgeDragMove (Drag.Done _) mapping nodeMappingEdgeId initialMidpoint subscriptionId -> do
+  NodeMappingEdgeDragMove (Drag.Done _) mapping nodeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
     state <- H.get
     case state ^? _mappingAtId mapping.id <<< _nodeMappingEdges <<< at nodeMappingEdgeId <<< traversed of
       Nothing -> pure unit
       Just nodeMappingEdge ->
         let
-          op = MappingElementOperation mapping.id
-               $ UpdateNodeMappingEdge (nodeMappingEdge {midpoint = initialMidpoint}) nodeMappingEdge
+          initialNodeMappingEdge = nodeMappingEdge {midpointAngle: initialMidpoint.angle, midpointRadius: initialMidpoint.radius}
+          op = [ MappingElementOperation mapping.id
+                 $ UpdateNodeMappingEdges [initialNodeMappingEdge] [nodeMappingEdge]
+               ]
           appOp = AppOperation
                   { target: MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
                   , op: []
-                  , historyUpdate: Insert [op]
+                  , historyUpdate: Insert op
                   , undoneUpdate: NoOp
                   }
         in
@@ -347,13 +351,14 @@ handleAction = case _ of
           PageSpacePoint2D { x : initialMidpointCartesian.x + dragData.offsetX
                            , y : initialMidpointCartesian.y + dragData.offsetY
                            }
-        newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        PageEdgeSpacePoint2D newMidpoint = pageSpaceToPageEdgeSpace sourcePosPageSpace targetPosPageSpace newMidpointCartesian
+        newEdgeMappingEdge = currentEdgeMappingEdge {midpointAngle: newMidpoint.angle, midpointRadius: newMidpoint.radius}
         op = [ MappingElementOperation mapping.id
-               $ MoveEdgeMappingEdgeMidpoint edgeMappingEdgeId currentEdgeMappingEdge.midpoint newMidpoint
+               $ UpdateEdgeMappingEdges [currentEdgeMappingEdge] [newEdgeMappingEdge]
              ]
         appOp = AppOperation { target : MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
                              , op : op
-                             , historyUpdate : Insert op
+                             , historyUpdate : NoOp
                              , undoneUpdate : NoOp
                              }
       pure appOp
@@ -361,8 +366,25 @@ handleAction = case _ of
       Nothing -> pure unit
       Just appOp -> interpretAndSend appOp
 
-  EdgeMappingEdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+  EdgeMappingEdgeDragMove (Drag.Done _) mapping edgeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
+    state <- H.get
+    case state ^? _mappingAtId mapping.id <<< _edgeMappingEdges <<< at edgeMappingEdgeId <<< traversed of
+      Nothing -> pure unit
+      Just edgeMappingEdge ->
+        let
+          initialEdgeMappingEdge = edgeMappingEdge {midpointAngle: initialMidpoint.angle, midpointRadius: initialMidpoint.radius}
+          op = [ MappingElementOperation mapping.id
+                 $ UpdateEdgeMappingEdges [initialEdgeMappingEdge] [edgeMappingEdge]
+               ]
+          appOp = AppOperation
+                  { target: MappingElement mapping.id mapping.sourceGraph mapping.targetGraph
+                  , op: []
+                  , historyUpdate: Insert op
+                  , undoneUpdate: NoOp
+                  }
+        in
+          interpretAndSend appOp
 
   EdgeDragStart graphId edgeId initialMidpoint mouseEvent -> do
     H.subscribe' \subscriptionId ->
@@ -388,15 +410,39 @@ handleAction = case _ of
             { x : initialMidpointGraphSpace.x + dragOffsetGraphSpace.x
             , y : initialMidpointGraphSpace.y + dragOffsetGraphSpace.y
             }
-        newMidpoint = graphSpaceToGraphEdgeSpace sourcePos targetPos newMidpointGraphSpace
-        appOp = undoableGraphOp graphId $ MoveEdgeMidpoint edge.id (edgeMidpoint edge) newMidpoint
+        GraphEdgeSpacePoint2D newMidpoint = graphSpaceToGraphEdgeSpace sourcePos targetPos newMidpointGraphSpace
+        op = [ GraphElementOperation graphId
+               $ UpdateEdges [edge] [(edge {midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius})]
+             ]
+        appOp = AppOperation
+                { target: GraphElement graphId
+                , op: op
+                , historyUpdate: NoOp
+                , undoneUpdate: NoOp
+                }
       pure $ interpretAndSend appOp
     of
       Nothing -> pure unit
       Just thingsToDo -> thingsToDo
 
-  EdgeDragMove (Drag.Done _) _ _ _ subscriptionId ->
+  EdgeDragMove (Drag.Done _) graphId edgeId (GraphEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
+    state <- H.get
+    case state ^? _graphAtId graphId <<< _edge edgeId <<< traversed of
+      Nothing -> pure unit
+      Just edge ->
+        let
+          op = [ GraphElementOperation graphId
+                 $ UpdateEdges [(edge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius})] [edge]
+               ]
+          appOp = AppOperation
+                  { target: GraphElement graphId
+                  , op: []
+                  , historyUpdate: Insert op
+                  , undoneUpdate: NoOp
+                  }
+        in
+          interpretAndSend appOp
 
   EdgeDrawStart pane sourceElement mouseEvent -> do
     state <- H.get
@@ -488,11 +534,9 @@ handleAction = case _ of
     newNodeId <- H.liftEffect genUUID
     state <- H.get
     let
-      newNodePosition = pageSpaceToGraphSpace pane $ mouseEventPosition mouseEvent
-      op = GraphElementOperation pane.graphId
-           <$> [ InsertNode newNodeId
-               , MoveNode newNodeId (GraphSpacePoint2D {x: 0.0, y: 0.0}) newNodePosition
-               ]
+      GraphSpacePoint2D newNodePosition = pageSpaceToGraphSpace pane $ mouseEventPosition mouseEvent
+      newNode = (freshNode pane.graphId newNodeId) {positionX = newNodePosition.x, positionY = newNodePosition.y}
+      op = [GraphElementOperation pane.graphId $ InsertNodes [newNode]]
       appOp = AppOperation { target : GraphElement pane.graphId
                            , op : op
                            , historyUpdate : Insert op
@@ -536,8 +580,9 @@ handleAction = case _ of
     then pure unit
     else
       let
+        newEdge = freshEdge edgeMetadata
         appOp = undoableGraphOp edgeMetadata.graphId
-                $ InsertEdge edgeMetadata
+                $ InsertEdge newEdge
       in do
         interpretAndSend appOp
         handleAction $ UpdateFocus $ Just $ FocusEdge edgeMetadata.graphId edgeMetadata.id
@@ -801,7 +846,7 @@ handleQuery = case _ of
   ReceiveOperation op a -> do
     state <- H.get
     H.modify_ $ _megagraph %~ interpretAppOperation (preprocessAppOperation op state.megagraph)
-    for_ (nodesWithTextUpdate op) (handleAction <<< tupleApply UpdateNodeContentEditableText)
+    for_ (updatedNodes op) (handleAction <<< tupleApply UpdateNodeContentEditableText)
     H.modify_ arrangePanes
     pure $ Just a
 
@@ -844,9 +889,9 @@ interpretAndSend op = do
   state <- H.get
   let
     preprocessedOp = preprocessAppOperation op state.megagraph
-    -- query = renderMutation $ appOperationToQuery preprocessedOp
-  -- H.liftEffect $ Console.log $ query
-  -- H.raise $ SendOperation $ query
+    query = renderMutation $ appOperationToQuery preprocessedOp
+  H.liftEffect $ Console.log $ query
+  H.raise $ SendOperation $ query
   H.modify_ $ _megagraph %~ interpretAppOperation preprocessedOp
 
 

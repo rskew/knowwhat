@@ -109,7 +109,7 @@ renderGraphNode state pane node =
               if text == updateText
               then Nothing
               else let
-                     op = [GraphElementOperation node.graphId $ UpdateNodeText node.id text updateText]
+                     op = [GraphElementOperation node.graphId $ UpdateNodes [node] [(node {text = updateText})]]
                      target = GraphElement node.graphId
                    in
                      Just $ Tuple op target
@@ -439,7 +439,7 @@ renderEdgeTextField state renderPane edge = do
           if text == updateText
           then Nothing
           else let
-                 op = [GraphElementOperation edge.graphId $ UpdateEdgeText edge.id text updateText]
+                 op = [GraphElementOperation edge.graphId $ UpdateEdges [edge] [(edge {text = updateText})]]
                  target = GraphElement edge.graphId
                in
                  Just $ Tuple op target

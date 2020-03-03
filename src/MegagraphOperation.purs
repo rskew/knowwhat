@@ -5,45 +5,37 @@ import Prelude
 import Data.Array as Array
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, Graph, GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation, edgeArray, edgeMidpoint, nodePosition)
+import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, Mapping, MappingId, Node, NodeMappingEdge, PathEquation, edgeArray)
 
 
 -- | An operation on a graph is stored with the before/after values of the updated field
 -- | to allow it to be inverted.
 data GraphOperation
   -- GraphOp name   | target node/edge | pre-op state         | post-op state
-  = InsertNode        NodeId
-  | UpdateNode                           Node                   Node
-  | DeleteNode        NodeId
-  | InsertEdge        EdgeMetadata
-  | UpdateEdge                           Edge                   Edge
-  | DeleteEdge        EdgeMetadata
-  | MoveNode          NodeId             GraphSpacePoint2D      GraphSpacePoint2D
-  | UpdateNodeText    NodeId             String                 String
-  | UpdateEdgeText    EdgeId             String                 String
-  | MoveEdgeMidpoint  EdgeId             GraphEdgeSpacePoint2D  GraphEdgeSpacePoint2D
-  | ConnectSubgraph   NodeId             (Maybe GraphId)        (Maybe GraphId)
+  = InsertNodes       (Array Node)
+  | UpdateNodes                          (Array Node)           (Array Node)
+  | DeleteNodes       (Array Node)
+  | InsertEdges       (Array Edge)
+  | UpdateEdges                          (Array Edge)           (Array Edge)
+  | DeleteEdges       (Array Edge)
   | UpdateTitle                          String                 String
   | SetTitleValidity                     Boolean                Boolean
 
 data EquationOperation
   -- EquationOp name   | target graph | equation
-  = InsertPathEquation   PathEquation
-  | DeletePathEquation   PathEquation
+  = InsertPathEquations  (Array PathEquation)
+  | DeletePathEquations  (Array PathEquation)
 
 data MappingOperation
-  -- MappingOp name            | element
-  = InsertNodeMappingEdge        NodeMappingEdge
-  | UpdateNodeMappingEdge                        NodeMappingEdge      NodeMappingEdge
-  | DeleteNodeMappingEdge        NodeMappingEdge
-  | InsertEdgeMappingEdge        EdgeMappingEdge
-  | UpdateEdgeMappingEdge                        EdgeMappingEdge      EdgeMappingEdge
-  | DeleteEdgeMappingEdge        EdgeMappingEdge
-  | MoveNodeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
-  | MoveEdgeMappingEdgeMidpoint  EdgeId          PageEdgeSpacePoint2D PageEdgeSpacePoint2D
+  -- MappingOp name        | element                 | from                    | to
+  = InsertNodeMappingEdges   (Array NodeMappingEdge)
+  | UpdateNodeMappingEdges                             (Array NodeMappingEdge) (Array NodeMappingEdge)
+  | DeleteNodeMappingEdges   (Array NodeMappingEdge)
+  | InsertEdgeMappingEdges   (Array EdgeMappingEdge)
+  | UpdateEdgeMappingEdges                             (Array EdgeMappingEdge) (Array EdgeMappingEdge)
+  | DeleteEdgeMappingEdges   (Array EdgeMappingEdge)
 
 data CreateOperation
   = CreateGraph GraphId String
@@ -96,35 +88,28 @@ instance encodeMegagraphOperation :: Encode MegagraphOperation where
 
 invertGraphOperation :: GraphOperation -> GraphOperation
 invertGraphOperation = case _ of
-  InsertNode       nodeId               -> DeleteNode       nodeId
-  DeleteNode       nodeId               -> InsertNode       nodeId
-  UpdateNode                    from to -> UpdateNode                    to from
-  InsertEdge       edgeMetadata         -> DeleteEdge       edgeMetadata
-  DeleteEdge       edgeMetadata         -> InsertEdge       edgeMetadata
-  UpdateEdge                    from to -> UpdateEdge                    to from
-  MoveNode         nodeId       from to -> MoveNode         nodeId       to  from
-  UpdateNodeText   nodeId       from to -> UpdateNodeText   nodeId       to  from
-  UpdateEdgeText   edgeMetadata from to -> UpdateEdgeText   edgeMetadata to  from
-  MoveEdgeMidpoint edgeId       from to -> MoveEdgeMidpoint edgeId       from to
-  ConnectSubgraph  nodeId       old new -> ConnectSubgraph  nodeId       new old
+  InsertNodes      node                 -> DeleteNodes      node
+  DeleteNodes      node                 -> InsertNodes      node
+  UpdateNodes                   from to -> UpdateNodes                   to from
+  InsertEdges      edgeMetadata         -> DeleteEdges      edgeMetadata
+  DeleteEdges      edgeMetadata         -> InsertEdges      edgeMetadata
+  UpdateEdges                   from to -> UpdateEdges                   to from
   UpdateTitle                   from to -> UpdateTitle                   to  from
   SetTitleValidity              from to -> SetTitleValidity              to  from
 
 invertEquationOperation :: EquationOperation -> EquationOperation
 invertEquationOperation = case _ of
-  InsertPathEquation pathEquation -> DeletePathEquation pathEquation
-  DeletePathEquation pathEquation -> InsertPathEquation pathEquation
+  InsertPathEquations pathEquations -> DeletePathEquations pathEquations
+  DeletePathEquations pathEquations -> InsertPathEquations pathEquations
 
 invertMappingOperation :: MappingOperation -> MappingOperation
 invertMappingOperation = case _ of
-  InsertNodeMappingEdge nodeMappingEdge  -> DeleteNodeMappingEdge nodeMappingEdge
-  DeleteNodeMappingEdge nodeMappingEdge  -> InsertNodeMappingEdge nodeMappingEdge
-  UpdateNodeMappingEdge          from to -> UpdateNodeMappingEdge          to from
-  InsertEdgeMappingEdge edgeMappingEdge  -> DeleteEdgeMappingEdge edgeMappingEdge
-  DeleteEdgeMappingEdge edgeMappingEdge  -> InsertEdgeMappingEdge edgeMappingEdge
-  UpdateEdgeMappingEdge          from to -> UpdateEdgeMappingEdge          to from
-  MoveNodeMappingEdgeMidpoint id from to -> MoveNodeMappingEdgeMidpoint id to from
-  MoveEdgeMappingEdgeMidpoint id from to -> MoveEdgeMappingEdgeMidpoint id to from
+  InsertNodeMappingEdges nodeMappingEdges -> DeleteNodeMappingEdges nodeMappingEdges
+  DeleteNodeMappingEdges nodeMappingEdges -> InsertNodeMappingEdges nodeMappingEdges
+  UpdateNodeMappingEdges from to          -> UpdateNodeMappingEdges to from
+  InsertEdgeMappingEdges edgeMappingEdges -> DeleteEdgeMappingEdges edgeMappingEdges
+  DeleteEdgeMappingEdges edgeMappingEdges -> InsertEdgeMappingEdges edgeMappingEdges
+  UpdateEdgeMappingEdges from to          -> UpdateEdgeMappingEdges to from
 
 invertCreateOperation :: CreateOperation -> CreateOperation
 invertCreateOperation = case _ of
@@ -150,28 +135,18 @@ invertMegagraphUpdate =
 
 instance showGraphOperation :: Show GraphOperation where
   show = case _ of
-    InsertNode nodeId ->
-      "InsertNode " <> show nodeId
-    DeleteNode nodeId ->
-      "DeleteNode " <> show nodeId
-    UpdateNode from to ->
-      "UpdateNode from: " <> show from <> " to: " <> show to
-    InsertEdge edge ->
-      "InsertEdge edge: " <> show edge
-    DeleteEdge edge ->
-      "DeleteEdge edge: " <> show edge
-    UpdateEdge from to ->
-      "UpdateEdge from: " <> show from <> " to: " <> show to
-    MoveNode nodeId from to ->
-      "MoveNode node: " <> show nodeId <> " from: " <> show from <> " to: " <> show to
-    UpdateNodeText nodeId from to ->
-      "UpdateNodeText node: " <> show nodeId <> " from: " <> from <> " to: " <> to
-    UpdateEdgeText edgeId from to ->
-      "UpdateEdgeText edge: " <> show edgeId <> " from: " <> from <> " to: " <> to
-    MoveEdgeMidpoint edgeId from to ->
-      "MoveEdgeMidpoint edge: " <> show edgeId <> " from: " <> show from <> " to: " <> show to
-    ConnectSubgraph nodeId old new ->
-      "ConnectSubgraph of node: " <> show nodeId <> " to graph: " <> show new
+    InsertNodes nodes ->
+      "InsertNodes " <> show nodes
+    DeleteNodes nodes ->
+      "DeleteNodes " <> show nodes
+    UpdateNodes from to ->
+      "UpdateNodes from: " <> show from <> " to: " <> show to
+    InsertEdges edges ->
+      "InsertEdges edges: " <> show edges
+    DeleteEdges edges ->
+      "DeleteEdges edges: " <> show edges
+    UpdateEdges from to ->
+      "UpdateEdges from: " <> show from <> " to: " <> show to
     UpdateTitle from to ->
       "UpdateTitle from " <> from <> " to: " <> to
     SetTitleValidity from to ->
@@ -179,29 +154,25 @@ instance showGraphOperation :: Show GraphOperation where
 
 instance showEquationOperation :: Show EquationOperation where
   show = case _ of
-    InsertPathEquation pathEquation ->
-      "InsertPathEquation " <> show pathEquation
-    DeletePathEquation pathEquation ->
-      "DeletePathEquation " <> show pathEquation
+    InsertPathEquations pathEquations ->
+      "InsertPathEquations " <> show pathEquations
+    DeletePathEquations pathEquations ->
+      "DeletePathEquations " <> show pathEquations
 
 instance showMappingOperation :: Show MappingOperation where
   show = case _ of
-    InsertNodeMappingEdge nodeMappingEdge ->
-      "InsertNodeMappingEdge " <> show nodeMappingEdge
-    DeleteNodeMappingEdge nodeMappingEdge ->
-      "DeleteNodeMappingEdge " <> show nodeMappingEdge
-    UpdateNodeMappingEdge from to ->
-      "UpdateNodeMappingEdge from: " <> show from <> " to: " <> show to
-    InsertEdgeMappingEdge edgeMappingEdge ->
-      "InsertEdgeMappingEdge " <> show edgeMappingEdge
-    DeleteEdgeMappingEdge edgeMappingEdge ->
-      "DeleteEdgeMappingEdge " <> show edgeMappingEdge
-    UpdateEdgeMappingEdge from to ->
-      "UpdateEdgeMappingEdge from: " <> show from <> " to: " <> show to
-    MoveNodeMappingEdgeMidpoint id from to ->
-      "MoveNodeMappingEdgeMidpoint " <> show id <> " to: " <> show to <> " from: " <> show from
-    MoveEdgeMappingEdgeMidpoint id from to ->
-      "MoveEdgeMappingEdgeMidpoint " <> show id <> " to: " <> show to <> " from: " <> show from
+    InsertNodeMappingEdges nodeMappingEdges ->
+      "InsertNodeMappingEdges " <> show nodeMappingEdges
+    DeleteNodeMappingEdges nodeMappingEdges ->
+      "DeleteNodeMappingEdges " <> show nodeMappingEdges
+    UpdateNodeMappingEdges from to ->
+      "UpdateNodeMappingEdges from: " <> show from <> " to: " <> show to
+    InsertEdgeMappingEdges edgeMappingEdges ->
+      "InsertEdgeMappingEdges " <> show edgeMappingEdges
+    DeleteEdgeMappingEdges edgeMappingEdges ->
+      "DeleteEdgeMappingEdges " <> show edgeMappingEdges
+    UpdateEdgeMappingEdges from to ->
+      "UpdateEdgeMappingEdges from: " <> show from <> " to: " <> show to
 
 instance showCreateOperation :: Show CreateOperation where
   show = case _ of
@@ -225,70 +196,40 @@ instance showMegagraphOperation :: Show MegagraphOperation where
     CreateElementOperation createOp ->
       "CreateELementOperation " <> show createOp
 
-encodeNodeAsGraphOperations :: Node -> Array GraphOperation
-encodeNodeAsGraphOperations node =
-  [ InsertNode node.id
-  , MoveNode node.id (GraphSpacePoint2D {x: 0.0, y: 0.0}) (nodePosition node)
-  , UpdateNodeText node.id "" node.text
-  , ConnectSubgraph node.id Nothing node.subgraph
-  ]
+encodeNodesAsMegagraphUpdate :: GraphId -> Array Node -> MegagraphUpdate
+encodeNodesAsMegagraphUpdate graphId nodes =
+  [GraphElementOperation graphId $ InsertNodes nodes]
 
-encodeNodeAsMegagraphUpdate :: Node -> MegagraphUpdate
-encodeNodeAsMegagraphUpdate node =
-  GraphElementOperation node.graphId <$> encodeNodeAsGraphOperations node
+encodeEdgesAsMegagraphUpdate :: GraphId -> Array Edge -> MegagraphUpdate
+encodeEdgesAsMegagraphUpdate graphId edges =
+  [GraphElementOperation graphId $ InsertEdges edges]
 
-encodeEdgeAsGraphOperations :: Edge -> Array GraphOperation
-encodeEdgeAsGraphOperations edge =
-  let
-    edgeMetadata = {id: edge.id, graphId: edge.graphId, source: edge.source, target: edge.target}
-  in
-   [ InsertEdge edgeMetadata
-   , UpdateEdgeText edge.id "" edge.text
-   , MoveEdgeMidpoint edge.id (GraphEdgeSpacePoint2D {angle: 0.0, radius: 0.0}) (edgeMidpoint edge)
-   ]
-
-encodeEdgeAsMegagraphUpdate :: Edge -> MegagraphUpdate
-encodeEdgeAsMegagraphUpdate edge =
-  GraphElementOperation edge.graphId <$> encodeEdgeAsGraphOperations edge
-
-encodePathEquationAsMegagraphUpdate :: GraphId -> PathEquation -> MegagraphUpdate
-encodePathEquationAsMegagraphUpdate graphId pathEquation =
-  [ GraphElementEquationOperation graphId $ InsertPathEquation pathEquation ]
+encodePathEquationsAsMegagraphUpdate :: GraphId -> Array PathEquation -> MegagraphUpdate
+encodePathEquationsAsMegagraphUpdate graphId pathEquations =
+  [ GraphElementEquationOperation graphId $ InsertPathEquations pathEquations ]
 
 encodeGraphAsMegagraphUpdate :: Graph -> MegagraphUpdate
 encodeGraphAsMegagraphUpdate graph =
   let
-    nodeOps = encodeNodeAsMegagraphUpdate <$> (Array.fromFoldable $ Map.values graph.nodes)
-    edgeOps = encodeEdgeAsMegagraphUpdate <$> edgeArray graph
-    pathEquationOps = encodePathEquationAsMegagraphUpdate graph.id <$> Array.fromFoldable graph.pathEquations
-    titleOp = [ [ GraphElementOperation graph.id $ UpdateTitle "" graph.title.text ] ]
+    nodeOps = encodeNodesAsMegagraphUpdate graph.id (Array.fromFoldable $ Map.values graph.nodes)
+    edgeOps = encodeEdgesAsMegagraphUpdate graph.id (edgeArray graph)
+    pathEquationOps = encodePathEquationsAsMegagraphUpdate graph.id $ Array.fromFoldable graph.pathEquations
+    titleOp = [ GraphElementOperation graph.id $ UpdateTitle "" graph.title.text ]
   in
-    Array.concat $ nodeOps <> edgeOps <> pathEquationOps <> titleOp
+    nodeOps <> edgeOps <> pathEquationOps <> titleOp
 
-encodeNodeMappingEdgeAsMegagraphUpdate :: NodeMappingEdge -> MegagraphUpdate
-encodeNodeMappingEdgeAsMegagraphUpdate nodeMappingEdge =
-  MappingElementOperation nodeMappingEdge.mappingId
-  <$> [ InsertNodeMappingEdge nodeMappingEdge
-      , MoveNodeMappingEdgeMidpoint
-          nodeMappingEdge.id
-          (PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0})
-          nodeMappingEdge.midpoint
-      ]
+encodeNodeMappingEdgesAsMegagraphUpdate :: MappingId -> Array NodeMappingEdge -> MegagraphUpdate
+encodeNodeMappingEdgesAsMegagraphUpdate mappingId nodeMappingEdges =
+  [MappingElementOperation mappingId $ InsertNodeMappingEdges nodeMappingEdges]
 
-encodeEdgeMappingEdgeAsMegagraphUpdate :: EdgeMappingEdge -> MegagraphUpdate
-encodeEdgeMappingEdgeAsMegagraphUpdate edgeMappingEdge =
-  MappingElementOperation edgeMappingEdge.mappingId
-  <$> [ InsertEdgeMappingEdge edgeMappingEdge
-      , MoveEdgeMappingEdgeMidpoint
-          edgeMappingEdge.id
-          (PageEdgeSpacePoint2D {angle: 0.0, radius: 0.0})
-          edgeMappingEdge.midpoint
-      ]
+encodeEdgeMappingEdgesAsMegagraphUpdate :: MappingId -> Array EdgeMappingEdge -> MegagraphUpdate
+encodeEdgeMappingEdgesAsMegagraphUpdate mappingId edgeMappingEdges =
+  [MappingElementOperation mappingId $ InsertEdgeMappingEdges edgeMappingEdges]
 
 encodeMappingAsMegagraphUpdate :: Mapping -> MegagraphUpdate
 encodeMappingAsMegagraphUpdate mapping =
   let
-    nodeMappingEdgesOps = encodeNodeMappingEdgeAsMegagraphUpdate <$> Array.fromFoldable mapping.nodeMappingEdges
-    edgeMappingEdgesOps = encodeEdgeMappingEdgeAsMegagraphUpdate <$> Array.fromFoldable mapping.edgeMappingEdges
+    nodeMappingEdgesOps = encodeNodeMappingEdgesAsMegagraphUpdate mapping.id $ Array.fromFoldable mapping.nodeMappingEdges
+    edgeMappingEdgesOps = encodeEdgeMappingEdgesAsMegagraphUpdate mapping.id $ Array.fromFoldable mapping.edgeMappingEdges
   in
-    Array.concat $ nodeMappingEdgesOps <> edgeMappingEdgesOps
+    nodeMappingEdgesOps <> edgeMappingEdgesOps

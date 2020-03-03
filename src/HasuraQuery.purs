@@ -9,6 +9,7 @@ import Prelude
 import Data.Argonaut.Core (stringify)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array as Array
+import Data.Array (length)
 import Data.Array.NonEmpty (fromNonEmpty, toNonEmpty)
 import Data.NonEmpty (NonEmpty)
 import Data.NonEmpty as NonEmpty
@@ -26,6 +27,8 @@ import Record.Extra (class Keys, keys)
 import Type.Prelude (class IsSymbol, class RowToList, class Union, RLProxy(..), RProxy(..), SProxy(..), reflectSymbol)
 import Unsafe.Coerce (unsafeCoerce)
 
+-- | GraphQLQuery and GraphQLMutation behave exactly the same, but cannot be
+-- | combined.
 data GraphQLQuery schema
   = Query (RProxy schema) (NonEmpty Array String)
 
@@ -48,7 +51,7 @@ instance semigroupGraphQLMutation :: Semigroup (GraphQLMutation schema) where
 
 queryToString :: forall schema. GraphQLQuery schema -> String
 queryToString (Query _ subQueries) =
-  "{ " <>
+  "query { " <>
   String.joinWith " " (NonEmpty.fromNonEmpty Array.cons subQueries) <>
   " }"
 
@@ -72,60 +75,61 @@ renderMutation mutation =
                            , payload : { query : mutationToString mutation }
                            }
 
-upsertOperation :: forall schema tableName tableRow tableRowL r.
-                   IsSymbol tableName
-                   -- Table is in the schema
-                   => Cons tableName (Record tableRow) r schema
-                   -- So we can get the keys of the vars record
-                   => RowToList tableRow tableRowL
-                   => Keys tableRowL
-                   -- So the vars are JSON encodable
-                   => RowListEncodeJSON tableRow tableRowL
-                   => SProxy tableName
-                   -> Record tableRow
-                   -> GraphQLMutation schema
-upsertOperation _ vars =
-  let
-    tableName = reflectSymbol (SProxy :: SProxy tableName)
-    varNames = Array.fromFoldable $ keys (RProxy :: RProxy tableRow)
-    varsStr =
-      vars
-      # rowListEncodeJSONImpl (RLProxy :: RLProxy tableRowL)
-      <#> (\(Tuple field val) -> field <> ": " <> val)
-      # String.joinWith ", "
-  in
-    Mutation RProxy
-    $ NonEmpty.singleton
-    $ "insert_" <> tableName <> "(\
-      \    objects: [\
-      \      {\
-      \        " <> varsStr <> "\
-      \      }\
-      \    ]\
-      \    on_conflict: {\
-      \        constraint: " <> tableName <> "_pkey\
-      \        update_columns: [" <> (String.joinWith ", " varNames) <> "]\
-      \    }\
-      \) {\
-      \  affected_rows\
-      \}"
+upsertOperation ::
+  forall schema tableName tableRow tableRowL r.
+  IsSymbol tableName
+  -- Table is in the schema
+  => Cons tableName (Record tableRow) r schema
+  -- We can get the keys of the tableRow record
+  => RowToList tableRow tableRowL
+  => Keys tableRowL
+  -- The fields are JSON encodable
+  => RowListEncodeJSON tableRow tableRowL
+  => SProxy tableName
+  -> Array (Record tableRow)
+  -> GraphQLMutation schema
+upsertOperation _ objects =
+  if length objects == 0
+  then emptyMutation
+  else
+    let
+      tableName = reflectSymbol (SProxy :: SProxy tableName)
+      varNames = Array.fromFoldable $ keys (RProxy :: RProxy tableRow)
+      stringifyObject =
+        rowListEncodeJSONImpl (RLProxy :: RLProxy tableRowL)
+        >>> map (\(Tuple field val) -> field <> ": " <> val)
+        >>> \fieldValsStr -> "{ " <> String.joinWith ", " fieldValsStr <> " }"
+      objectsStr = "[ " <> String.joinWith " " (stringifyObject <$> objects) <> " ]"
+    in
+      Mutation RProxy
+      $ NonEmpty.singleton
+      $ "insert_" <> tableName <> "(\
+        \    objects: " <> objectsStr <> "\
+        \    on_conflict: {\
+        \        constraint: " <> tableName <> "_pkey\
+        \        update_columns: [" <> (String.joinWith ", " varNames) <> "]\
+        \    }\
+        \) {\
+        \  affected_rows\
+        \}"
 
-updateOperation :: forall schema tableName tableRow fields fieldsL r r' r''.
-                   IsSymbol tableName
-                   -- Table is in the schema
-                   => Cons tableName (Record tableRow) r schema
-                   -- Schema must contain an id: UUID field
-                   => Cons "id" UUID r' tableRow
-                   -- The vars must be a subset of the schema fields
-                   => Union fields r'' tableRow
-                   -- Get the keys of the vars record
-                   => RowToList (id :: UUID | fields) fieldsL
-                   => Keys fieldsL
-                   -- So the vars are JSON encodable
-                   => RowListEncodeJSON (id :: UUID | fields) fieldsL
-                   => SProxy tableName
-                   -> Record (id :: UUID | fields)
-                   -> GraphQLMutation schema
+updateOperation ::
+  forall schema tableName tableRow fields fieldsL r r' r''.
+  IsSymbol tableName
+  -- Table is in the schema
+  => Cons tableName (Record tableRow) r schema
+  -- Schema must contain an id: UUID field
+  => Cons "id" UUID r' tableRow
+  -- The vars must be a subset of the schema fields
+  => Union fields r'' tableRow
+  -- Get the keys of the vars record
+  => RowToList (id :: UUID | fields) fieldsL
+  => Keys fieldsL
+  -- The vars are JSON encodable
+  => RowListEncodeJSON (id :: UUID | fields) fieldsL
+  => SProxy tableName
+  -> Record (id :: UUID | fields)
+  -> GraphQLMutation schema
 updateOperation _ vars =
   let
     tableName = reflectSymbol (SProxy :: SProxy tableName)
@@ -145,26 +149,30 @@ updateOperation _ vars =
       \    affected_rows\
       \}"
 
-deleteOperation :: forall schema tableName tableRow r r'.
-                   IsSymbol tableName
-                   -- Table is in the schema
-                   => Cons tableName (Record tableRow) r schema
-                   -- Schema must contain an id: UUID field
-                   => Cons "id" UUID r' tableRow
-                   => SProxy tableName
-                   -> UUID
-                   -> GraphQLMutation schema
-deleteOperation _ id =
-  let
-    tableName = reflectSymbol (SProxy :: SProxy tableName)
-  in
-    Mutation RProxy
-    $ NonEmpty.singleton
-    $ "delete_" <> tableName <> "(\
-      \  where: {id: {_eq: \"" <> UUID.toString id <> "\"}}\
-      \) {\
-      \  affected_rows\
-      \}"
+deleteOperation ::
+  forall schema tableName tableRow r r'.
+  IsSymbol tableName
+  -- Table is in the schema
+  => Cons tableName (Record tableRow) r schema
+  -- Schema must contain an id: UUID field
+  => Cons "id" UUID r' tableRow
+  => SProxy tableName
+  -> Array UUID
+  -> GraphQLMutation schema
+deleteOperation _ ids =
+  if length ids == 0
+  then emptyMutation
+  else
+    let
+      tableName = reflectSymbol (SProxy :: SProxy tableName)
+    in
+      Mutation RProxy
+      $ NonEmpty.singleton
+      $ "delete_" <> tableName <> "(\
+        \  where: {id: {_in: [ \"" <> String.joinWith "\" \"" (UUID.toString <$> ids) <> "\" ]}}\
+        \) {\
+        \  affected_rows\
+        \}"
 
 
 ------

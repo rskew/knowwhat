@@ -7,7 +7,7 @@ import AppState (AppState, DrawingEdge)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
 import Megagraph (GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
@@ -41,17 +41,19 @@ lookupNodePositionInPane state graphId nodeId renderPane = do
   node <- Map.lookup nodeId graphState.graph.nodes
   pure $ (nodePosition node) # graphSpaceToPageSpace graphState.view # pageSpaceToGraphSpace renderPane
 
--- | Utility to indicate if an operation received from the server updates a node's
--- | text, in which case the contenteditable field needs to be refreshed.
-nodesWithTextUpdate :: AppOperation -> Array (Tuple GraphId NodeId)
-nodesWithTextUpdate (AppOperation {target, op, historyUpdate, undoneUpdate}) =
-  op
-  <#> graphAndNodeId
-  # Array.catMaybes
+-- | Indicated which nodes are updated in an AppOperation. Used to update the
+-- | text fields when a node is updated from a server message.
+updatedNodes :: AppOperation -> Array (Tuple GraphId NodeId)
+updatedNodes (AppOperation {target, op, historyUpdate, undoneUpdate}) =
+  Array.concatMap graphAndNodeId op
     where
-      graphAndNodeId (GraphElementOperation graphId (UpdateNodeText nodeId _ _)) =
-        Just $ Tuple graphId nodeId
-      graphAndNodeId _ = Nothing
+      graphAndNodeId (GraphElementOperation graphId (InsertNodes nodes)) =
+        (\node -> Tuple graphId node.id) <$> nodes
+      graphAndNodeId (GraphElementOperation graphId (DeleteNodes nodes)) =
+        (\node -> Tuple graphId node.id) <$> nodes
+      graphAndNodeId (GraphElementOperation graphId (UpdateNodes from to)) =
+        (\node -> Tuple graphId node.id) <$> to
+      graphAndNodeId _ = []
 
 type Parabola
   = { p0 :: Point2D

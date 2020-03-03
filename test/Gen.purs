@@ -4,21 +4,22 @@ import Prelude
 
 import AppState (MegagraphState)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
+import Data.Array (length, replicate, zipWith)
 import Data.Array as Array
 import Data.Array.NonEmpty as NonEmptyArray
-import Data.Foldable (foldl)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.NonEmpty (NonEmpty(..))
-import Data.Traversable (traverse)
+import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
 import Effect.Unsafe (unsafePerformEffect)
 import Interpreter (interpretGraphOperation)
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), edgeMidpoint, edgeToMetadata, emptyGraph, emptyMapping, freshEdge, freshNode, freshPane, nodePosition)
-import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), encodeEdgeAsGraphOperations, encodeNodeAsGraphOperations)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, Mapping, MappingId, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), emptyGraph, emptyMapping, freshEdge, freshNode, freshPane)
+import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..))
+import Record (merge)
 import Test.QuickCheck (class Arbitrary, arbitrary)
 import Test.QuickCheck.Gen (Gen, arrayOf, elements, oneOf)
 
@@ -30,9 +31,20 @@ nodeGen graphId = do
   y     <- arbitrary :: Gen Number
   pure $ (freshNode graphId nodeId) { text = text, positionX = x, positionY = y }
 
-chooseNode :: Graph -> Gen (Maybe Node)
+nodesGen :: GraphId -> Gen (Array Node)
+nodesGen graphId = arrayOf $ nodeGen graphId
+
+chooseNode :: Graph -> Maybe (Gen Node)
 chooseNode graph =
-  traverse elements $ nonEmptyValues graph.nodes
+  elements <$> nonEmptyValues graph.nodes
+
+chooseNodes :: Graph -> Gen (Array Node)
+chooseNodes graph = fromMaybe (pure []) $ arrayOf <$> chooseNode graph
+
+nodeUpdatesGen :: Graph -> Array Node -> Gen (Array Node)
+nodeUpdatesGen graph nodes = do
+    nodeUpdates <- sequence $ replicate (length nodes) (nodeGen graph.id)
+    pure $ zipWith (\prevNode updateNode -> updateNode {id = prevNode.id}) nodes nodeUpdates
 
 -- | Generate an edge for the nodes in a single graph
 edgeGen :: NonEmpty Array Node -> Gen Edge
@@ -52,9 +64,26 @@ edgeGen nodes = do
                     , midpointRadius = radius
                     }
 
-chooseEdge :: Graph -> Gen (Maybe Edge)
+edgesGen :: Graph -> Maybe (Gen (Array Edge))
+edgesGen graph =
+  (arrayOf <<< edgeGen) <$> nonEmptyValues graph.nodes
+
+chooseEdge :: Graph -> Maybe (Gen Edge)
 chooseEdge graph =
-  traverse elements $ nonEmptyValues graph.edges.idMap
+  elements <$> nonEmptyValues graph.edges.idMap
+
+chooseEdges :: Graph -> Gen (Array Edge)
+chooseEdges graph = fromMaybe (pure []) $ arrayOf <$> chooseEdge graph
+
+edgeUpdatesGen :: Graph -> Array Edge -> Gen (Array Edge)
+edgeUpdatesGen graph edges = do
+  midpoints <- arrayOf arbitrary :: Gen (Array GraphEdgeSpacePoint2D)
+  texts <- arrayOf arbitrary :: Gen (Array String)
+  let updates = zipWith (\(GraphEdgeSpacePoint2D midpoint) text -> merge {text: text} midpoint) midpoints texts
+  pure $ zipWith (\edge updates' ->
+                     edge {text = updates'.text, midpointAngle = updates'.angle, midpointRadius = updates'.radius})
+                 edges
+                 updates
 
 newtype TestGraph = TestGraph Graph
 
@@ -74,18 +103,12 @@ graphGen = do
     nodes = Array.cons node nodes'
     nonEmptyNodes = Array.cons node nodes'
 
-  let graph = foldl
-                (flip interpretGraphOperation)
-                (emptyGraph graphId)
-                (Array.concatMap encodeNodeAsGraphOperations nodes)
+  let graph = interpretGraphOperation (InsertNodes nodes) (emptyGraph graphId)
 
   -- generate a bunch of edges between the nodes
   edges <- arrayOf $ edgeGen $ NonEmpty node nonEmptyNodes
 
-  let graph' = foldl
-                 (flip interpretGraphOperation)
-                 graph
-                 (Array.concatMap encodeEdgeAsGraphOperations edges)
+  let graph' = interpretGraphOperation (InsertEdges edges) graph
 
   pure $ TestGraph graph'
 
@@ -95,18 +118,32 @@ nodeMappingEdgeGen mappingId sourceNodes targetNodes = do
     edgeId = unsafePerformEffect UUID.genUUID
   sourceNode <- elements sourceNodes
   targetNode <- elements targetNodes
+  PageEdgeSpacePoint2D midpoint <- arbitrary :: Gen PageEdgeSpacePoint2D
   angle <- arbitrary :: Gen Number
   radius <- arbitrary :: Gen Number
   pure $ { id         : edgeId
          , mappingId  : mappingId
          , sourceNode  : sourceNode.id
          , targetNode  : targetNode.id
-         , midpoint : PageEdgeSpacePoint2D { angle : angle, radius : radius }
+         , midpointAngle : midpoint.angle
+         , midpointRadius : midpoint.radius
          }
 
-chooseNodeMappingEdge :: Mapping -> Gen (Maybe NodeMappingEdge)
+chooseNodeMappingEdge :: Mapping -> Maybe (Gen NodeMappingEdge)
 chooseNodeMappingEdge mapping =
-  traverse elements $ nonEmptyValues mapping.nodeMappingEdges
+  elements <$> nonEmptyValues mapping.nodeMappingEdges
+
+chooseNodeMappingEdges :: Mapping -> Gen (Array NodeMappingEdge)
+chooseNodeMappingEdges mapping =
+  fromMaybe (pure []) $ arrayOf <$> chooseNodeMappingEdge mapping
+
+nodeMappingEdgeUpdatesGen :: Array NodeMappingEdge -> Gen (Array NodeMappingEdge)
+nodeMappingEdgeUpdatesGen nodeMappingEdges = do
+  updatedMidpoints <- sequence $ replicate (length nodeMappingEdges) (arbitrary :: Gen PageEdgeSpacePoint2D)
+  pure $ zipWith (\prevEdge (PageEdgeSpacePoint2D newMidpoint) ->
+                     prevEdge {midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius})
+                 nodeMappingEdges
+                 updatedMidpoints
 
 edgeMappingEdgeGen :: MappingId -> NonEmpty Array Edge -> NonEmpty Array Edge -> Gen EdgeMappingEdge
 edgeMappingEdgeGen mappingId sourceEdges targetEdges = do
@@ -114,18 +151,30 @@ edgeMappingEdgeGen mappingId sourceEdges targetEdges = do
     edgeId = unsafePerformEffect UUID.genUUID
   sourceEdge <- elements sourceEdges
   targetEdge <- elements targetEdges
-  angle <- arbitrary :: Gen Number
-  radius <- arbitrary :: Gen Number
+  PageEdgeSpacePoint2D midpoint <- arbitrary :: Gen PageEdgeSpacePoint2D
   pure $ { id         : edgeId
          , mappingId  : mappingId
          , sourceEdge  : sourceEdge.id
          , targetEdge  : targetEdge.id
-         , midpoint : PageEdgeSpacePoint2D { angle : angle, radius : radius }
+         , midpointAngle : midpoint.angle
+         , midpointRadius : midpoint.radius
          }
 
-chooseEdgeMappingEdge :: Mapping -> Gen (Maybe EdgeMappingEdge)
+chooseEdgeMappingEdge :: Mapping -> Maybe (Gen EdgeMappingEdge)
 chooseEdgeMappingEdge mapping =
-  traverse elements $ nonEmptyValues mapping.edgeMappingEdges
+  elements <$> nonEmptyValues mapping.edgeMappingEdges
+
+chooseEdgeMappingEdges :: Mapping -> Gen (Array EdgeMappingEdge)
+chooseEdgeMappingEdges mapping =
+  fromMaybe (pure []) $ arrayOf <$> chooseEdgeMappingEdge mapping
+
+edgeMappingEdgeUpdatesGen :: Array EdgeMappingEdge -> Gen (Array EdgeMappingEdge)
+edgeMappingEdgeUpdatesGen edgeMappingEdges = do
+  updatedMidpoints <- sequence $ replicate (length edgeMappingEdges) arbitrary :: Gen (Array PageEdgeSpacePoint2D)
+  pure $ zipWith (\prevEdge (PageEdgeSpacePoint2D newMidpoint) ->
+                     prevEdge {midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius})
+                 edgeMappingEdges
+                 updatedMidpoints
 
 mappingGen :: NonEmpty Array Graph -> Gen Mapping
 mappingGen graphs =
@@ -161,24 +210,30 @@ megagraphGen = do
 alwaysValidGraphOperationGen :: Graph -> Gen GraphOperation
 alwaysValidGraphOperationGen graph = do
   oneOf $ NonEmpty
-    ( let
-         nodeId = unsafePerformEffect $ UUID.genUUID
-      in
-       pure $ InsertNode nodeId )
-    [ let
-         edgeMetadata = { id      : unsafePerformEffect UUID.genUUID
-                        , graphId : unsafePerformEffect UUID.genUUID
-                        , source  : unsafePerformEffect UUID.genUUID
-                        , target  : unsafePerformEffect UUID.genUUID
-                        }
-      in
-        pure $ InsertEdge edgeMetadata
+    ( do
+        nodes <- nodesGen graph.id
+        pure $ InsertNodes nodes )
+
+    [ do
+         nodes <- chooseNodes graph
+         nodeUpdates <- nodeUpdatesGen graph nodes
+         pure $ UpdateNodes nodes nodeUpdates
+
     , do
-        newTitleText <- arbitrary :: Gen String
-        pure $ UpdateTitle graph.title.text newTitleText
+         nodes <- chooseNodes graph
+         pure $ DeleteNodes nodes
+
     , do
-        newTitleIsValid <- arbitrary :: Gen Boolean
-        pure $ SetTitleValidity graph.title.isValid newTitleIsValid
+         edges <- chooseEdges graph
+         pure $ DeleteEdges edges
+
+    , do
+         newTitleText <- arbitrary :: Gen String
+         pure $ UpdateTitle graph.title.text newTitleText
+
+    , do
+         newTitleIsValid <- arbitrary :: Gen Boolean
+         pure $ SetTitleValidity graph.title.isValid newTitleIsValid
     ]
 
 graphOperationGen :: Graph -> Gen (Maybe GraphOperation)
@@ -186,46 +241,29 @@ graphOperationGen graph = do
   oneOf $ NonEmpty
     ( Just <$> alwaysValidGraphOperationGen graph )
 
-    [ chooseNode graph >>= traverse \node ->
-        pure $ DeleteNode node.id
+    [ sequence do
+        genEdges <- edgesGen graph
+        pure do
+          edges <- genEdges
+          pure $ InsertEdges edges
 
-    , chooseEdge graph >>= traverse \edge ->
-        pure $ DeleteEdge (edgeToMetadata edge)
-
-    , chooseNode graph >>= traverse \node -> do
-        x <- arbitrary :: Gen Number
-        y <- arbitrary :: Gen Number
-        pure $ MoveNode node.id (nodePosition node) (GraphSpacePoint2D {x: x, y: y})
-
-    , chooseNode graph >>= traverse \node -> do
-        newText <- arbitrary :: Gen String
-        pure $ UpdateNodeText node.id node.text newText
-
-    , chooseEdge graph >>= traverse \edge -> do
-        newText <- arbitrary :: Gen String
-        pure $ UpdateEdgeText edge.id edge.text newText
-
-    , chooseEdge graph >>= traverse \edge -> do
-        angle <- arbitrary :: Gen Number
-        radius <- arbitrary :: Gen Number
-        pure $ MoveEdgeMidpoint edge.id (edgeMidpoint edge) (GraphEdgeSpacePoint2D {angle: angle, radius: radius})
-
-    , chooseNode graph >>= traverse \node -> do
-        newSubgraph <- oneOf $ NonEmpty (pure Nothing) [ pure $ Just $ unsafePerformEffect UUID.genUUID ]
-        pure $ ConnectSubgraph node.id node.subgraph newSubgraph
+    , do
+         edges <- chooseEdges graph
+         edgeUpdates <- edgeUpdatesGen graph edges
+         pure $ Just $ UpdateEdges edges edgeUpdates
     ]
 
 -- | Just make paths from any old arrays of edges, without worrying about
 -- | making a valid path.
 pathEquationGen :: Graph -> Gen PathEquation
 pathEquationGen graph = do
-  pathA <- Array.catMaybes <$> arrayOf (chooseEdge graph)
-  pathB <- Array.catMaybes <$> arrayOf (chooseEdge graph)
+  pathA <- chooseEdges graph
+  pathB <- chooseEdges graph
   pure $ PathEquation (_.id <$> pathA) (_.id <$> pathB)
 
-choosePathEquation :: Graph -> Gen (Maybe PathEquation)
+choosePathEquation :: Graph -> Maybe (Gen PathEquation)
 choosePathEquation graph =
-  traverse elements $ nonEmptyOfEquations graph.pathEquations
+  elements <$> nonEmptyOfEquations graph.pathEquations
     where
       nonEmptyOfEquations =
         map NonEmptyArray.toNonEmpty <<< NonEmptyArray.fromArray <<< Array.fromFoldable
@@ -234,41 +272,50 @@ equationOperationGen :: Graph -> Gen (Maybe EquationOperation)
 equationOperationGen graph =
   oneOf $ NonEmpty
     ( do
-        pathEquation <- pathEquationGen graph
-        pure $ Just $ InsertPathEquation pathEquation )
-    [ do
-        pathEquation <- choosePathEquation graph
-        pure $ DeletePathEquation <$> pathEquation ]
+        pathEquations <- arrayOf $ pathEquationGen graph
+        pure $ Just $ InsertPathEquations pathEquations )
+
+    [ sequence do
+        genPathEquation <- choosePathEquation graph
+        pure do
+          pathEquations <- arrayOf genPathEquation
+          pure $ DeletePathEquations pathEquations ]
 
 mappingOperationGen :: Mapping -> Graph -> Graph -> Gen (Maybe MappingOperation)
 mappingOperationGen mapping sourceGraph targetGraph =
   oneOf $ NonEmpty
-    ( case nonEmptyValues sourceGraph.nodes, nonEmptyValues targetGraph.nodes of
-        Just sourceGraphNodes, Just targetGraphNodes -> do
-          nodeMappingEdge <- nodeMappingEdgeGen mapping.id sourceGraphNodes targetGraphNodes
-          pure $ Just $ InsertNodeMappingEdge nodeMappingEdge
-        _, _ -> pure $ Nothing )
-    [ chooseNodeMappingEdge mapping >>= (pure <<< map DeleteNodeMappingEdge)
-    , case nonEmptyValues sourceGraph.edges.idMap, nonEmptyValues targetGraph.edges.idMap of
-        Just sourceGraphEdges, Just targetGraphEdges -> do
-          edgeMappingEdge <- edgeMappingEdgeGen mapping.id sourceGraphEdges targetGraphEdges
-          pure $ Just $ InsertEdgeMappingEdge edgeMappingEdge
-        _, _ -> pure $ Nothing
-    , chooseEdgeMappingEdge mapping >>= (pure <<< map DeleteEdgeMappingEdge)
+    ( sequence do
+         sourceNodes <- nonEmptyValues sourceGraph.nodes
+         targetNodes <- nonEmptyValues targetGraph.nodes
+         pure do
+           nodeMappingEdges <- arrayOf $ nodeMappingEdgeGen mapping.id sourceNodes targetNodes
+           pure $ InsertNodeMappingEdges nodeMappingEdges)
+
+
+    [ do
+         nodeMappingEdges <- chooseNodeMappingEdges mapping
+         edgeUpdates <- nodeMappingEdgeUpdatesGen nodeMappingEdges
+         pure $ Just $ UpdateNodeMappingEdges nodeMappingEdges edgeUpdates
+
     , do
-        angle <- arbitrary :: Gen Number
-        radius <- arbitrary :: Gen Number
-        let newMidpoint = PageEdgeSpacePoint2D {angle: angle, radius: radius}
-        maybeNodeMappingEdge <- chooseNodeMappingEdge mapping
-        pure (maybeNodeMappingEdge <#> \nodeMappingEdge ->
-          MoveNodeMappingEdgeMidpoint nodeMappingEdge.id nodeMappingEdge.midpoint newMidpoint)
+         nodeMappingEdges <- chooseNodeMappingEdges mapping
+         pure $ Just $ DeleteNodeMappingEdges nodeMappingEdges
+
+    , sequence do
+         sourceEdges <- nonEmptyValues sourceGraph.edges.idMap
+         targetEdges <- nonEmptyValues targetGraph.edges.idMap
+         pure do
+           edgeMappingEdges <- arrayOf $ edgeMappingEdgeGen mapping.id sourceEdges targetEdges
+           pure $ InsertEdgeMappingEdges edgeMappingEdges
+
     , do
-        angle <- arbitrary :: Gen Number
-        radius <- arbitrary :: Gen Number
-        let newMidpoint = PageEdgeSpacePoint2D {angle: angle, radius: radius}
-        maybeEdgeMappingEdge <- chooseEdgeMappingEdge mapping
-        pure (maybeEdgeMappingEdge <#> \edgeMappingEdge ->
-          MoveEdgeMappingEdgeMidpoint edgeMappingEdge.id edgeMappingEdge.midpoint newMidpoint)
+         edgeMappingEdges <- chooseEdgeMappingEdges mapping
+         edgeUpdates <- edgeMappingEdgeUpdatesGen edgeMappingEdges
+         pure $ Just $ UpdateEdgeMappingEdges edgeMappingEdges edgeUpdates
+
+    , do
+         edgeMappingEdges <- chooseEdgeMappingEdges mapping
+         pure $ Just $ DeleteEdgeMappingEdges edgeMappingEdges
     ]
 
 megagraphOperationGen :: MegagraphState -> Gen (Maybe MegagraphOperation)

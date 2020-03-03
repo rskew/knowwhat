@@ -1,10 +1,7 @@
 module Test.Main where
 
-import MegagraphOperation (MegagraphOperation(..), encodeNodeAsGraphOperations, invertMegagraphUpdate)
 import Prelude
 
-import Data.Array as Array
-import Data.Foldable (foldl)
 import Data.List as List
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
@@ -13,6 +10,7 @@ import Effect.Aff (launchAff_)
 import Effect.Class (liftEffect)
 import Gen (TestGraph(..))
 import Interpreter (interpretGraphOperation)
+import MegagraphOperation (GraphOperation(..))
 import Test.QuickCheck (Result(..), quickCheck', (===))
 import Test.Spec (it, describe)
 import Test.Spec.Reporter.Console (consoleReporter)
@@ -27,23 +25,11 @@ prop_RemoveInsertNode (TestGraph graph) =
   case List.uncons (Map.values graph.nodes) of
     Nothing -> Success
     Just {head, tail} ->
-      let
-        insertNodeOps = encodeNodeAsGraphOperations head
-        -- Some fudgery as the mechanism to invert an operation is
-        -- defined on MegagraphUpdates which operate on the MegagraphState,
-        -- but we want to invert our operations which just operate on a Graph.
-        removeNodeOps = insertNodeOps
-                        <#> GraphElementOperation head.graphId
-                        # invertMegagraphUpdate
-                        <#> case _ of
-                              GraphElementOperation _ op -> Just op
-                              _ -> Nothing
-                        # Array.catMaybes
-      in
-        graph
-        ===
-        (foldl (flip interpretGraphOperation) graph removeNodeOps
-          # \graph' -> foldl (flip interpretGraphOperation) graph' insertNodeOps)
+      graph
+      ===
+      (graph
+       # interpretGraphOperation (InsertNode head)
+       # interpretGraphOperation (DeleteNode head))
 
 --prop_EncodeDecode :: TestGraph -> Result
 --prop_EncodeDecode (TestGraph graphId graphData _ _) =

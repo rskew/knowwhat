@@ -13,10 +13,10 @@ import Data.Maybe (Maybe(..))
 import Data.NonEmpty as NonEmpty
 import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
-import HasuraQuery (class RowListEncodeJSON, GraphQLMutation, GraphQLQuery(..), deleteOperation, updateOperation, upsertOperation)
+import HasuraQuery (class RowListEncodeJSON, GraphQLMutation, GraphQLQuery(..), deleteOperation, upsertOperation)
 import Megagraph (Edge, EdgeId, EdgeRow, GraphId, NodeId, NodeRow, Node, _nodes, _text, _title, batchInsertEdges)
 import Record.Extra (class Keys)
-import Type.Prelude (class RowToList, class Union, RProxy(..), SProxy(..))
+import Type.Prelude (class RowToList, RProxy(..), SProxy(..))
 
 type GraphRow
   = ( id :: GraphId
@@ -29,55 +29,57 @@ type GraphSchema
     , edges :: Edge
     )
 
-graphUpsertQuery :: Record GraphRow -> GraphQLMutation GraphSchema
-graphUpsertQuery graphRow =
-  upsertOperation (SProxy :: SProxy "graphs") queryVariables
-  where
-    queryVariables = { id : graphRow.id
-                     , title : graphRow.title
-                     }
+renderGraphUpsertQuery :: Array (Record GraphRow) -> GraphQLMutation GraphSchema
+renderGraphUpsertQuery graphRows =
+  upsertOperation (SProxy :: SProxy "graphs") graphRows
 
-nodeUpsertQuery :: forall nodeRowL.
-                   RowToList NodeRow nodeRowL
-                   => Keys nodeRowL
-                   => RowListEncodeJSON NodeRow nodeRowL
-                   => Node
-                   -> GraphQLMutation GraphSchema
-nodeUpsertQuery node = upsertOperation (SProxy :: SProxy "nodes") node
+renderGraphDeleteQuery :: Array GraphId -> GraphQLMutation GraphSchema
+renderGraphDeleteQuery ids = deleteOperation (SProxy :: SProxy "graphs") ids
 
-nodeUpdateQuery :: forall fields r fieldsL.
-                   Union fields r NodeRow
-                   => RowToList (id :: NodeId | fields) fieldsL
-                   => Keys fieldsL
-                   => RowListEncodeJSON (id :: NodeId | fields) fieldsL
-                   => Record (id :: NodeId | fields)
-                   -> GraphQLMutation GraphSchema
-nodeUpdateQuery fields =
-  updateOperation (SProxy :: SProxy "nodes") fields
+renderNodeUpsertQuery ::
+  forall nodeRowL.
+  RowToList NodeRow nodeRowL
+  => Keys nodeRowL
+  => RowListEncodeJSON NodeRow nodeRowL
+  => Array Node
+  -> GraphQLMutation GraphSchema
+renderNodeUpsertQuery nodes = upsertOperation (SProxy :: SProxy "nodes") nodes
 
-nodeDeleteQuery :: NodeId -> GraphQLMutation GraphSchema
-nodeDeleteQuery id = deleteOperation (SProxy :: SProxy "nodes") id
+--renderNodeUpdateQuery ::
+--  forall fields r fieldsL.
+--  Union fields r NodeRow
+--  => RowToList (id :: NodeId | fields) fieldsL
+--  => Keys fieldsL
+--  => RowListEncodeJSON (id :: NodeId | fields) fieldsL
+--  => Record (id :: NodeId | fields)
+--  -> GraphQLMutation GraphSchema
+--renderNodeUpdateQuery fields =
+--  updateOperation (SProxy :: SProxy "nodes") fields
 
-edgeUpsertQuery :: forall edgeRowL.
-                   RowToList EdgeRow edgeRowL
-                   => Keys edgeRowL
-                   => Edge
-                   -> GraphQLMutation GraphSchema
-edgeUpsertQuery edge =
-  upsertOperation (SProxy :: SProxy "edges") edge
+renderNodeDeleteQuery :: Array NodeId -> GraphQLMutation GraphSchema
+renderNodeDeleteQuery ids = deleteOperation (SProxy :: SProxy "nodes") ids
 
-edgeUpdateQuery :: forall fields r fieldsL.
-                   Union fields r EdgeRow
-                   => RowToList (id :: EdgeId | fields) fieldsL
-                   => Keys fieldsL
-                   => RowListEncodeJSON (id :: EdgeId | fields) fieldsL
-                   => Record (id :: EdgeId | fields)
-                   -> GraphQLMutation GraphSchema
-edgeUpdateQuery fields =
-  updateOperation (SProxy :: SProxy "edges") fields
+renderEdgeUpsertQuery ::
+  forall edgeRowL.
+  RowToList EdgeRow edgeRowL
+  => Keys edgeRowL
+  => Array Edge
+  -> GraphQLMutation GraphSchema
+renderEdgeUpsertQuery edges =
+  upsertOperation (SProxy :: SProxy "edges") edges
 
-edgeDeleteQuery :: EdgeId -> GraphQLMutation GraphSchema
-edgeDeleteQuery id = deleteOperation (SProxy :: SProxy "edges") id
+--edgeUpdateQuery :: forall fields r fieldsL.
+--                   Union fields r EdgeRow
+--                   => RowToList (id :: EdgeId | fields) fieldsL
+--                   => Keys fieldsL
+--                   => RowListEncodeJSON (id :: EdgeId | fields) fieldsL
+--                   => Record (id :: EdgeId | fields)
+--                   -> GraphQLMutation GraphSchema
+--edgeUpdateQuery fields =
+--  updateOperation (SProxy :: SProxy "edges") fields
+
+renderEdgeDeleteQuery :: Array EdgeId -> GraphQLMutation GraphSchema
+renderEdgeDeleteQuery ids = deleteOperation (SProxy :: SProxy "edges") ids
 
 -- TODO type safety by constraining query subfields by schema fields
 -- a.k.a using purescript's type system to validate the query format

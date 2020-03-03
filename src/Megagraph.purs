@@ -26,6 +26,7 @@ import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
 import Math as Math
 import Record.Builder as Builder
+import Test.QuickCheck (class Arbitrary)
 import Web.HTML.HTMLElement as WHE
 
 
@@ -90,6 +91,8 @@ derive newtype instance ordGraphEdgeSpacePoint2D :: Ord GraphEdgeSpacePoint2D
 
 derive instance genericGraphEdgeSpacePoint2D :: Generic GraphEdgeSpacePoint2D _
 
+derive newtype instance arbitraryGraphEdgeSpacePoint2D :: Arbitrary GraphEdgeSpacePoint2D
+
 instance encodeGraphEdgeSpacePoint2D :: Encode GraphEdgeSpacePoint2D where
   encode x = x # genericEncode defaultOptions
 
@@ -105,6 +108,8 @@ derive newtype instance eqPageEdgeSpacePoint2D :: Eq PageEdgeSpacePoint2D
 derive newtype instance ordPageEdgeSpacePoint2D :: Ord PageEdgeSpacePoint2D
 
 derive instance genericPageEdgeSpacePoint2D :: Generic PageEdgeSpacePoint2D _
+
+derive newtype instance arbitraryPageEdgeSpacePoint2D :: Arbitrary PageEdgeSpacePoint2D
 
 instance encodePageEdgeSpacePoint2D :: Encode PageEdgeSpacePoint2D where
   encode x = x # genericEncode defaultOptions
@@ -197,6 +202,7 @@ type EdgeRow
     , midpointRadius :: Number
     , text           :: String
     , isValid        :: Boolean
+    , deleted        :: Boolean
     )
 type Edge = Record EdgeRow
 
@@ -207,6 +213,7 @@ freshEdge edgeMetadata =
     , midpointAngle  : 0.0
     , midpointRadius : 0.0
     , isValid        : true
+    , deleted        : false
     }
 
 type NodeRow
@@ -217,6 +224,7 @@ type NodeRow
     , positionY :: Number
     , text      :: String
     , isValid   :: Boolean
+    , deleted        :: Boolean
     )
 type Node = Record NodeRow
 
@@ -229,6 +237,7 @@ freshNode graphId id
     , positionY : 0.0
     , text      : ""
     , isValid   : true
+    , deleted   : false
     }
 
 data Focus
@@ -296,21 +305,25 @@ type MappingId = UUID
 -- | For mapping edges, the midpoint is interpreted in page-space coords,
 -- | rather than graph-space coords like the normal edges.
 type NodeMappingEdge
-  = { id         :: EdgeId
-    , mappingId  :: MappingId
-    , sourceNode :: NodeId
-    , targetNode :: NodeId
-    , midpoint   :: PageEdgeSpacePoint2D
+  = { id             :: EdgeId
+    , mappingId      :: MappingId
+    , sourceNode     :: NodeId
+    , targetNode     :: NodeId
+    , midpointAngle  :: Number
+    , midpointRadius :: Number
+    , deleted        :: Boolean
     }
 
 -- | For mapping edges, the midpoint is interpreted in page-space coords,
 -- | rather than graph-space coords like the normal edges.
 type EdgeMappingEdge
-  = { id         :: EdgeId
-    , mappingId  :: MappingId
-    , sourceEdge :: EdgeId
-    , targetEdge :: EdgeId
-    , midpoint   :: PageEdgeSpacePoint2D
+  = { id             :: EdgeId
+    , mappingId      :: MappingId
+    , sourceEdge     :: EdgeId
+    , targetEdge     :: EdgeId
+    , midpointAngle  :: Number
+    , midpointRadius :: Number
+    , deleted        :: Boolean
     }
 
 -- | all ((==) mapping.sourceGraph) (mapping.nodeMappingEdges <#> _.sourceNode.graphId)
@@ -431,14 +444,9 @@ _subgraph = prop (SProxy :: SProxy "subgraph")
 ------
 -- Interface
 
-insertNewNode :: NodeId -> Graph -> Graph
-insertNewNode nodeId graph =
-  graph { nodes =
-             Map.insert
-             nodeId
-             (freshNode graph.id nodeId)
-             graph.nodes
-        }
+insertNode :: Node -> Graph -> Graph
+insertNode node graph =
+  graph { nodes = graph.nodes # Map.insert node.id node }
 
 updateNode :: Node -> Graph -> Graph
 updateNode node graph =
@@ -448,28 +456,27 @@ deleteNode :: NodeId -> Graph -> Graph
 deleteNode nodeId graph =
   graph { nodes = Map.delete nodeId graph.nodes }
 
-insertNewEdge :: EdgeMetadata -> Graph -> Graph
-insertNewEdge edgeMetadata graph =
+insertEdge :: Edge -> Graph -> Graph
+insertEdge edge graph =
   let
-    newEdge = freshEdge edgeMetadata
     createSubmapsIfNotExists keyA keyB keyC value map = case Map.lookup keyA map of
       Nothing -> map # at keyA ?~ Map.singleton keyB (Map.singleton keyC value)
       Just subMap -> case Map.lookup keyB subMap of
         Nothing -> map # at keyA <<< traversed <<< at keyB ?~ Map.singleton keyC value
         Just subSubMap -> map # at keyA <<< traversed <<< at keyB <<< traversed <<< at keyC ?~ value
     edgesSourceTarget = createSubmapsIfNotExists
-                          newEdge.source
-                          newEdge.target
-                          newEdge.id
-                          newEdge
+                          edge.source
+                          edge.target
+                          edge.id
+                          edge
                           graph.edges.sourceTarget
     edgesTargetSource = createSubmapsIfNotExists
-                          newEdge.target
-                          newEdge.source
-                          newEdge.id
-                          newEdge
+                          edge.target
+                          edge.source
+                          edge.id
+                          edge
                           graph.edges.targetSource
-    idMap = Map.insert edgeMetadata.id newEdge graph.edges.idMap
+    idMap = graph.edges.idMap # Map.insert edge.id edge
   in
     graph { edges = { sourceTarget : edgesSourceTarget
                     , targetSource : edgesTargetSource
@@ -482,7 +489,7 @@ batchInsertEdges edges graph = foldr updateEdge graph edges
 
 updateEdge :: Edge -> Graph -> Graph
 updateEdge edge =
-  insertNewEdge (edgeToMetadata edge)
+  insertEdge edge
   >>>
   updateEdgeData (const edge) edge.id
 
@@ -567,12 +574,12 @@ deleteEdgeMappingEdge edgeMappingEdgeId =
   _edgeMappingEdges %~ Map.delete edgeMappingEdgeId
 
 updateNodeMappingEdgeMidpoint :: EdgeId -> PageEdgeSpacePoint2D -> Mapping -> Mapping
-updateNodeMappingEdgeMidpoint nodeMappingEdgeId newMidpoint =
-  _nodeMappingEdges <<< at nodeMappingEdgeId <<< traversed %~ _{ midpoint = newMidpoint }
+updateNodeMappingEdgeMidpoint nodeMappingEdgeId (PageEdgeSpacePoint2D newMidpoint) =
+  _nodeMappingEdges <<< at nodeMappingEdgeId <<< traversed %~ _{ midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius }
 
 updateEdgeMappingEdgeMidpoint :: EdgeId -> PageEdgeSpacePoint2D -> Mapping -> Mapping
-updateEdgeMappingEdgeMidpoint edgeMappingEdgeId newMidpoint =
-  _edgeMappingEdges <<< at edgeMappingEdgeId <<< traversed %~ _{ midpoint = newMidpoint }
+updateEdgeMappingEdgeMidpoint edgeMappingEdgeId (PageEdgeSpacePoint2D newMidpoint) =
+  _edgeMappingEdges <<< at edgeMappingEdgeId <<< traversed %~ _{ midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius }
 
 
 ------

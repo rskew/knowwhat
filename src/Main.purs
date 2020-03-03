@@ -97,7 +97,7 @@ wsConsumer query = CR.consumer \msg -> do
 
 -- A consumer coroutine that takes output messages from our component IO
 -- and sends them using the websocket
-wsSender :: forall query. WS.WebSocket -> CR.Consumer Message Aff Unit
+wsSender :: WS.WebSocket -> CR.Consumer Message Aff Unit
 wsSender socket = CR.consumer \msg -> do
   case msg of
     SendOperation message -> do
