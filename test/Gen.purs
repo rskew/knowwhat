@@ -2,7 +2,6 @@ module Gen where
 
 import Prelude
 
-import AppState (MegagraphState)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array (length, replicate, zipWith)
 import Data.Array as Array
@@ -11,13 +10,13 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
-import Data.NonEmpty (NonEmpty(..))
+import Data.NonEmpty (NonEmpty(..), (:|))
 import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
 import Effect.Unsafe (unsafePerformEffect)
 import Interpreter (interpretGraphOperation)
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, Mapping, MappingId, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), emptyGraph, emptyMapping, freshEdge, freshNode, freshPane)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, Mapping, MappingId, Megagraph, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), emptyGraph, emptyMapping, freshEdge, freshNode, freshPane)
 import MegagraphOperation (EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..))
 import Record (merge)
 import Test.QuickCheck (class Arbitrary, arbitrary)
@@ -70,7 +69,7 @@ edgesGen graph =
 
 chooseEdge :: Graph -> Maybe (Gen Edge)
 chooseEdge graph =
-  elements <$> nonEmptyValues graph.edges.idMap
+  elements <$> nonEmptyValues graph.edges
 
 chooseEdges :: Graph -> Gen (Array Edge)
 chooseEdges graph = fromMaybe (pure []) $ arrayOf <$> chooseEdge graph
@@ -103,12 +102,12 @@ graphGen = do
     nodes = Array.cons node nodes'
     nonEmptyNodes = Array.cons node nodes'
 
-  let graph = interpretGraphOperation (InsertNodes nodes) (emptyGraph graphId)
+  let graph = interpretGraphOperation (UpdateNodes (_{deleted = true} <$> nodes) nodes) (emptyGraph graphId)
 
   -- generate a bunch of edges between the nodes
   edges <- arrayOf $ edgeGen $ NonEmpty node nonEmptyNodes
 
-  let graph' = interpretGraphOperation (InsertEdges edges) graph
+  let graph' = interpretGraphOperation (UpdateEdges (_{deleted = true} <$> edges) edges) graph
 
   pure $ TestGraph graph'
 
@@ -127,6 +126,7 @@ nodeMappingEdgeGen mappingId sourceNodes targetNodes = do
          , targetNode  : targetNode.id
          , midpointAngle : midpoint.angle
          , midpointRadius : midpoint.radius
+         , deleted : false
          }
 
 chooseNodeMappingEdge :: Mapping -> Maybe (Gen NodeMappingEdge)
@@ -158,6 +158,7 @@ edgeMappingEdgeGen mappingId sourceEdges targetEdges = do
          , targetEdge  : targetEdge.id
          , midpointAngle : midpoint.angle
          , midpointRadius : midpoint.radius
+         , deleted : false
          }
 
 chooseEdgeMappingEdge :: Mapping -> Maybe (Gen EdgeMappingEdge)
@@ -183,14 +184,14 @@ mappingGen graphs =
   in do
     sourceGraph <- elements graphs
     targetGraph <- elements graphs
-    edgeMappingEdges <- mappingEdgesGen edgeMappingEdgeGen mappingId sourceGraph.edges.idMap targetGraph.edges.idMap
+    edgeMappingEdges <- mappingEdgesGen edgeMappingEdgeGen mappingId sourceGraph.edges targetGraph.edges
     nodeMappingEdges <- mappingEdgesGen nodeMappingEdgeGen mappingId sourceGraph.nodes targetGraph.nodes
     pure $ (emptyMapping mappingId sourceGraph.id targetGraph.id)
            { nodeMappingEdges = nodeMappingEdges
            , edgeMappingEdges = edgeMappingEdges
            }
 
-megagraphGen :: Gen MegagraphState
+megagraphGen :: Gen Megagraph
 megagraphGen = do
   testGraph <- graphGen
   testGraphs <- arrayOf graphGen
@@ -199,55 +200,34 @@ megagraphGen = do
     nonEmptyGraphs = NonEmpty (unwrap testGraph) (unwrap <$> testGraphs)
   mappings <- arrayOf $ mappingGen nonEmptyGraphs
   let rect = { width : 0.0, left : 0.0, right : 0.0, height : 0.0, top : 0.0, bottom : 0.0 }
-  pure $ { graphs : graphs
-                    <#> (\graph' -> Tuple graph'.id { graph : graph', view : freshPane graph'.id rect, history : [], undone : [] })
-                    # Map.fromFoldable
-         , mappings : mappings
-                      <#> (\mapping' -> Tuple mapping'.id { mapping : mapping', history : [], undone : [] })
-                      # Map.fromFoldable
+  pure $ { graphs: graphs
+                   <#> (\graph -> Tuple graph.id graph)
+                   # Map.fromFoldable
+         , panes: graphs
+                  <#> (\graph -> Tuple graph.id (freshPane graph.id rect))
+                  # Map.fromFoldable
+         , mappings: mappings
+                     <#> (\mapping -> Tuple mapping.id mapping)
+                     # Map.fromFoldable
          }
 
 alwaysValidGraphOperationGen :: Graph -> Gen GraphOperation
 alwaysValidGraphOperationGen graph = do
   oneOf $ NonEmpty
     ( do
-        nodes <- nodesGen graph.id
-        pure $ InsertNodes nodes )
-
-    [ do
          nodes <- chooseNodes graph
          nodeUpdates <- nodeUpdatesGen graph nodes
-         pure $ UpdateNodes nodes nodeUpdates
-
-    , do
-         nodes <- chooseNodes graph
-         pure $ DeleteNodes nodes
-
-    , do
-         edges <- chooseEdges graph
-         pure $ DeleteEdges edges
-
-    , do
+         pure $ UpdateNodes nodes nodeUpdates)
+    [ do
          newTitleText <- arbitrary :: Gen String
          pure $ UpdateTitle graph.title.text newTitleText
-
-    , do
-         newTitleIsValid <- arbitrary :: Gen Boolean
-         pure $ SetTitleValidity graph.title.isValid newTitleIsValid
     ]
 
 graphOperationGen :: Graph -> Gen (Maybe GraphOperation)
 graphOperationGen graph = do
   oneOf $ NonEmpty
     ( Just <$> alwaysValidGraphOperationGen graph )
-
-    [ sequence do
-        genEdges <- edgesGen graph
-        pure do
-          edges <- genEdges
-          pure $ InsertEdges edges
-
-    , do
+    [ do
          edges <- chooseEdges graph
          edgeUpdates <- edgeUpdatesGen graph edges
          pure $ Just $ UpdateEdges edges edgeUpdates
@@ -274,7 +254,6 @@ equationOperationGen graph =
     ( do
         pathEquations <- arrayOf $ pathEquationGen graph
         pure $ Just $ InsertPathEquations pathEquations )
-
     [ sequence do
         genPathEquation <- choosePathEquation graph
         pure do
@@ -284,53 +263,42 @@ equationOperationGen graph =
 mappingOperationGen :: Mapping -> Graph -> Graph -> Gen (Maybe MappingOperation)
 mappingOperationGen mapping sourceGraph targetGraph =
   oneOf $ NonEmpty
-    ( sequence do
-         sourceNodes <- nonEmptyValues sourceGraph.nodes
-         targetNodes <- nonEmptyValues targetGraph.nodes
-         pure do
-           nodeMappingEdges <- arrayOf $ nodeMappingEdgeGen mapping.id sourceNodes targetNodes
-           pure $ InsertNodeMappingEdges nodeMappingEdges)
-
-
-    [ do
+    ( do
          nodeMappingEdges <- chooseNodeMappingEdges mapping
          edgeUpdates <- nodeMappingEdgeUpdatesGen nodeMappingEdges
-         pure $ Just $ UpdateNodeMappingEdges nodeMappingEdges edgeUpdates
-
-    , do
-         nodeMappingEdges <- chooseNodeMappingEdges mapping
-         pure $ Just $ DeleteNodeMappingEdges nodeMappingEdges
-
-    , sequence do
-         sourceEdges <- nonEmptyValues sourceGraph.edges.idMap
-         targetEdges <- nonEmptyValues targetGraph.edges.idMap
-         pure do
-           edgeMappingEdges <- arrayOf $ edgeMappingEdgeGen mapping.id sourceEdges targetEdges
-           pure $ InsertEdgeMappingEdges edgeMappingEdges
-
-    , do
+         pure $ Just $ UpdateNodeMappingEdges nodeMappingEdges edgeUpdates)
+    [ do
          edgeMappingEdges <- chooseEdgeMappingEdges mapping
          edgeUpdates <- edgeMappingEdgeUpdatesGen edgeMappingEdges
          pure $ Just $ UpdateEdgeMappingEdges edgeMappingEdges edgeUpdates
-
-    , do
-         edgeMappingEdges <- chooseEdgeMappingEdges mapping
-         pure $ Just $ DeleteEdgeMappingEdges edgeMappingEdges
     ]
 
-megagraphOperationGen :: MegagraphState -> Gen (Maybe MegagraphOperation)
+megagraphOperationGen :: Megagraph -> Gen (Maybe MegagraphOperation)
 megagraphOperationGen megagraph =
   let
     mappingOpGen = runMaybeT do
-      mappingState <- MaybeT $ traverse elements (nonEmptyValues megagraph.mappings)
-      let mapping = mappingState.mapping
-      sourceGraph :: Graph <- MaybeT $ pure $ Map.lookup mapping.sourceGraph megagraph.graphs <#> _.graph
-      targetGraph :: Graph <- MaybeT $ pure $ Map.lookup mapping.targetGraph megagraph.graphs <#> _.graph
+      mapping <- MaybeT $ traverse elements (nonEmptyValues megagraph.mappings)
+      sourceGraph :: Graph <- MaybeT $ pure $ Map.lookup mapping.sourceGraph megagraph.graphs
+      targetGraph :: Graph <- MaybeT $ pure $ Map.lookup mapping.targetGraph megagraph.graphs
       mappingOperation <- MaybeT $ mappingOperationGen mapping sourceGraph targetGraph
-      MaybeT $ pure $ Just $ MappingElementOperation mapping.id mappingOperation
+      MaybeT $ pure $ Just $ MappingComponentOperation mapping.id mapping.sourceGraph mapping.targetGraph mappingOperation
+    graphOpGen = runMaybeT do
+      graph <- MaybeT $ traverse elements (nonEmptyValues megagraph.graphs)
+      graphOperation <- MaybeT $ graphOperationGen graph
+      MaybeT $ pure $ Just $ GraphComponentOperation graph.id graphOperation
+    -- TODO equationOperation
   in
-    mappingOpGen
+    oneOf $ mappingOpGen :| [graphOpGen]
 
+data TestGraphWithOp = TestGraphWithOp Graph GraphOperation
+
+instance arbitraryTestGraphWithOp :: Arbitrary TestGraphWithOp where
+  arbitrary = do
+    TestGraph graph <- graphGen
+    maybeOp <- graphOperationGen graph
+    pure $ case maybeOp of
+      Nothing -> TestGraphWithOp graph (UpdateTitle graph.title.text graph.title.text)
+      Just op -> TestGraphWithOp graph op
 
 ------
 -- Utils

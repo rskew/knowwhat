@@ -6,7 +6,7 @@ module HasuraQuery where
 
 import Prelude
 
-import Data.Argonaut.Core (stringify)
+import Data.Argonaut.Core (Json, stringify)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Array as Array
 import Data.Array (length)
@@ -61,17 +61,17 @@ mutationToString (Mutation _ subMutation) =
   String.joinWith " " (NonEmpty.fromNonEmpty Array.cons subMutation) <>
   " }"
 
-renderQuery :: forall schema. GraphQLQuery schema -> String
-renderQuery query =
+renderQuery :: forall schema. String -> GraphQLQuery schema -> String
+renderQuery id query =
   stringify $ encodeJson $ { type : "start"
-                           , id : ""
+                           , id : id
                            , payload : { query : queryToString query }
                            }
 
-renderMutation :: forall schema. GraphQLMutation schema -> String
-renderMutation mutation =
+renderMutation :: forall schema. String -> GraphQLMutation schema -> String
+renderMutation id mutation =
   stringify $ encodeJson $ { type : "start"
-                           , id : ""
+                           , id : id
                            , payload : { query : mutationToString mutation }
                            }
 
@@ -197,3 +197,9 @@ instance consRowListEncodeJSON
         firstField = reflectSymbol (SProxy :: SProxy field)
         firstVal = get (SProxy :: SProxy field) rec
         rest = rowListEncodeJSONImpl (RLProxy :: RLProxy tailL) $ unsafeCoerce rec
+
+type GraphQLWebsocketResponse
+  = { type :: String
+    , id :: String
+    , payload :: Json
+    }

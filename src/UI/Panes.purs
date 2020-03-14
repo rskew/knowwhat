@@ -2,63 +2,63 @@ module UI.Panes where
 
 import Prelude
 
-import AppState (AppState, GraphState, MegagraphElement(..), _focusedPane, _graphState, _graphs, _megagraph, _pane, _windowBoundingRect)
+import AppState (AppState, _focusedPane, _megagraph, _windowBoundingRect)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Lens ((.~), (%~), (?~))
+import Data.Lens.At (at)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
-import Megagraph (GraphId, GraphView, PageSpacePoint2D(..), _boundingRect, _origin, _zoom, emptyGraph, freshPane)
+import Megagraph (GraphId, GraphView, PageSpacePoint2D(..), _boundingRect, _graphs, _origin, _panes, _zoom, emptyGraph, freshPane)
+import MegagraphOperation (MegagraphComponent(..))
 import UI.Constants (paneDividerWidth)
 import Web.HTML.HTMLElement as WHE
 
 
-insertPane :: GraphId -> AppState -> AppState
-insertPane graphId state =
+insertBlankPane :: GraphId -> AppState -> AppState
+insertBlankPane graphId state =
   let
     newPaneWidth = (state.windowBoundingRect.width / (toNumber (1 + (Map.size state.megagraph.graphs))))
                    - paneDividerWidth
-    newPaneRect  = state.windowBoundingRect { width = newPaneWidth
-                                            , left  = state.windowBoundingRect.right - newPaneWidth
-                                            }
+    newPaneRect =
+      state.windowBoundingRect
+        { width = newPaneWidth
+        , left  = state.windowBoundingRect.right - newPaneWidth
+        }
     newPane = freshPane graphId newPaneRect
     squishedOldPanesWidth = state.windowBoundingRect.width - newPaneWidth - paneDividerWidth
   in
     state
+    -- Squish existing panes by shrinking window
     # rescaleWindow (state.windowBoundingRect { width = squishedOldPanesWidth
                                               , right = squishedOldPanesWidth
                                               })
+    -- Reset window to full size leaving a fresh gap
     # _windowBoundingRect .~ state.windowBoundingRect
-    # _megagraph <<< _graphState graphId ?~ { graph: emptyGraph graphId
-                                            , view : newPane
-                                            , history : []
-                                            , undone : []
-                                            }
-    # _focusedPane ?~ GraphElement graphId
+    -- Insert new pane in empty space
+    # _megagraph <<< _graphs <<< at graphId ?~ emptyGraph graphId
+    # _megagraph <<< _panes <<< at graphId ?~ newPane
+    # _focusedPane ?~ GraphComponent graphId
     # arrangePanes
 
 arrangePanes :: AppState -> AppState
 arrangePanes state =
-  state # _megagraph <<< _graphs %~ mapMapWithIndex updatePane
+  state # _megagraph <<< _panes %~ mapMapWithIndex updatePane
     where
       nPanes = toNumber $ Map.size state.megagraph.graphs
       paneWidth = (state.windowBoundingRect.width - paneDividerWidth * (nPanes - 1.0)) / nPanes
-      updatePane :: Int -> GraphState -> GraphState
-      updatePane index graphState =
-          graphState
-          # _pane <<< _boundingRect %~ _{ width = paneWidth
-                                        , left  = (paneWidth + paneDividerWidth) * (toNumber index)
-                                        , right = (paneWidth + paneDividerWidth) * (toNumber index) + paneWidth
-                                        }
+      updatePane :: Int -> GraphView -> GraphView
+      updatePane index =
+        _boundingRect %~ _{ width = paneWidth
+                          , left  = (paneWidth + paneDividerWidth) * (toNumber index)
+                          , right = (paneWidth + paneDividerWidth) * (toNumber index) + paneWidth
+                          }
       mapMapWithIndex f =
         Map.toUnfoldable
-        >>>
-        Array.mapWithIndex (\index (Tuple key val) ->
-          Tuple key (f index val))
-        >>>
-        Map.fromFoldable
+        >>> Array.mapWithIndex (\index (Tuple key val) -> Tuple key (f index val))
+        >>> Map.fromFoldable
 
 rescaleWindow :: WHE.DOMRect -> AppState -> AppState
 rescaleWindow newWindowBoundingRect appState =
@@ -77,7 +77,7 @@ rescaleWindow newWindowBoundingRect appState =
   in
     appState
     # _windowBoundingRect .~ newWindowBoundingRect
-    # _megagraph <<< _graphs %~ map (_pane <<< _boundingRect %~ scaleRect)
+    # _megagraph <<< _panes %~ map (_boundingRect %~ scaleRect)
 
 -- | Zoom in/out holding the focus point invariant in page space and graph space
 -- |

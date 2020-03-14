@@ -1,9 +1,8 @@
 module GraphComponent where
 
-import AppState (AppState, emptyAppState)
+import AppState (AppState, emptyAppState, Action(..), Input, Message, Query)
 import GraphComponent.HandleAction (handleAction, handleQuery)
 import GraphComponent.Render (render)
-import GraphComponent.Types (Action(..), Input, Message, Query)
 
 import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)

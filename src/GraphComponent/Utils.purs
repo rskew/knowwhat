@@ -2,7 +2,6 @@ module GraphComponent.Utils where
 
 import Prelude
 
-import AppOperation (AppOperation(..))
 import AppState (AppState, DrawingEdge)
 import Data.Array as Array
 import Data.Int (toNumber)
@@ -11,7 +10,7 @@ import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
 import Megagraph (GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
-import MegagraphOperation (GraphOperation(..), MegagraphOperation(..))
+import MegagraphOperation (GraphOperation(..), MegagraphOperation(..), MegagraphUpdate)
 import UI.Constants (haloRadius)
 import Web.UIEvent.MouseEvent as ME
 
@@ -37,21 +36,18 @@ drawingEdgeWithinNodeHalo drawingEdgeState pane node =
 
 lookupNodePositionInPane :: AppState -> GraphId -> NodeId -> GraphView -> Maybe GraphSpacePoint2D
 lookupNodePositionInPane state graphId nodeId renderPane = do
-  graphState <- Map.lookup graphId state.megagraph.graphs
-  node <- Map.lookup nodeId graphState.graph.nodes
-  pure $ (nodePosition node) # graphSpaceToPageSpace graphState.view # pageSpaceToGraphSpace renderPane
+  graph <- Map.lookup graphId state.megagraph.graphs
+  view <- Map.lookup graphId state.megagraph.panes
+  node <- Map.lookup nodeId graph.nodes
+  pure $ (nodePosition node) # graphSpaceToPageSpace view # pageSpaceToGraphSpace renderPane
 
--- | Indicated which nodes are updated in an AppOperation. Used to update the
+-- | Indicated which nodes are updated in a MegagraphUpdate. Used to update the
 -- | text fields when a node is updated from a server message.
-updatedNodes :: AppOperation -> Array (Tuple GraphId NodeId)
-updatedNodes (AppOperation {target, op, historyUpdate, undoneUpdate}) =
+updatedNodes :: MegagraphUpdate -> Array (Tuple GraphId NodeId)
+updatedNodes op =
   Array.concatMap graphAndNodeId op
     where
-      graphAndNodeId (GraphElementOperation graphId (InsertNodes nodes)) =
-        (\node -> Tuple graphId node.id) <$> nodes
-      graphAndNodeId (GraphElementOperation graphId (DeleteNodes nodes)) =
-        (\node -> Tuple graphId node.id) <$> nodes
-      graphAndNodeId (GraphElementOperation graphId (UpdateNodes from to)) =
+      graphAndNodeId (GraphComponentOperation graphId (UpdateNodes from to)) =
         (\node -> Tuple graphId node.id) <$> to
       graphAndNodeId _ = []
 

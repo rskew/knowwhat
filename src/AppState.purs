@@ -2,9 +2,11 @@ module AppState where
 
 import Prelude
 
+import ContentEditable.SVGComponent as SVGContentEditable
+import Data.Argonaut.Core (Json)
 import Data.Array as Array
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Lens', Traversal', lens, traversed)
+import Data.Lens (Lens', Traversal', lens, traversed, (%~), (?~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
@@ -17,10 +19,16 @@ import Data.Tuple (Tuple)
 import Data.UUID (UUID)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (Edge, EdgeId, Focus, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, NodeId, PageSpacePoint2D, Point2D, emptyGraph, emptyMapping, freshPane)
-import MegagraphOperation (MegagraphUpdate)
+import Halogen as H
+import Halogen.Component.Utils.Drag as Drag
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, GraphEdgeSpacePoint2D, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, Megagraph, MegagraphElement, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D, PageSpacePoint2D, Point2D, emptyMegagraph)
+import MegagraphOperation (MegagraphComponent(..), MegagraphUpdate)
+import Web.Event.Event as WE
+import Web.File.FileReader as FileReader
 import Web.HTML.HTMLElement as WHE
-
+import Web.UIEvent.KeyboardEvent as KE
+import Web.UIEvent.MouseEvent as ME
+import Web.UIEvent.WheelEvent as WhE
 
 appStateVersion :: String
 appStateVersion = "0.0.0.0.0.0.0.1"
@@ -28,68 +36,144 @@ appStateVersion = "0.0.0.0.0.0.0.1"
 ------
 -- Types
 
+data Action
+  = DoMany (Array Action)
+  | PreventDefault WE.Event
+  | StopPropagation WE.Event
+  | EvalQuery (Query Unit)
+  | Init
+  | LoadGraph GraphId
+  | UpdateContentEditableText GraphId
+  | UpdateNodeContentEditableText GraphId NodeId
+  | BackgroundDragStart GraphId PageSpacePoint2D ME.MouseEvent
+  | BackgroundDragMove Drag.DragEvent GraphId PageSpacePoint2D H.SubscriptionId
+  | NodeDragStart GraphId NodeId GraphSpacePoint2D ME.MouseEvent
+  | NodeDragMove Drag.DragEvent GraphId NodeId GraphSpacePoint2D H.SubscriptionId
+  | EdgeDragStart GraphId EdgeId GraphEdgeSpacePoint2D ME.MouseEvent
+  | EdgeDragMove Drag.DragEvent GraphId EdgeId GraphEdgeSpacePoint2D H.SubscriptionId
+  | NodeMappingEdgeDragStart MappingId NodeMappingEdge ME.MouseEvent
+  | NodeMappingEdgeDragMove Drag.DragEvent Mapping EdgeId PageEdgeSpacePoint2D H.SubscriptionId
+  | EdgeMappingEdgeDragStart MappingId EdgeMappingEdge ME.MouseEvent
+  | EdgeMappingEdgeDragMove Drag.DragEvent Mapping EdgeId PageEdgeSpacePoint2D H.SubscriptionId
+  | EdgeDrawStart GraphView EdgeSourceElement ME.MouseEvent
+  | EdgeDrawMove Drag.DragEvent GraphId DrawingEdgeId H.SubscriptionId
+  | NodeTextInput GraphId NodeId String
+  | EdgeTextInput GraphId EdgeId String
+  | TitleTextInput GraphId String
+  | UpdateTitleValidity GraphId Boolean
+  | AppCreateNode GraphView ME.MouseEvent
+  | AppDeleteNode Node
+  | AppCreateEdge EdgeMetadata
+  | AppDeleteEdge Edge
+  | AppCreateNodeMappingEdge EdgeId NodeId GraphId NodeId GraphId
+  | AppDeleteNodeMappingEdge MappingId EdgeId
+  | AppCreateEdgeMappingEdge EdgeId EdgeId GraphId EdgeId GraphId
+  | AppDeleteEdgeMappingEdge MappingId EdgeId
+  | UpdateNodeSubgraph GraphId NodeId (Maybe GraphId)
+  | UpdateFocus (Maybe MegagraphElement)
+  | UpdateFocusPane MegagraphComponent
+  | DeleteFocus
+  | Hover HoveredElementId
+  | UnHover HoveredElementId
+  | OnFocusText TextFieldElement (String -> Maybe (Tuple MegagraphUpdate MegagraphComponent))
+  | OnBlurText
+  | BlurFocusedTextField
+  | Zoom GraphId WhE.WheelEvent
+  | CenterGraphOriginAndZoom
+  | Undo MegagraphComponent
+  | Redo MegagraphComponent
+  | RemovePane GraphId
+  | FetchLocalFile WE.Event
+  | LoadLocalFile FileReader.FileReader H.SubscriptionId WE.Event
+  | SaveLocalFile
+  | Keypress KE.KeyboardEvent
+  | Keyup KE.KeyboardEvent
+  | DoNothing
+
+data TextFieldElement
+  = NodeTextField GraphId NodeId
+  | EdgeTextField GraphId EdgeId
+  | TitleTextField GraphId
+
+derive instance eqTextFieldElement :: Eq TextFieldElement
+
+type Input = Shape
+
+data Query a
+  = UpdateBoundingRect a
+  | ReceiveOperation String Json a
+  | QLoadGraph GraphId a
+
+data Message
+  = SendOperation String
+
+-- Slot type for parent components using a child GraphComponent
+type Slot = H.Slot Query Message
+
+type Slots =
+  ( nodeTextField  :: SVGContentEditable.Slot NodeId
+  , edgeTextField  :: SVGContentEditable.Slot EdgeId
+  , titleTextField :: SVGContentEditable.Slot GraphId
+  )
+
+_nodeTextField :: SProxy "nodeTextField"
+_nodeTextField = SProxy
+
+_edgeTextField :: SProxy "edgeTextField"
+_edgeTextField = SProxy
+
+_titleTextField :: SProxy "titleTextField"
+_titleTextField = SProxy
+
 type KeyHoldState
   = { spaceDown   :: Boolean
     , controlDown :: Boolean
     }
 
-type GraphState
-  = { graph :: Graph
-    , view :: GraphView
-    , history :: Array MegagraphUpdate
-    , undone :: Array MegagraphUpdate
-    }
-
-emptyGraphState :: GraphId -> WHE.DOMRect -> GraphState
-emptyGraphState graphId rect
-  = { graph : emptyGraph graphId
-    , view : freshPane graphId rect
-    , history : []
-    , undone : []
-    }
-
-type MappingState
-  = { mapping :: Mapping
-    , history :: Array MegagraphUpdate
+type ComponentHistory
+  = { history :: Array MegagraphUpdate
     , undone  :: Array MegagraphUpdate
     }
 
-emptyMappingState :: MappingId -> GraphId -> GraphId -> MappingState
-emptyMappingState mappingId from to = { mapping : emptyMapping mappingId from to
-                                      , history : []
-                                      , undone : []
-                                      }
-
--- | A selection of graphs and mappings from the larger megagraph.
--- | A megagraph is a collection of graphs and mappings between graphs
--- | where each node has a subgraph and each edge has a submapping.
--- | A mapping is a set of mappingEdges from nodes to nodes and edges to edges.
--- | The UI represents a sub-megagraph, where there is only a single mapping
--- | between any pairs of graphs. This is a view on a larger megagraph.
-type MegagraphState
-  = { graphs :: Map GraphId GraphState
-    , mappings :: Map MappingId MappingState
+freshComponentHistory :: ComponentHistory
+freshComponentHistory
+  = { history: []
+    , undone: []
     }
 
-emptyMegagraph :: MegagraphState
-emptyMegagraph = { graphs : Map.empty
-                 , mappings : Map.empty
-                 }
+type History
+  = { graphHistory   :: Map GraphId ComponentHistory
+    , mappingHistory :: Map MappingId ComponentHistory
+    }
+
+emptyHistory :: History
+emptyHistory = { graphHistory: Map.empty, mappingHistory: Map.empty}
 
 type AppState
-  = { megagraph          :: MegagraphState
+  = { megagraph          :: Megagraph
+    , megagraphHistory   :: History
     , windowBoundingRect :: WHE.DOMRect
     , drawingEdges       :: Map DrawingEdgeId DrawingEdge
     , hoveredElements    :: Set HoveredElementId
-    , focus              :: Maybe Focus
-    , focusedPane        :: Maybe MegagraphElement
-    , textFocused        :: Maybe (String -> Maybe (Tuple MegagraphUpdate MegagraphElement))
+    , focus              :: Maybe MegagraphElement
+    , focusedPane        :: Maybe MegagraphComponent
+    , textFocused        :: Maybe { historyUpdater :: (String -> Maybe (Tuple MegagraphUpdate MegagraphComponent))
+                                  , textFieldElement :: TextFieldElement
+                                  }
     , keyHoldState       :: KeyHoldState
+    -- Each active conversation is kept track of via an id, with the handler
+    -- for the next incoming message indexed by the id.
+    , callbacks          :: Map String (Json -> Maybe Action)
+    -- The elements pending a server query are kept track of in a Map,
+    -- with the element id as the key and the callbackId / conversation id
+    -- as the value.
+    , pending            :: Map UUID String
     }
 
 emptyAppState :: WHE.DOMRect -> AppState
 emptyAppState rect
   = { megagraph          : emptyMegagraph
+    , megagraphHistory   : emptyHistory
     , windowBoundingRect : rect
     , drawingEdges       : Map.empty
     , hoveredElements    : Set.empty
@@ -97,7 +181,67 @@ emptyAppState rect
     , focusedPane        : Nothing
     , textFocused        : Nothing
     , keyHoldState       : { spaceDown : false, controlDown : false }
+    , callbacks          : Map.empty
+    , pending            : Map.empty
     }
+
+data HistoryUpdate
+  = Insert MegagraphUpdate
+  | Pop
+  | Replace (Array MegagraphUpdate)
+  | NoOp
+
+derive instance genericHistoryUpdate :: Generic HistoryUpdate _
+instance decodeHistoryUpdate :: Decode HistoryUpdate where
+  decode = genericDecode defaultOptions
+instance encodeHistoryUpdate :: Encode HistoryUpdate where
+  encode = genericEncode defaultOptions
+
+instance showHistoryUpdate :: Show HistoryUpdate where
+  show = case _ of
+    Insert op -> "Insert " <> show op
+    Pop -> "Pop"
+    Replace megagraphUpdate -> "Replace " <> show megagraphUpdate
+    NoOp -> "NoOp"
+
+updateHistoryArray :: HistoryUpdate -> Array MegagraphUpdate -> Array MegagraphUpdate
+updateHistoryArray = case _ of
+  Insert op -> Array.cons op
+  Pop -> Array.drop 1
+  Replace newHistory -> const newHistory
+  NoOp -> identity
+
+updateHistory :: HistoryUpdate -> MegagraphComponent -> AppState -> AppState
+updateHistory historyUpdate target state =
+  let
+    updateComponentHistory target' = case target' of
+      GraphComponent graphId ->
+        (case Map.lookup graphId state.megagraphHistory.graphHistory of
+          Nothing -> _graphHistory <<< at graphId ?~ freshComponentHistory
+          Just graphHistory -> identity)
+        >>>
+        (_graphHistory <<< at graphId <<< traversed <<< _history %~ updateHistoryArray historyUpdate)
+      MappingComponent mappingId from to ->
+        (case Map.lookup mappingId state.megagraphHistory.mappingHistory of
+            Nothing -> _mappingHistory <<< at mappingId ?~ freshComponentHistory
+            Just mappingHistory -> identity)
+        >>>
+        (_mappingHistory <<< at mappingId <<< traversed <<< _history %~ updateHistoryArray historyUpdate)
+  in
+    state
+    # _megagraphHistory %~ updateComponentHistory target
+
+updateUndone :: HistoryUpdate -> MegagraphComponent -> AppState -> AppState
+updateUndone undoneUpdate target state =
+  let
+    updateComponentHistory target' = case target' of
+      GraphComponent graphId ->
+        _graphHistory <<< at graphId <<< traversed <<< _undone %~ updateHistoryArray undoneUpdate
+      MappingComponent mappingId from to ->
+        _mappingHistory <<< at mappingId <<< traversed <<< _undone %~ updateHistoryArray undoneUpdate
+  in
+    state
+    # _megagraphHistory %~ updateComponentHistory target
 
 type Shape
   = { width :: Number
@@ -128,31 +272,11 @@ type DrawingEdge
 
 type DrawingEdgeId = UUID
 
-data MegagraphElement
-  = GraphElement GraphId
-  | MappingElement MappingId GraphId GraphId
-
-derive instance eqMegagraphElement :: Eq MegagraphElement
-
-derive instance ordMegagraphElement :: Ord MegagraphElement
-
-derive instance genericMegagraphElement :: Generic MegagraphElement _
-instance decodeMegagraphElement :: Decode MegagraphElement where
-  decode = genericDecode defaultOptions
-instance encodeMegagraphElement :: Encode MegagraphElement where
-  encode = genericEncode defaultOptions
-
-instance showMegagraphElement :: Show MegagraphElement where
-  show = case _ of
-    GraphElement graphId -> "GraphElement " <> show graphId
-    MappingElement mappingId source target ->
-      "MappingElement " <> show mappingId <> " from: " <> show source <> " to: " <> show target
-
 data HoveredElementId
-  = NodeHaloId   GraphId          NodeId
-  | NodeBorderId GraphId          NodeId
-  | EdgeHaloId   MegagraphElement EdgeId
-  | EdgeBorderId MegagraphElement EdgeId
+  = NodeHaloId   GraphId            NodeId
+  | NodeBorderId GraphId            NodeId
+  | EdgeHaloId   MegagraphComponent EdgeId
+  | EdgeBorderId MegagraphComponent EdgeId
 
 derive instance eqHoveredElementId :: Eq HoveredElementId
 
@@ -180,42 +304,8 @@ _drawingEdgeTargetGraph :: DrawingEdgeId -> Traversal' AppState GraphId
 _drawingEdgeTargetGraph drawingEdgeId =
   _drawingEdges <<< at drawingEdgeId <<< traversed <<< prop (SProxy :: SProxy "targetGraph")
 
-_megagraph :: Lens' AppState MegagraphState
+_megagraph :: Lens' AppState Megagraph
 _megagraph = prop (SProxy :: SProxy "megagraph")
-
-_graphs :: Lens' MegagraphState (Map GraphId GraphState)
-_graphs = prop (SProxy :: SProxy "graphs")
-
-_graphState :: GraphId -> Lens' MegagraphState (Maybe GraphState)
-_graphState graphId =
-  prop (SProxy :: SProxy "graphs")
-  <<< at graphId
-
-_mappings :: Lens' MegagraphState (Map MappingId MappingState)
-_mappings = prop (SProxy :: SProxy "mappings")
-
-_mappingState :: MappingId -> Lens' MegagraphState (Maybe MappingState)
-_mappingState mappingId =
-  prop (SProxy :: SProxy "mappings")
-  <<< at mappingId
-
-_mapping :: Lens' MappingState Mapping
-_mapping = prop (SProxy :: SProxy "mapping")
-
-_mappingAtId :: MappingId -> Traversal' AppState Mapping
-_mappingAtId mappingId = _megagraph <<< _mappingState mappingId <<< traversed <<< _mapping
-
-_graph :: Lens' GraphState Graph
-_graph = prop (SProxy :: SProxy "graph")
-
-_graphAtId :: GraphId -> Traversal' AppState Graph
-_graphAtId graphId = _megagraph <<< _graphState graphId <<< traversed <<< _graph
-
-_pane :: Lens' GraphState GraphView
-_pane = prop (SProxy :: SProxy "view")
-
-_paneAtId :: GraphId -> Traversal' AppState GraphView
-_paneAtId graphId = _megagraph <<< _graphState graphId <<< traversed <<< _pane
 
 _windowBoundingRect :: Lens' AppState WHE.DOMRect
 _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")
@@ -223,13 +313,22 @@ _windowBoundingRect = prop (SProxy :: SProxy "windowBoundingRect")
 _coerceToGraphSpace :: Lens' Point2D GraphSpacePoint2D
 _coerceToGraphSpace = lens GraphSpacePoint2D (\_ (GraphSpacePoint2D pos) -> pos)
 
---_history :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
---_history = prop (SProxy :: SProxy "history")
---
---_undone :: Lens' AppState (Map GraphId (Array (AppOperation Unit)))
---_undone = prop (SProxy :: SProxy "undone")
+_megagraphHistory :: Lens' AppState History
+_megagraphHistory = prop (SProxy :: SProxy "megagraphHistory")
 
-_focusedPane :: Lens' AppState (Maybe MegagraphElement)
+_graphHistory :: Lens' History (Map GraphId ComponentHistory)
+_graphHistory = prop (SProxy :: SProxy "graphHistory")
+
+_mappingHistory :: Lens' History (Map MappingId ComponentHistory)
+_mappingHistory = prop (SProxy :: SProxy "graphHistory")
+
+_history :: Lens' ComponentHistory (Array MegagraphUpdate)
+_history = prop (SProxy :: SProxy "history")
+
+_undone :: Lens' ComponentHistory (Array MegagraphUpdate)
+_undone = prop (SProxy :: SProxy "undone")
+
+_focusedPane :: Lens' AppState (Maybe MegagraphComponent)
 _focusedPane = prop (SProxy :: SProxy "focusedPane")
 
 _hoveredElements :: Lens' AppState (Set HoveredElementId)
@@ -244,6 +343,11 @@ _spaceDown = prop (SProxy :: SProxy "spaceDown")
 _controlDown :: Lens' KeyHoldState Boolean
 _controlDown = prop (SProxy :: SProxy "controlDown")
 
+_callbacks :: Lens' AppState (Map String (Json -> Maybe Action))
+_callbacks = prop (SProxy :: SProxy "callbacks")
+
+_pending :: Lens' AppState (Map UUID String)
+_pending = prop (SProxy :: SProxy "pending")
 
 ------
 -- Utils
@@ -254,7 +358,6 @@ lookupMapping :: GraphId -> GraphId -> AppState -> Maybe Mapping
 lookupMapping sourceGraphId targetGraphId state =
   state.megagraph.mappings
   # Map.values >>> Array.fromFoldable
-  <#> _.mapping
   # Array.filter (\mapping -> mapping.sourceGraph == sourceGraphId
                            && mapping.targetGraph == targetGraphId)
   # Array.head

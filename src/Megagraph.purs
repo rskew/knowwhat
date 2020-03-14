@@ -13,7 +13,6 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', Traversal', lens, traversed, (%~), (.~), (?~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
@@ -240,17 +239,17 @@ freshNode graphId id
     , deleted   : false
     }
 
-data Focus
-  = FocusNode GraphId NodeId
-  | FocusEdge GraphId EdgeId
-  | FocusNodeMappingEdge MappingId EdgeId
-  | FocusEdgeMappingEdge MappingId EdgeId
+data MegagraphElement
+  = NodeElement GraphId NodeId
+  | EdgeElement GraphId EdgeId
+  | NodeMappingEdgeElement MappingId EdgeId
+  | EdgeMappingEdgeElement MappingId EdgeId
 
-derive instance eqFocus :: Eq Focus
-derive instance ordFocus :: Ord Focus
-derive instance genericFocus :: Generic Focus _
+derive instance eqMegagraphElement :: Eq MegagraphElement
+derive instance ordMegagraphElement :: Ord MegagraphElement
+derive instance genericMegagraphElement :: Generic MegagraphElement _
 
-instance showFocus :: Show Focus where
+instance showMegagraphElement :: Show MegagraphElement where
   show = genericShow
 
 data PathEquation = PathEquation (Array EdgeId) (Array EdgeId)
@@ -278,10 +277,7 @@ type Graph
   = { id :: GraphId
     , title :: GraphTitle
     , nodes :: Map NodeId Node
-    , edges :: { sourceTarget :: Map NodeId (Map NodeId (Map EdgeId Edge))
-               , targetSource :: Map NodeId (Map NodeId (Map EdgeId Edge))
-               , idMap :: Map EdgeId Edge
-               }
+    , edges ::  Map EdgeId Edge
     , pathEquations :: Set PathEquation
     }
 
@@ -292,10 +288,7 @@ emptyGraph id
               , isValid : true
               }
     , nodes : Map.empty
-    , edges : { sourceTarget : Map.empty
-              , targetSource : Map.empty
-              , idMap : Map.empty
-              }
+    , edges : Map.empty
     , pathEquations : Set.empty
     }
 
@@ -304,26 +297,50 @@ type MappingId = UUID
 
 -- | For mapping edges, the midpoint is interpreted in page-space coords,
 -- | rather than graph-space coords like the normal edges.
-type NodeMappingEdge
-  = { id             :: EdgeId
+type NodeMappingEdgeRow
+  = ( id             :: EdgeId
     , mappingId      :: MappingId
     , sourceNode     :: NodeId
     , targetNode     :: NodeId
     , midpointAngle  :: Number
     , midpointRadius :: Number
     , deleted        :: Boolean
+    )
+type NodeMappingEdge = Record NodeMappingEdgeRow
+
+freshNodeMappingEdge :: EdgeId -> MappingId -> NodeId -> NodeId -> NodeMappingEdge
+freshNodeMappingEdge edgeId mappingId sourceNodeId targetNodeId
+  = { id             : edgeId
+    , mappingId      : mappingId
+    , sourceNode     : sourceNodeId
+    , targetNode     : targetNodeId
+    , midpointAngle  : 0.0
+    , midpointRadius : 0.0
+    , deleted        : false
     }
 
 -- | For mapping edges, the midpoint is interpreted in page-space coords,
 -- | rather than graph-space coords like the normal edges.
-type EdgeMappingEdge
-  = { id             :: EdgeId
+type EdgeMappingEdgeRow
+  = ( id             :: EdgeId
     , mappingId      :: MappingId
     , sourceEdge     :: EdgeId
     , targetEdge     :: EdgeId
     , midpointAngle  :: Number
     , midpointRadius :: Number
     , deleted        :: Boolean
+    )
+type EdgeMappingEdge = Record EdgeMappingEdgeRow
+
+freshEdgeMappingEdge :: EdgeId -> MappingId -> EdgeId -> EdgeId -> EdgeMappingEdge
+freshEdgeMappingEdge edgeId mappingId sourceEdgeId targetEdgeId
+  = { id             : edgeId
+    , mappingId      : mappingId
+    , sourceEdge     : sourceEdgeId
+    , targetEdge     : targetEdgeId
+    , midpointAngle  : 0.0
+    , midpointRadius : 0.0
+    , deleted        : false
     }
 
 -- | all ((==) mapping.sourceGraph) (mapping.nodeMappingEdges <#> _.sourceNode.graphId)
@@ -332,7 +349,7 @@ type EdgeMappingEdge
 -- | all ((==) mapping.targetGraph) (mapping.edgeMappingEdges <#> _.targetEdge.graphId)
 type Mapping
   = { id :: MappingId
-    , name :: String
+    , title :: String
     , sourceGraph :: GraphId
     , targetGraph :: GraphId
     , nodeMappingEdges :: Map EdgeId NodeMappingEdge
@@ -342,7 +359,7 @@ type Mapping
 emptyMapping :: MappingId -> GraphId -> GraphId -> Mapping
 emptyMapping id sourceId targetId
   = { id : id
-    , name : ""
+    , title : UUID.toString id
     , sourceGraph : sourceId
     , targetGraph : targetId
     , nodeMappingEdges : Map.empty
@@ -353,7 +370,7 @@ type GraphView
   = { graphId      :: GraphId
     , origin       :: PageSpacePoint2D
     , zoom         :: Number
-    , focus        :: Maybe Focus
+    , focus        :: Maybe MegagraphElement
     , boundingRect :: WHE.DOMRect
     }
 
@@ -366,30 +383,46 @@ freshPane graphId rect
     , boundingRect : rect
     }
 
+-- | A megagraph is a collection of graphs and mappings between graphs
+-- | where each node has a subgraph and each edge has a submapping.
+-- | A mapping is a set of edges between graphs, from nodes to nodes and edges to edges.
+-- | The UI represents a sub-megagraph, where there is only a single mapping
+-- | between any pairs of graphs. This is a view on a larger megagraph.
+type Megagraph
+  = { graphs :: Map GraphId Graph
+    , panes :: Map GraphId GraphView
+    , mappings :: Map MappingId Mapping
+    }
+
+emptyMegagraph :: Megagraph
+emptyMegagraph = { graphs : Map.empty
+                 , panes : Map.empty
+                 , mappings : Map.empty
+                 }
 
 ------
 -- Lenses
 
-_title :: Lens' Graph GraphTitle
+_title :: forall r t. Lens' {title :: t | r} t
 _title = prop (SProxy :: SProxy "title")
 
-_text :: Lens' GraphTitle String
+_isValid :: Lens' GraphTitle Boolean
+_isValid = prop (SProxy :: SProxy "isValid")
+
+_text :: forall r. Lens' {text :: String | r} String
 _text = prop (SProxy :: SProxy "text")
 
 _nodes :: Lens' Graph (Map NodeId Node)
 _nodes = prop (SProxy :: SProxy "nodes")
 
-_sourceTarget :: Lens' Graph (Map NodeId (Map NodeId (Map EdgeId Edge)))
-_sourceTarget = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "sourceTarget")
+_node :: NodeId -> Traversal' Graph Node
+_node nodeId = _nodes <<< at nodeId <<< traversed
 
-_targetSource :: Lens' Graph (Map NodeId (Map NodeId (Map EdgeId Edge)))
-_targetSource = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "targetSource")
+_edges :: Lens' Graph (Map EdgeId Edge)
+_edges = prop (SProxy :: SProxy "edges")
 
-_idMap :: Lens' Graph (Map EdgeId Edge)
-_idMap = prop (SProxy :: SProxy "edges") <<< prop (SProxy :: SProxy "idMap")
-
-_edge :: EdgeId -> Lens' Graph (Maybe Edge)
-_edge edgeId = _idMap <<< at edgeId
+_edge :: EdgeId -> Traversal' Graph Edge
+_edge edgeId = _edges <<< at edgeId <<< traversed
 
 _position :: Lens' Node GraphSpacePoint2D
 _position = lens nodePosition updateNodePosition
@@ -403,12 +436,23 @@ _nodeSubgraph nodeId = _nodes <<< at nodeId <<< traversed <<< prop (SProxy :: SP
 _pathEquations :: Lens' Graph (Set PathEquation)
 _pathEquations = prop (SProxy :: SProxy "pathEquations")
 
--- These go to state
---_panes :: Lens' GraphData (Map GraphId GraphView)
---_panes = prop (SProxy :: SProxy "panes")
---
---_pane :: GraphId -> Traversal' GraphData GraphView
---_pane graphId = _panes <<< at graphId <<< traversed
+_graphs :: Lens' Megagraph (Map GraphId Graph)
+_graphs = prop (SProxy :: SProxy "graphs")
+
+_graph :: GraphId -> Traversal' Megagraph Graph
+_graph graphId = _graphs <<< at graphId <<< traversed
+
+_mappings :: Lens' Megagraph (Map MappingId Mapping)
+_mappings = prop (SProxy :: SProxy "mappings")
+
+_mapping :: MappingId -> Traversal' Megagraph Mapping
+_mapping mappingId = _mappings <<< at mappingId <<< traversed
+
+_panes :: Lens' Megagraph (Map GraphId GraphView)
+_panes = prop (SProxy :: SProxy "panes")
+
+_pane :: GraphId -> Traversal' Megagraph GraphView
+_pane graphId = _panes <<< at graphId <<< traversed
 
 _zoom :: Lens' GraphView Number
 _zoom = prop (SProxy :: SProxy "zoom")
@@ -416,7 +460,7 @@ _zoom = prop (SProxy :: SProxy "zoom")
 _origin :: Lens' GraphView PageSpacePoint2D
 _origin = prop (SProxy :: SProxy "origin")
 
-_focus :: Lens' GraphView (Maybe Focus)
+_focus :: Lens' GraphView (Maybe MegagraphElement)
 _focus = prop (SProxy :: SProxy "focus")
 
 _boundingRect :: Lens' GraphView WHE.DOMRect
@@ -428,8 +472,14 @@ _height = prop (SProxy :: SProxy "height")
 _nodeMappingEdges :: Lens' Mapping (Map EdgeId NodeMappingEdge)
 _nodeMappingEdges = prop (SProxy :: SProxy "nodeMappingEdges")
 
+_nodeMappingEdge :: EdgeId -> Traversal' Mapping NodeMappingEdge
+_nodeMappingEdge edgeId = _nodeMappingEdges <<< at edgeId <<< traversed
+
 _edgeMappingEdges :: Lens' Mapping (Map EdgeId EdgeMappingEdge)
 _edgeMappingEdges = prop (SProxy :: SProxy "edgeMappingEdges")
+
+_edgeMappingEdge :: EdgeId -> Traversal' Mapping EdgeMappingEdge
+_edgeMappingEdge edgeId = _edgeMappingEdges <<< at edgeId <<< traversed
 
 _source :: Lens' Edge NodeId
 _source = prop (SProxy :: SProxy "source")
@@ -457,32 +507,7 @@ deleteNode nodeId graph =
   graph { nodes = Map.delete nodeId graph.nodes }
 
 insertEdge :: Edge -> Graph -> Graph
-insertEdge edge graph =
-  let
-    createSubmapsIfNotExists keyA keyB keyC value map = case Map.lookup keyA map of
-      Nothing -> map # at keyA ?~ Map.singleton keyB (Map.singleton keyC value)
-      Just subMap -> case Map.lookup keyB subMap of
-        Nothing -> map # at keyA <<< traversed <<< at keyB ?~ Map.singleton keyC value
-        Just subSubMap -> map # at keyA <<< traversed <<< at keyB <<< traversed <<< at keyC ?~ value
-    edgesSourceTarget = createSubmapsIfNotExists
-                          edge.source
-                          edge.target
-                          edge.id
-                          edge
-                          graph.edges.sourceTarget
-    edgesTargetSource = createSubmapsIfNotExists
-                          edge.target
-                          edge.source
-                          edge.id
-                          edge
-                          graph.edges.targetSource
-    idMap = graph.edges.idMap # Map.insert edge.id edge
-  in
-    graph { edges = { sourceTarget : edgesSourceTarget
-                    , targetSource : edgesTargetSource
-                    , idMap : idMap
-                    }
-          }
+insertEdge edge = _edges <<< at edge.id ?~ edge
 
 batchInsertEdges :: Array Edge -> Graph -> Graph
 batchInsertEdges edges graph = foldr updateEdge graph edges
@@ -497,21 +522,13 @@ updateEdgeData :: (Edge -> Edge) -> EdgeId -> Graph -> Graph
 updateEdgeData updater edgeId graph =
   case lookupEdgeById edgeId graph of
     Nothing -> graph
-    Just edge ->
-      graph
-      # (_sourceTarget <<< at edge.source <<< traversed <<< at edge.target <<< traversed <<< at edge.id <<< traversed %~ updater)
-      # (_targetSource <<< at edge.target <<< traversed <<< at edge.source <<< traversed <<< at edge.id <<< traversed %~ updater)
-      # (_idMap <<< at edge.id <<< traversed %~ updater)
+    Just edge -> graph # _edge edge.id %~ updater
 
 deleteEdge :: EdgeId -> Graph -> Graph
 deleteEdge edgeId graph =
   case lookupEdgeById edgeId graph of
     Nothing -> graph
-    Just edge ->
-      graph
-      # (_sourceTarget <<< at edge.source <<< traversed <<< at edge.target <<< traversed <<< at edge.id .~ Nothing)
-      # (_targetSource <<< at edge.target <<< traversed <<< at edge.source <<< traversed <<< at edge.id .~ Nothing)
-      # (_idMap <<< at edge.id .~ Nothing)
+    Just edge -> graph # _edges <<< at edge.id .~ Nothing
 
 nodePosition :: Node -> GraphSpacePoint2D
 nodePosition node = GraphSpacePoint2D { x : node.positionX, y : node.positionY }
@@ -540,10 +557,6 @@ updateEdgeMidpoint edgeId (GraphEdgeSpacePoint2D newMidpoint) =
 updateTitle :: String -> Graph -> Graph
 updateTitle newTitle =
   _title <<< prop (SProxy :: SProxy "text") .~ newTitle
-
-setTitleValidity :: Boolean -> Graph -> Graph
-setTitleValidity newValidity =
-  _title <<< prop (SProxy :: SProxy "isValid") .~ newValidity
 
 connectSubgraph :: NodeId -> Maybe GraphId -> Graph -> Graph
 connectSubgraph nodeId maybeGraphId =
@@ -581,6 +594,10 @@ updateEdgeMappingEdgeMidpoint :: EdgeId -> PageEdgeSpacePoint2D -> Mapping -> Ma
 updateEdgeMappingEdgeMidpoint edgeMappingEdgeId (PageEdgeSpacePoint2D newMidpoint) =
   _edgeMappingEdges <<< at edgeMappingEdgeId <<< traversed %~ _{ midpointAngle = newMidpoint.angle, midpointRadius = newMidpoint.radius }
 
+-- | Not typesafe, don't use with Edge!
+mappingEdgeMidpoint :: forall r. {midpointAngle :: Number, midpointRadius :: Number | r} -> PageEdgeSpacePoint2D
+mappingEdgeMidpoint mappingEdge = PageEdgeSpacePoint2D {angle: mappingEdge.midpointAngle, radius: mappingEdge.midpointRadius}
+
 
 ------
 -- Utilities
@@ -595,28 +612,19 @@ edgeToMetadata edge
 
 allEdgesTouchingNode :: NodeId -> Graph -> { incoming :: Array Edge, outgoing :: Array Edge }
 allEdgesTouchingNode nodeId graph =
-  let
-    outgoingEdges = case Map.lookup nodeId graph.edges.sourceTarget of
-      Nothing -> []
-      Just targetEdgeMap -> Array.fromFoldable $ List.concatMap Map.values $ Map.values targetEdgeMap
-    incomingEdges = case Map.lookup nodeId graph.edges.targetSource of
-      Nothing -> []
-      Just targetEdgeMap -> Array.fromFoldable $ List.concatMap Map.values $ Map.values targetEdgeMap
-  in
-    { outgoing : outgoingEdges
-    , incoming : incomingEdges
-    }
+  { outgoing : edgeArray graph # Array.filter (\edge -> edge.source == nodeId)
+  , incoming : edgeArray graph # Array.filter (\edge -> edge.target == nodeId)
+  }
 
 edgeArray :: Graph -> Array Edge
-edgeArray graph = Array.fromFoldable do
-  targetEdgeMap <- Map.values graph.edges.sourceTarget
-  edgeMap <- Map.values targetEdgeMap
-  edge <- Map.values edgeMap
-  pure edge
+edgeArray graph =
+  graph.edges
+  # Map.values
+  # Array.fromFoldable
 
 lookupEdgeById :: EdgeId -> Graph -> Maybe Edge
 lookupEdgeById edgeId graph = do
-  Map.lookup edgeId graph.edges.idMap
+  Map.lookup edgeId graph.edges
 
 -- TODO
 -- why do I want this?

@@ -3,25 +3,23 @@ module MegagraphOperation where
 import Prelude
 
 import Data.Array as Array
+import Data.Foldable (foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
+import Data.Maybe (Maybe(..))
+import Data.UUID as UUID
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
-import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, Mapping, MappingId, Node, NodeMappingEdge, PathEquation, edgeArray)
+import Megagraph (Megagraph, Edge, EdgeMappingEdge, Graph, GraphId, Mapping, MappingId, Node, NodeMappingEdge, PathEquation, edgeArray)
 
 
 -- | An operation on a graph is stored with the before/after values of the updated field
 -- | to allow it to be inverted.
 data GraphOperation
-  -- GraphOp name   | target node/edge | pre-op state         | post-op state
-  = InsertNodes       (Array Node)
-  | UpdateNodes                          (Array Node)           (Array Node)
-  | DeleteNodes       (Array Node)
-  | InsertEdges       (Array Edge)
-  | UpdateEdges                          (Array Edge)           (Array Edge)
-  | DeleteEdges       (Array Edge)
-  | UpdateTitle                          String                 String
-  | SetTitleValidity                     Boolean                Boolean
+  -- GraphOp name   | pre-op state         | post-op state
+  = UpdateNodes       (Array Node)           (Array Node)
+  | UpdateEdges       (Array Edge)           (Array Edge)
+  | UpdateTitle       String                 String
 
 data EquationOperation
   -- EquationOp name   | target graph | equation
@@ -29,25 +27,40 @@ data EquationOperation
   | DeletePathEquations  (Array PathEquation)
 
 data MappingOperation
-  -- MappingOp name        | element                 | from                    | to
-  = InsertNodeMappingEdges   (Array NodeMappingEdge)
-  | UpdateNodeMappingEdges                             (Array NodeMappingEdge) (Array NodeMappingEdge)
-  | DeleteNodeMappingEdges   (Array NodeMappingEdge)
-  | InsertEdgeMappingEdges   (Array EdgeMappingEdge)
-  | UpdateEdgeMappingEdges                             (Array EdgeMappingEdge) (Array EdgeMappingEdge)
-  | DeleteEdgeMappingEdges   (Array EdgeMappingEdge)
+  -- MappingOp name        | from                    | to
+  = UpdateNodeMappingEdges (Array NodeMappingEdge) (Array NodeMappingEdge)
+  | UpdateEdgeMappingEdges (Array EdgeMappingEdge) (Array EdgeMappingEdge)
 
 data CreateOperation
   = CreateGraph GraphId String
-  | DeleteGraph GraphId String
-  | CreateMapping MappingId GraphId GraphId
-  | DeleteMapping MappingId GraphId GraphId
+  | CreateMapping MappingId GraphId GraphId String
 
 data MegagraphOperation
-  = GraphElementOperation GraphId GraphOperation
-  | GraphElementEquationOperation GraphId EquationOperation
-  | MappingElementOperation MappingId MappingOperation
-  | CreateElementOperation CreateOperation
+  = GraphComponentOperation GraphId GraphOperation
+  | GraphComponentEquationOperation GraphId EquationOperation
+  | MappingComponentOperation MappingId GraphId GraphId MappingOperation
+  | CreateComponentOperation CreateOperation
+  | MegagraphOperationNoOp
+
+data MegagraphComponent
+  = GraphComponent GraphId
+  | MappingComponent MappingId GraphId GraphId
+
+derive instance eqMegagraphComponent :: Eq MegagraphComponent
+
+derive instance ordMegagraphComponent :: Ord MegagraphComponent
+
+derive instance genericMegagraphComponent :: Generic MegagraphComponent _
+instance decodeMegagraphComponent :: Decode MegagraphComponent where
+  decode = genericDecode defaultOptions
+instance encodeMegagraphComponent :: Encode MegagraphComponent where
+  encode = genericEncode defaultOptions
+
+instance showMegagraphComponent :: Show MegagraphComponent where
+  show = case _ of
+    GraphComponent graphId -> "GraphComponent " <> show graphId
+    MappingComponent mappingId source target ->
+      "MappingComponent " <> show mappingId <> " from: " <> show source <> " to: " <> show target
 
 -- | Operations can be grouped together into a single update.
 -- | However, the interpreter converts each operation into an update before they
@@ -88,14 +101,9 @@ instance encodeMegagraphOperation :: Encode MegagraphOperation where
 
 invertGraphOperation :: GraphOperation -> GraphOperation
 invertGraphOperation = case _ of
-  InsertNodes      node                 -> DeleteNodes      node
-  DeleteNodes      node                 -> InsertNodes      node
-  UpdateNodes                   from to -> UpdateNodes                   to from
-  InsertEdges      edgeMetadata         -> DeleteEdges      edgeMetadata
-  DeleteEdges      edgeMetadata         -> InsertEdges      edgeMetadata
-  UpdateEdges                   from to -> UpdateEdges                   to from
-  UpdateTitle                   from to -> UpdateTitle                   to  from
-  SetTitleValidity              from to -> SetTitleValidity              to  from
+  UpdateNodes      from to -> UpdateNodes      to from
+  UpdateEdges      from to -> UpdateEdges      to from
+  UpdateTitle      from to -> UpdateTitle      to from
 
 invertEquationOperation :: EquationOperation -> EquationOperation
 invertEquationOperation = case _ of
@@ -104,30 +112,19 @@ invertEquationOperation = case _ of
 
 invertMappingOperation :: MappingOperation -> MappingOperation
 invertMappingOperation = case _ of
-  InsertNodeMappingEdges nodeMappingEdges -> DeleteNodeMappingEdges nodeMappingEdges
-  DeleteNodeMappingEdges nodeMappingEdges -> InsertNodeMappingEdges nodeMappingEdges
-  UpdateNodeMappingEdges from to          -> UpdateNodeMappingEdges to from
-  InsertEdgeMappingEdges edgeMappingEdges -> DeleteEdgeMappingEdges edgeMappingEdges
-  DeleteEdgeMappingEdges edgeMappingEdges -> InsertEdgeMappingEdges edgeMappingEdges
-  UpdateEdgeMappingEdges from to          -> UpdateEdgeMappingEdges to from
-
-invertCreateOperation :: CreateOperation -> CreateOperation
-invertCreateOperation = case _ of
-  CreateGraph graphId title -> DeleteGraph graphId title
-  DeleteGraph graphId title -> CreateGraph graphId title
-  CreateMapping mappingId from to -> DeleteMapping mappingId from to
-  DeleteMapping mappingId from to -> CreateMapping mappingId from to
+  UpdateNodeMappingEdges from to -> UpdateNodeMappingEdges to from
+  UpdateEdgeMappingEdges from to -> UpdateEdgeMappingEdges to from
 
 invertMegagraphOperation :: MegagraphOperation -> MegagraphOperation
 invertMegagraphOperation = case _ of
-  GraphElementOperation graphId graphOp ->
-    GraphElementOperation graphId $ invertGraphOperation graphOp
-  GraphElementEquationOperation graphId equationOp ->
-    GraphElementEquationOperation graphId $ invertEquationOperation equationOp
-  MappingElementOperation mappingId mappingOp ->
-    MappingElementOperation mappingId $ invertMappingOperation mappingOp
-  CreateElementOperation createOp ->
-    CreateElementOperation $ invertCreateOperation createOp
+  GraphComponentOperation graphId graphOp ->
+    GraphComponentOperation graphId $ invertGraphOperation graphOp
+  GraphComponentEquationOperation graphId equationOp ->
+    GraphComponentEquationOperation graphId $ invertEquationOperation equationOp
+  MappingComponentOperation mappingId from to mappingOp ->
+    MappingComponentOperation mappingId from to $ invertMappingOperation mappingOp
+  CreateComponentOperation createOp -> MegagraphOperationNoOp
+  MegagraphOperationNoOp -> MegagraphOperationNoOp
 
 invertMegagraphUpdate :: MegagraphUpdate -> MegagraphUpdate
 invertMegagraphUpdate =
@@ -135,22 +132,12 @@ invertMegagraphUpdate =
 
 instance showGraphOperation :: Show GraphOperation where
   show = case _ of
-    InsertNodes nodes ->
-      "InsertNodes " <> show nodes
-    DeleteNodes nodes ->
-      "DeleteNodes " <> show nodes
     UpdateNodes from to ->
       "UpdateNodes from: " <> show from <> " to: " <> show to
-    InsertEdges edges ->
-      "InsertEdges edges: " <> show edges
-    DeleteEdges edges ->
-      "DeleteEdges edges: " <> show edges
     UpdateEdges from to ->
       "UpdateEdges from: " <> show from <> " to: " <> show to
     UpdateTitle from to ->
       "UpdateTitle from " <> from <> " to: " <> to
-    SetTitleValidity from to ->
-      "SetTitleValidity from " <> show from <> " to: " <> show to
 
 instance showEquationOperation :: Show EquationOperation where
   show = case _ of
@@ -161,16 +148,8 @@ instance showEquationOperation :: Show EquationOperation where
 
 instance showMappingOperation :: Show MappingOperation where
   show = case _ of
-    InsertNodeMappingEdges nodeMappingEdges ->
-      "InsertNodeMappingEdges " <> show nodeMappingEdges
-    DeleteNodeMappingEdges nodeMappingEdges ->
-      "DeleteNodeMappingEdges " <> show nodeMappingEdges
     UpdateNodeMappingEdges from to ->
       "UpdateNodeMappingEdges from: " <> show from <> " to: " <> show to
-    InsertEdgeMappingEdges edgeMappingEdges ->
-      "InsertEdgeMappingEdges " <> show edgeMappingEdges
-    DeleteEdgeMappingEdges edgeMappingEdges ->
-      "DeleteEdgeMappingEdges " <> show edgeMappingEdges
     UpdateEdgeMappingEdges from to ->
       "UpdateEdgeMappingEdges from: " <> show from <> " to: " <> show to
 
@@ -178,35 +157,38 @@ instance showCreateOperation :: Show CreateOperation where
   show = case _ of
     CreateGraph graphId title ->
       "CreateGraph " <> show graphId <> " with title: " <> title
-    DeleteGraph graphId title ->
-      "DeleteGraph " <> show graphId <> " with title: " <> title
-    CreateMapping mappingId from to ->
-      "CreateMapping " <> show mappingId <> " from: " <> show from <> " to: " <> show to
-    DeleteMapping mappingId from to ->
-      "DeleteGraph " <> show mappingId <> " from: " <> show from <> " to: " <> show to
+    CreateMapping mappingId from to title ->
+      "CreateMapping " <> title <> " " <> show mappingId <> " from: " <> show from <> " to: " <> show to
 
 instance showMegagraphOperation :: Show MegagraphOperation where
   show = case _ of
-    GraphElementOperation graphId graphOp ->
-      "GraphElementOperation on graph " <> show graphId <> " " <> show graphOp
-    GraphElementEquationOperation graphId equationOp ->
-      "GraphElementEquationOperation on graph " <> show graphId <> " " <> show equationOp
-    MappingElementOperation mappingId mappingOp ->
-      "MappingElementOperation on mapping " <> show mappingId <> " " <> show mappingOp
-    CreateElementOperation createOp ->
-      "CreateELementOperation " <> show createOp
+    GraphComponentOperation graphId graphOp ->
+      "GraphComponentOperation on graph " <> show graphId <> " " <> show graphOp
+    GraphComponentEquationOperation graphId equationOp ->
+      "GraphComponentEquationOperation on graph " <> show graphId <> " " <> show equationOp
+    MappingComponentOperation mappingId from to mappingOp ->
+      "MappingComponentOperation on mapping " <> show mappingId <> " from: " <> show from <> " to: " <> show to <> " " <> show mappingOp
+    CreateComponentOperation createOp ->
+      "CreateComponentOperation " <> show createOp
+    MegagraphOperationNoOp -> "MegagraphOperationNoOp"
 
 encodeNodesAsMegagraphUpdate :: GraphId -> Array Node -> MegagraphUpdate
 encodeNodesAsMegagraphUpdate graphId nodes =
-  [GraphElementOperation graphId $ InsertNodes nodes]
+  let
+    deletedNodes = _{deleted = true} <$> nodes
+  in
+    [GraphComponentOperation graphId $ UpdateNodes deletedNodes nodes]
 
 encodeEdgesAsMegagraphUpdate :: GraphId -> Array Edge -> MegagraphUpdate
 encodeEdgesAsMegagraphUpdate graphId edges =
-  [GraphElementOperation graphId $ InsertEdges edges]
+  let
+    deletedEdges = _{deleted = true} <$> edges
+  in
+    [GraphComponentOperation graphId $ UpdateEdges deletedEdges edges]
 
 encodePathEquationsAsMegagraphUpdate :: GraphId -> Array PathEquation -> MegagraphUpdate
 encodePathEquationsAsMegagraphUpdate graphId pathEquations =
-  [ GraphElementEquationOperation graphId $ InsertPathEquations pathEquations ]
+  [ GraphComponentEquationOperation graphId $ InsertPathEquations pathEquations ]
 
 encodeGraphAsMegagraphUpdate :: Graph -> MegagraphUpdate
 encodeGraphAsMegagraphUpdate graph =
@@ -214,22 +196,66 @@ encodeGraphAsMegagraphUpdate graph =
     nodeOps = encodeNodesAsMegagraphUpdate graph.id (Array.fromFoldable $ Map.values graph.nodes)
     edgeOps = encodeEdgesAsMegagraphUpdate graph.id (edgeArray graph)
     pathEquationOps = encodePathEquationsAsMegagraphUpdate graph.id $ Array.fromFoldable graph.pathEquations
-    titleOp = [ GraphElementOperation graph.id $ UpdateTitle "" graph.title.text ]
+    titleOp = [ GraphComponentOperation graph.id $ UpdateTitle "" graph.title.text ]
   in
     nodeOps <> edgeOps <> pathEquationOps <> titleOp
 
-encodeNodeMappingEdgesAsMegagraphUpdate :: MappingId -> Array NodeMappingEdge -> MegagraphUpdate
-encodeNodeMappingEdgesAsMegagraphUpdate mappingId nodeMappingEdges =
-  [MappingElementOperation mappingId $ InsertNodeMappingEdges nodeMappingEdges]
+encodeNodeMappingEdgesAsMegagraphUpdate :: MappingId -> GraphId -> GraphId -> Array NodeMappingEdge -> MegagraphUpdate
+encodeNodeMappingEdgesAsMegagraphUpdate mappingId from to nodeMappingEdges =
+  let
+    deletedNodeMappingEdges = _{deleted = true} <$> nodeMappingEdges
+  in
+    [MappingComponentOperation mappingId from to $ UpdateNodeMappingEdges deletedNodeMappingEdges nodeMappingEdges]
 
-encodeEdgeMappingEdgesAsMegagraphUpdate :: MappingId -> Array EdgeMappingEdge -> MegagraphUpdate
-encodeEdgeMappingEdgesAsMegagraphUpdate mappingId edgeMappingEdges =
-  [MappingElementOperation mappingId $ InsertEdgeMappingEdges edgeMappingEdges]
+encodeEdgeMappingEdgesAsMegagraphUpdate :: MappingId -> GraphId -> GraphId -> Array EdgeMappingEdge -> MegagraphUpdate
+encodeEdgeMappingEdgesAsMegagraphUpdate mappingId from to edgeMappingEdges =
+  let
+    deletedEdgeMappingEdges = _{deleted = true} <$> edgeMappingEdges
+  in
+    [MappingComponentOperation mappingId from to $ UpdateEdgeMappingEdges deletedEdgeMappingEdges edgeMappingEdges]
 
 encodeMappingAsMegagraphUpdate :: Mapping -> MegagraphUpdate
 encodeMappingAsMegagraphUpdate mapping =
   let
-    nodeMappingEdgesOps = encodeNodeMappingEdgesAsMegagraphUpdate mapping.id $ Array.fromFoldable mapping.nodeMappingEdges
-    edgeMappingEdgesOps = encodeEdgeMappingEdgesAsMegagraphUpdate mapping.id $ Array.fromFoldable mapping.edgeMappingEdges
+    nodeMappingEdgesOps = encodeNodeMappingEdgesAsMegagraphUpdate mapping.id mapping.sourceGraph mapping.targetGraph
+                          $ Array.fromFoldable mapping.nodeMappingEdges
+    edgeMappingEdgesOps = encodeEdgeMappingEdgesAsMegagraphUpdate mapping.id mapping.sourceGraph mapping.targetGraph
+                          $ Array.fromFoldable mapping.edgeMappingEdges
   in
     nodeMappingEdgesOps <> edgeMappingEdgesOps
+
+encodeMegagraphAsMegagraphUpdate :: Megagraph -> MegagraphUpdate
+encodeMegagraphAsMegagraphUpdate megagraph =
+  Array.concat
+  $ (megagraph.graphs # Map.values >>> Array.fromFoldable >>> map encodeGraphAsMegagraphUpdate)
+    <>
+    (megagraph.mappings # Map.values >>> Array.fromFoldable >>> map encodeMappingAsMegagraphUpdate)
+
+createTargetIfNotExists :: Megagraph -> MegagraphComponent -> MegagraphUpdate -> MegagraphUpdate
+createTargetIfNotExists megagraph target =
+  let
+    createGraphIfNotExists graphId = case Map.lookup graphId megagraph.graphs of
+      Just _ -> identity
+      Nothing -> Array.cons (CreateComponentOperation $ CreateGraph graphId (UUID.toString graphId))
+    createMappingIfNotExists mappingId from to = case Map.lookup mappingId megagraph.mappings of
+      Just _ -> identity
+      Nothing -> Array.cons (CreateComponentOperation $ CreateMapping mappingId from to (UUID.toString mappingId))
+  in
+    case target of
+      GraphComponent graphId -> createGraphIfNotExists graphId
+      MappingComponent mappingId from to -> createMappingIfNotExists mappingId from to
+
+createTargetsIfNotExist :: Megagraph -> MegagraphUpdate -> MegagraphUpdate
+createTargetsIfNotExist megagraph op =
+  let
+    targets =
+      op
+      <#> case _ of
+        GraphComponentOperation graphId _ -> Just $ GraphComponent graphId
+        GraphComponentEquationOperation graphId _ -> Just $ GraphComponent graphId
+        MappingComponentOperation mappingId from to _ -> Just $ MappingComponent mappingId from to
+        _ -> Nothing
+      # Array.catMaybes
+      # Array.nub
+  in
+    foldr (createTargetIfNotExists megagraph) op targets

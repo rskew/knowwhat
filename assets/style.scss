@@ -1,25 +1,35 @@
 :root {
     --pane-border-width: 4px;
 
+    --gold: #fc0;
+    --aqua: #0dd;
+    --caramel: #f70;
+    --gray: #aaac;
+    --red: #f66b;
+    --white: #fff;
+    --black: #000;
+
     // TODO: make this switchable once there's the semblance of a menu
     // light mode
     //--svg-background-color: #ffffff;
-    --node-color: #000000;
-    --node-border-color: #00000033;
-    --focused-color: #ffcc00;
-    --focused-source-color: #ffcc00;
-    --focused-target-color: #ff7700ff;
-    --highlighted-color: #0088ffbb;
-    --node-mapping-edge-color: #0088ffff;
-    --edge-mapping-edge-color: #ff7700ff;
-    --invalid-color: #ff6666bb;
-    --text-field-border-color: #aaaaaacc;
-    --text-field-background-color: #ffffffbb;
-    --background-color: #ffffff;
-    --edge-color: #666666;
-    --transparent-white-color: #ffffff00;
-    --text-color: #000000;
-    --divider-color: #444444;
+    --node-color: #000;
+    --node-border-color: #0003;
+    --focused-color: var(--gold);
+    --focused-source-color: var(--gold);
+    --focused-target-color: var(--caramel);
+    --text-focused-color: var(--caramel);
+    --highlighted-color: var(--aqua);
+    --node-mapping-edge-color: var(--aqua);
+    --edge-mapping-edge-color: var(--caramel);
+    --invalid-color: var(--red);
+    --text-field-border-color: var(--gray);
+    --text-field-background-color: #fffb;
+    --background-color: #fff;
+    --edge-color: #666;
+    --transparent-white-color: #fff0;
+    --text-color: #000;
+    --divider-color: #444;
+    --pending-color: var(--aqua);
 
     // dark mode
     //--svg-background-color: #000000;
@@ -129,7 +139,17 @@ foreignObject {
 }
 
 .invalidIndicator {
+    display: none;
+}
+
+.invalidIndicator.invalid {
+    display: block;
     fill: var(--invalid-color);
+}
+
+.invalidIndicator.pending {
+    display: block;
+    fill: var(--pending-color);
 }
 
 .node {
@@ -142,6 +162,10 @@ foreignObject {
 
 .node.focused {
     fill: var(--focused-color);
+}
+
+.node.textFocused {
+    fill: var(--text-focused-color);
 }
 
 .nodeBorder {
@@ -176,6 +200,11 @@ foreignObject {
 
 .nodeHalo.focused {
     stroke: var(--focused-color);
+    opacity: 1.0;
+}
+
+.nodeHalo.pending {
+    stroke: var(--pending-color);
     opacity: 1.0;
 }
 
@@ -214,6 +243,11 @@ foreignObject {
     stroke: var(--focused-color);
     stroke-width: 3px;
     fill: none;
+}
+
+.edge.textFocused {
+    stroke: var(--text-focused-color);
+    stroke-width: 3px;
 }
 
 .edgeBorder {

@@ -1,6 +1,8 @@
 -- | QueryServerOp DSL for asking the server/database questions from the client
 module AppOperation.QueryServerOp where
 
+-- TODO delete module
+
 --import Prelude
 --
 --import Megagraph (GraphId, NodeId)

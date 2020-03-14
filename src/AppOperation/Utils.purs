@@ -1,15 +1,14 @@
 module AppOperation.Utils where
 
 import Prelude
-import AppState (AppState)
-import Megagraph (Edge, GraphId, Mapping, Node)
-import MegagraphOperation (MegagraphUpdate, encodeEdgesAsMegagraphUpdate, encodeEdgeMappingEdgesAsMegagraphUpdate, encodeNodesAsMegagraphUpdate, encodeNodeMappingEdgesAsMegagraphUpdate, invertMegagraphUpdate)
 
+import AppState (AppState)
 import Data.Array as Array
 import Data.Map as Map
+import Megagraph (Edge, GraphId, Mapping, Node)
+import MegagraphOperation (MegagraphUpdate, encodeEdgeMappingEdgesAsMegagraphUpdate, encodeEdgesAsMegagraphUpdate, encodeNodeMappingEdgesAsMegagraphUpdate, encodeNodesAsMegagraphUpdate, invertMegagraphUpdate)
 
-
--- TODO delete module
+-- TODO cleanup
 
 --mappingsToFromGraph :: AppState -> GraphId -> Array Mapping
 --mappingsToFromGraph state graphId =
@@ -22,11 +21,11 @@ import Data.Map as Map
 ------
 -- Delete helpers
 
---removeEdgeOp :: Edge -> MegagraphUpdate
---removeEdgeOp = invertMegagraphUpdate <<< encodeEdgeAsMegagraphUpdate
---
---removeNodeOp :: Node -> MegagraphUpdate
---removeNodeOp = invertMegagraphUpdate <<< encodeNodeAsMegagraphUpdate
+removeEdgesOp :: GraphId -> Array Edge -> MegagraphUpdate
+removeEdgesOp graphId = invertMegagraphUpdate <<< encodeEdgesAsMegagraphUpdate graphId
+
+removeNodesOp :: GraphId -> Array Node -> MegagraphUpdate
+removeNodesOp graphId = invertMegagraphUpdate <<< encodeNodesAsMegagraphUpdate graphId
 
 --removeNodeMappingEdgesOp :: AppState -> Node -> MegagraphUpdate
 --removeNodeMappingEdgesOp state node =

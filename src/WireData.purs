@@ -2,12 +2,12 @@ module WireData where
 
 import Prelude
 
-import AppOperation (AppOperation)
 import Data.DateTime.Instant (Instant)
-import Effect.Now (now)
 import Effect (Effect)
+import Effect.Now (now)
 import Foreign (F, ForeignError(..), fail)
 import Foreign.Generic (encodeJSON, decodeJSON)
+import MegagraphOperation (MegagraphUpdate)
 
 -- TODO get from Config
 version :: String
@@ -24,11 +24,11 @@ type WireDataRaw =
   }
 
 type WireData =
-  { op       :: AppOperation
+  { op       :: MegagraphUpdate
   , metadata :: Metadata
   }
 
-encodeWireData :: AppOperation -> Effect WireDataRaw
+encodeWireData :: MegagraphUpdate -> Effect WireDataRaw
 encodeWireData op = do
   timestamp <- now
   pure { op : encodeJSON op
