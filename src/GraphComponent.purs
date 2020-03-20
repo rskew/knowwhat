@@ -11,14 +11,15 @@ import Halogen.HTML as HH
 
 
 initialState :: Input -> AppState
-initialState windowShape =
+initialState {windowShape, webSocketConnection} =
   emptyAppState { left : 0.0
                 , width : windowShape.width
-                , right : windowShape.height
+                , right : windowShape.width
                 , top : 0.0
                 , height : windowShape.height
-                , bottom : windowShape.width
+                , bottom : windowShape.height
                 }
+                webSocketConnection
 
 graphComponent :: H.Component HH.HTML Query Input Message Aff
 graphComponent =

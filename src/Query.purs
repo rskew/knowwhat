@@ -67,6 +67,19 @@ renderNodeUpsertQuery ::
   -> GraphQLMutation MegagraphSchema
 renderNodeUpsertQuery nodes = upsertOperation (SProxy :: SProxy "nodes") nodes
 
+type NodeUpsertResponse
+  = { data ::
+      { insert_nodes ::
+        { affected_rows :: Int
+        }
+      }
+    }
+
+parseNodeUpsertResponse :: Json -> Either String Int
+parseNodeUpsertResponse json = do
+  nodeUpsertResponse :: NodeUpsertResponse <- decodeJson json
+  pure $ nodeUpsertResponse.data.insert_nodes.affected_rows
+
 renderEdgeUpsertQuery ::
   forall edgeRowL.
   RowToList EdgeRow edgeRowL

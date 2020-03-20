@@ -2,9 +2,9 @@ module GraphComponent.Render where
 
 import Prelude
 
-import AppState (Action(..), AppState, DrawingEdge, EdgeSourceElement(..), HoveredElementId(..), Slots, TextFieldElement(..), _drawingEdges, _edgeTextField, _nodeTextField, _titleTextField)
-import CSS as CSS
+import AppState (Action(..), AppState, DrawingEdge, EdgeSourceElement(..), HoveredElementId(..), Slots, TextFieldElement(..), _drawingEdges, _edgeTextField, _liveMegagraph, _nodeTextField, _pane, _titleTextField)
 import ContentEditable.SVGComponent as SVGContentEditable
+import CSS as CSS
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Lens ((^.), (^?), traversed)
@@ -22,8 +22,10 @@ import Halogen.HTML.CSS as HCSS
 import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _graph, _isValid, _node, _nodes, _pane, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
-import MegagraphOperation (GraphOperation(..), MegagraphComponent(..), MegagraphOperation(..))
+import LiveMegagraph (MegagraphMutation(..))
+import LiveMegagraph as LiveMegagraph
+import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _graph, _isValid, _node, _nodes, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
+import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..))
 import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
@@ -51,7 +53,7 @@ renderGraphNode state pane node =
                                          NodeSource drawingEdgeSourceNode -> drawingEdgeSourceNode /= node.id)
       # Map.size
       # \n -> n > 0
-    nodePendingServerResponse = isJust $ Map.lookup node.id state.pending
+    -- nodePendingServerResponse = isJust $ Map.lookup node.id state.pending
     nodeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (NodeTextField node.graphId node.id)
     nodeClasses =
       joinWith " " $ Array.catMaybes
@@ -89,9 +91,9 @@ renderGraphNode state pane node =
       , if drawingEdgeOverNode
         then Just "ready"
         else Nothing
-      , if nodePendingServerResponse
-        then Just "pending"
-        else Nothing
+      --, if nodePendingServerResponse
+      --  then Just "pending"
+      --  else Nothing
       ]
     textBoxHTML textBoxOffset =
       [ SE.g
@@ -110,11 +112,11 @@ renderGraphNode state pane node =
           -- Handle messages raised by component
           case _ of
             SVGContentEditable.TextUpdate text -> Just $ NodeTextInput node.graphId node.id text
-            SVGContentEditable.Focused text -> Just $ OnFocusText (NodeTextField node.graphId node.id) \updateText ->
-              if text == updateText
+            SVGContentEditable.Focused _ -> Just $ OnFocusText (NodeTextField node.graphId node.id) \updateText ->
+              if node.text == updateText
               then Nothing
               else let
-                     op = [GraphComponentOperation node.graphId $ UpdateNodes [node] [(node {text = updateText})]]
+                     op = UpdateNodeText node updateText
                      target = GraphComponent node.graphId
                    in
                      Just $ Tuple op target
@@ -162,7 +164,7 @@ renderGraphNode state pane node =
 
 renderGhostNode :: AppState -> GraphView -> Node -> Maybe (Tuple String (H.ComponentHTML Action Slots Aff))
 renderGhostNode state renderPane node =
-  case state.megagraph ^? _pane node.graphId of
+  case state ^? _pane node.graphId of
     Nothing -> Nothing
     Just nativePane -> Just
       let
@@ -186,20 +188,22 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
   GraphSpacePoint2D targetPos <- lookupNodePositionInPane state mapping.targetGraph nodeMappingEdge.targetNode renderPane
   let
     focused = state.focus == Just (NodeMappingEdgeElement mapping.id nodeMappingEdge.id)
-    edgePendingServerResponse = isJust $ Map.lookup nodeMappingEdge.id state.pending
+    -- TODO
+    -- edgePendingServerResponse = isJust $ Map.lookup nodeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "nodeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
       [ Just "edgeBorder"
-      , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) nodeMappingEdge.id)
+      , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id) nodeMappingEdge.id)
         then Just "hovered"
         else Nothing
       , if focused
         then Just "focused"
         else Nothing
-      , if edgePendingServerResponse
-        then Just "pending"
-        else Nothing
+      -- TODO
+      --, if edgePendingServerResponse
+      --  then Just "pending"
+      --  else Nothing
       ]
     targetHasSubgraph =
       isJust $ state.megagraph ^? _graph mapping.targetGraph <<< _node nodeMappingEdge.targetNode <<< _subgraph <<< traversed
@@ -234,10 +238,10 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
       , HE.onMouseDown \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
                                            , NodeMappingEdgeDragStart mapping.id nodeMappingEdge e
                                            ]
-      , HE.onMouseEnter \_ -> Just $ Hover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) nodeMappingEdge.id
-      , HE.onMouseLeave \_ -> Just $ UnHover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) nodeMappingEdge.id
+      , HE.onMouseEnter \_ -> Just $ Hover $ EdgeBorderId (MappingComponent mapping.id) nodeMappingEdge.id
+      , HE.onMouseLeave \_ -> Just $ UnHover $ EdgeBorderId (MappingComponent mapping.id) nodeMappingEdge.id
       , HE.onDoubleClick \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
-                                             , AppDeleteNodeMappingEdge mapping.id nodeMappingEdge.id
+                                             , AppDeleteNodeMappingEdge nodeMappingEdge
                                              ]
       ]
     ]
@@ -246,12 +250,12 @@ renderEdgeMappingEdge :: AppState -> GraphView -> Mapping -> EdgeMappingEdge -> 
 renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
   sourceGraph <- state.megagraph ^? _graph mapping.sourceGraph
   sourceEdge <- lookupEdgeById edgeMappingEdge.sourceEdge sourceGraph
-  sourcePane <- state.megagraph ^? _pane mapping.sourceGraph
+  sourcePane <- state ^? _pane mapping.sourceGraph
   sourceEdgeSourcePos <- sourceGraph ^? _nodes <<< at sourceEdge.source <<< traversed <<< _position
   sourceEdgeTargetPos <- sourceGraph ^? _nodes <<< at sourceEdge.target <<< traversed <<< _position
   targetGraph <- state.megagraph ^? _graph mapping.targetGraph
   targetEdge <- lookupEdgeById edgeMappingEdge.targetEdge targetGraph
-  targetPane <- state.megagraph ^? _pane mapping.targetGraph
+  targetPane <- state ^? _pane mapping.targetGraph
   targetEdgeSourcePos <- targetGraph ^? _nodes <<< at targetEdge.source <<< traversed <<< _position
   targetEdgeTargetPos <- targetGraph ^? _nodes <<< at targetEdge.target <<< traversed <<< _position
   let
@@ -260,20 +264,22 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
     sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePosGraphSpace
     targetPosPageSpace = graphSpaceToPageSpace targetPane targetPosGraphSpace
     focused = state.focus == Just (EdgeMappingEdgeElement mapping.id edgeMappingEdge.id)
-    edgePendingServerResponse = isJust $ Map.lookup edgeMappingEdge.id state.pending
+    -- TODO
+    -- edgePendingServerResponse = isJust $ Map.lookup edgeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "edgeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
       [ Just "edgeBorder"
-      , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) edgeMappingEdge.id)
+      , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id) edgeMappingEdge.id)
         then Just "hovered"
         else Nothing
       , if focused
         then Just "focused"
         else Nothing
-      , if edgePendingServerResponse
-        then Just "pending"
-        else Nothing
+      -- TODO
+      --, if edgePendingServerResponse
+      --  then Just "pending"
+      --  else Nothing
       ]
     markerRef = "url(#arrow-to-edge)"
     targetHasSubgraph = false
@@ -306,10 +312,10 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
       , HE.onMouseDown \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
                                            , EdgeMappingEdgeDragStart mapping.id edgeMappingEdge e
                                            ]
-      , HE.onMouseEnter \_ -> Just $ Hover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) edgeMappingEdge.id
-      , HE.onMouseLeave \_ -> Just $ UnHover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) edgeMappingEdge.id
+      , HE.onMouseEnter \_ -> Just $ Hover $ EdgeBorderId (MappingComponent mapping.id) edgeMappingEdge.id
+      , HE.onMouseLeave \_ -> Just $ UnHover $ EdgeBorderId (MappingComponent mapping.id) edgeMappingEdge.id
       , HE.onDoubleClick \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
-                                             , AppDeleteEdgeMappingEdge mapping.id edgeMappingEdge.id
+                                             , AppDeleteEdgeMappingEdge edgeMappingEdge
                                              ]
       ]
     ]
@@ -330,7 +336,7 @@ renderEdge state renderPane edge = do
     borderHovered = state.hoveredElements # Set.member (EdgeBorderId (GraphComponent edge.graphId) edge.id)
     haloHovered = state.hoveredElements # Set.member (EdgeHaloId (GraphComponent edge.graphId) edge.id)
     edgeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (EdgeTextField edge.graphId edge.id)
-    edgePendingServerResponse = isJust $ Map.lookup edge.id state.pending
+    -- edgePendingServerResponse = isJust $ Map.lookup edge.id state.pending
     edgeClasses = joinWith " " $ Array.catMaybes
                   [ Just "edge"
                   , if focused
@@ -346,9 +352,10 @@ renderEdge state renderPane edge = do
       , if borderHovered
         then Just "hovered"
         else Nothing
-      , if edgePendingServerResponse
-        then Just "pending"
-        else Nothing
+      -- TODO
+      --, if edgePendingServerResponse
+      --  then Just "pending"
+      --  else Nothing
       ]
     edgeHaloClasses =
       joinWith " " $ Array.catMaybes
@@ -469,7 +476,7 @@ renderEdgeTextField state renderPane edge = do
           if text == updateText
           then Nothing
           else let
-                 op = [GraphComponentOperation edge.graphId $ UpdateEdges [edge] [(edge {text = updateText})]]
+                 op = StateUpdate [UpdateEdges [edge] [(edge {text = updateText})]]
                  target = GraphComponent edge.graphId
                in
                  Just $ Tuple op target
@@ -518,7 +525,7 @@ renderTitle graphId titleText =
           if text == updateText
           then Nothing
           else let
-                 op = [GraphComponentOperation graphId $ UpdateTitle text updateText]
+                 op = StateUpdate [UpdateTitle graphId text updateText]
                  target = GraphComponent graphId
                in
                  Just $ Tuple op target
@@ -532,13 +539,15 @@ renderTitleInvalidIndicator state graphId =
       Nothing -> ""
       Just true -> ""
       Just false -> " invalid"
-    pending = case Map.lookup graphId state.pending of
-      Nothing -> ""
-      Just _ -> " pending"
+    -- TODO
+    --pending = case Map.lookup graphId state.pending of
+    --  Nothing -> ""
+    --  Just _ -> " pending"
   in
     Tuple (show graphId <> "_titleInvalidIndicator") $
       SE.rect
-      [ SA.class_ $ "invalidIndicator" <> pending <> invalid
+      -- TODO
+      [ SA.class_ $ "invalidIndicator" <> invalid --<> pending
       , SA.width  $ show invalidIndicatorSize
       , SA.height $ show invalidIndicatorSize
       , SA.x $ show invalidIndicatorOffset.x
@@ -603,9 +612,16 @@ renderSinglePane state renderPane graph =
     focusedClass = case state.focusedPane of
       Just (GraphComponent graphId) ->
         if graphId == renderPane.graphId then "focused" else ""
-      Just (MappingComponent _ sourceGraphId targetGraphId) ->
-        if sourceGraphId == renderPane.graphId then "focusedSource" else
-          if targetGraphId == renderPane.graphId then "focusedTarget" else ""
+      Just (MappingComponent mappingId) ->
+        case Map.lookup mappingId state.megagraph.mappings of
+          Nothing -> ""
+          Just mapping ->
+            if mapping.sourceGraph == renderPane.graphId
+            then "focusedSource"
+            else
+              if mapping.targetGraph == renderPane.graphId
+              then "focusedTarget"
+              else ""
       Nothing -> ""
 
   in
@@ -656,20 +672,34 @@ render state =
       # Array.fromFoldable
       <#> (\graphId -> do
         graph <- Map.lookup graphId state.megagraph.graphs
-        pane <- Map.lookup graphId state.megagraph.panes
+        pane <- Map.lookup graphId state.panes
         pure $ Tuple (show graphId) $ renderSinglePane state pane graph
       )
       # Array.catMaybes
   in
-    HK.div
-    [ HP.ref (H.RefLabel "panes")
-    , HP.classes [ HH.ClassName "panes" ]
+    HH.div
+    [ HP.classes [HH.ClassName "outer"]]
+    [ HK.div
+      [ HP.ref (H.RefLabel "panes")
+      , HP.classes [ HH.ClassName "panes" ]
+      ]
+      (renderedGraphs
+       <> [ Tuple "input" $
+                  HH.input
+                  [ HP.type_ InputFile
+                  , HE.onChange $ Just <<< FetchLocalFile
+                  ]
+          ]
+      )
+    , HH.div
+      [ HP.classes [HH.ClassName "pendingIndicatorContainer"]]
+      [ HH.slot
+        _liveMegagraph
+        unit
+        LiveMegagraph.liveMegagraph
+        state.webSocketConnection
+        case _ of
+          LiveMegagraph.ReturnAction action -> Just $ DoMany [action]
+          LiveMegagraph.MegagraphUpdated megagraph -> Just $ MegagraphUpdated megagraph
+      ]
     ]
-    (renderedGraphs
-     <> [ Tuple "input" $
-                HH.input
-                [ HP.type_ InputFile
-                , HE.onChange $ Just <<< FetchLocalFile
-                ]
-        ]
-    )

@@ -51,3 +51,6 @@ invalidIndicatorSize = 10.0
 
 edgeMappingEdgeBeginMarkerRadius :: Number
 edgeMappingEdgeBeginMarkerRadius = 3.0
+
+pendingIndicatorHeightPx :: Number
+pendingIndicatorHeightPx = 3.0

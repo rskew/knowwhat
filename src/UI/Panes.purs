@@ -2,7 +2,7 @@ module UI.Panes where
 
 import Prelude
 
-import AppState (AppState, _focusedPane, _megagraph, _windowBoundingRect)
+import AppState (AppState, _boundingRect, _focusedPane, _megagraph, _origin, _panes, _windowBoundingRect, _zoom)
 import Data.Array as Array
 import Data.Int (toNumber)
 import Data.Lens ((.~), (%~), (?~))
@@ -11,8 +11,8 @@ import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
-import Megagraph (GraphId, GraphView, PageSpacePoint2D(..), _boundingRect, _graphs, _origin, _panes, _zoom, emptyGraph, freshPane)
-import MegagraphOperation (MegagraphComponent(..))
+import Megagraph (GraphId, GraphView, PageSpacePoint2D(..), _graphs, emptyGraph, freshPane)
+import MegagraphStateUpdate (MegagraphComponent(..))
 import UI.Constants (paneDividerWidth)
 import Web.HTML.HTMLElement as WHE
 
@@ -39,15 +39,15 @@ insertBlankPane graphId state =
     # _windowBoundingRect .~ state.windowBoundingRect
     -- Insert new pane in empty space
     # _megagraph <<< _graphs <<< at graphId ?~ emptyGraph graphId
-    # _megagraph <<< _panes <<< at graphId ?~ newPane
+    # _panes <<< at graphId ?~ newPane
     # _focusedPane ?~ GraphComponent graphId
     # arrangePanes
 
 arrangePanes :: AppState -> AppState
 arrangePanes state =
-  state # _megagraph <<< _panes %~ mapMapWithIndex updatePane
+  state # _panes %~ mapMapWithIndex updatePane
     where
-      nPanes = toNumber $ Map.size state.megagraph.graphs
+      nPanes = toNumber $ Map.size state.panes
       paneWidth = (state.windowBoundingRect.width - paneDividerWidth * (nPanes - 1.0)) / nPanes
       updatePane :: Int -> GraphView -> GraphView
       updatePane index =
@@ -77,7 +77,7 @@ rescaleWindow newWindowBoundingRect appState =
   in
     appState
     # _windowBoundingRect .~ newWindowBoundingRect
-    # _megagraph <<< _panes %~ map (_boundingRect %~ scaleRect)
+    # _panes %~ map (_boundingRect %~ scaleRect)
 
 -- | Zoom in/out holding the focus point invariant in page space and graph space
 -- |

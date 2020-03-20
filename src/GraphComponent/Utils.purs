@@ -9,8 +9,8 @@ import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
 import Math as Math
-import Megagraph (GraphId, GraphSpacePoint2D(..), GraphView, Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
-import MegagraphOperation (GraphOperation(..), MegagraphOperation(..), MegagraphUpdate)
+import Megagraph (GraphId, GraphSpacePoint2D(..), Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, GraphView, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
+import MegagraphStateUpdate (MegagraphStateUpdate(..))
 import UI.Constants (haloRadius)
 import Web.UIEvent.MouseEvent as ME
 
@@ -37,18 +37,18 @@ drawingEdgeWithinNodeHalo drawingEdgeState pane node =
 lookupNodePositionInPane :: AppState -> GraphId -> NodeId -> GraphView -> Maybe GraphSpacePoint2D
 lookupNodePositionInPane state graphId nodeId renderPane = do
   graph <- Map.lookup graphId state.megagraph.graphs
-  view <- Map.lookup graphId state.megagraph.panes
+  view <- Map.lookup graphId state.panes
   node <- Map.lookup nodeId graph.nodes
   pure $ (nodePosition node) # graphSpaceToPageSpace view # pageSpaceToGraphSpace renderPane
 
 -- | Indicated which nodes are updated in a MegagraphUpdate. Used to update the
 -- | text fields when a node is updated from a server message.
-updatedNodes :: MegagraphUpdate -> Array (Tuple GraphId NodeId)
+updatedNodes :: Array MegagraphStateUpdate -> Array (Tuple GraphId NodeId)
 updatedNodes op =
   Array.concatMap graphAndNodeId op
     where
-      graphAndNodeId (GraphComponentOperation graphId (UpdateNodes from to)) =
-        (\node -> Tuple graphId node.id) <$> to
+      graphAndNodeId (UpdateNodes from to) =
+        (\node -> Tuple node.graphId node.id) <$> to
       graphAndNodeId _ = []
 
 type Parabola

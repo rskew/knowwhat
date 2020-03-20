@@ -46,11 +46,17 @@ input {
     display: none;
 }
 
+.outer {
+    height: 100%;
+    width: 100%;
+}
+
 .panes {
     height: 100%;
     width: 100%;
     display: block;
     background-color: var(--divider-color);
+    margin-bottom: -3px;
 }
 
 .pane {
@@ -70,6 +76,21 @@ input {
 
 .pane.focusedTarget {
     border: var(--pane-border-width) solid var(--focused-target-color);
+}
+
+.pendingIndicatorContainer {
+    height: 3px;
+    width: 100%;
+}
+
+.pendingIndicator {
+    height: 3px;
+    background-color: var(--background-color);
+}
+
+.pendingIndicator.pending {
+    height: 3px;
+    background-color: var(--aqua);
 }
 
 svg {

@@ -28,7 +28,6 @@ import Record.Builder as Builder
 import Test.QuickCheck (class Arbitrary)
 import Web.HTML.HTMLElement as WHE
 
-
 ------
 -- Types
 
@@ -181,6 +180,7 @@ pageEdgeSpaceToPageSpace (PageSpacePoint2D sourcePos) (PageSpacePoint2D targetPo
 pageSpaceToPageEdgeSpace :: PageSpacePoint2D -> PageSpacePoint2D -> PageSpacePoint2D -> PageEdgeSpacePoint2D
 pageSpaceToPageEdgeSpace (PageSpacePoint2D sourcePos) (PageSpacePoint2D targetPos) (PageSpacePoint2D pageSpacePoint) =
   PageEdgeSpacePoint2D $ sourceTargetCartesianToEdgePolar sourcePos targetPos pageSpacePoint
+
 
 type EdgeMetadata
   = { id      :: EdgeId
@@ -366,6 +366,21 @@ emptyMapping id sourceId targetId
     , edgeMappingEdges : Map.empty
     }
 
+-- | A megagraph is a collection of graphs and mappings between graphs
+-- | where each node has a subgraph and each edge has a submapping.
+-- | A mapping is a set of edges between graphs, from nodes to nodes and edges to edges.
+-- | The UI represents a sub-megagraph, where there is only a single mapping
+-- | between any pairs of graphs. This is a view on a larger megagraph.
+type Megagraph
+  = { graphs :: Map GraphId Graph
+    , mappings :: Map MappingId Mapping
+    }
+
+emptyMegagraph :: Megagraph
+emptyMegagraph = { graphs : Map.empty
+                 , mappings : Map.empty
+                 }
+
 type GraphView
   = { graphId      :: GraphId
     , origin       :: PageSpacePoint2D
@@ -383,22 +398,6 @@ freshPane graphId rect
     , boundingRect : rect
     }
 
--- | A megagraph is a collection of graphs and mappings between graphs
--- | where each node has a subgraph and each edge has a submapping.
--- | A mapping is a set of edges between graphs, from nodes to nodes and edges to edges.
--- | The UI represents a sub-megagraph, where there is only a single mapping
--- | between any pairs of graphs. This is a view on a larger megagraph.
-type Megagraph
-  = { graphs :: Map GraphId Graph
-    , panes :: Map GraphId GraphView
-    , mappings :: Map MappingId Mapping
-    }
-
-emptyMegagraph :: Megagraph
-emptyMegagraph = { graphs : Map.empty
-                 , panes : Map.empty
-                 , mappings : Map.empty
-                 }
 
 ------
 -- Lenses
@@ -447,27 +446,6 @@ _mappings = prop (SProxy :: SProxy "mappings")
 
 _mapping :: MappingId -> Traversal' Megagraph Mapping
 _mapping mappingId = _mappings <<< at mappingId <<< traversed
-
-_panes :: Lens' Megagraph (Map GraphId GraphView)
-_panes = prop (SProxy :: SProxy "panes")
-
-_pane :: GraphId -> Traversal' Megagraph GraphView
-_pane graphId = _panes <<< at graphId <<< traversed
-
-_zoom :: Lens' GraphView Number
-_zoom = prop (SProxy :: SProxy "zoom")
-
-_origin :: Lens' GraphView PageSpacePoint2D
-_origin = prop (SProxy :: SProxy "origin")
-
-_focus :: Lens' GraphView (Maybe MegagraphElement)
-_focus = prop (SProxy :: SProxy "focus")
-
-_boundingRect :: Lens' GraphView WHE.DOMRect
-_boundingRect = prop (SProxy :: SProxy "boundingRect")
-
-_height :: Lens' WHE.DOMRect Number
-_height = prop (SProxy :: SProxy "height")
 
 _nodeMappingEdges :: Lens' Mapping (Map EdgeId NodeMappingEdge)
 _nodeMappingEdges = prop (SProxy :: SProxy "nodeMappingEdges")

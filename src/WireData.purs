@@ -8,7 +8,7 @@ import Effect (Effect)
 import Effect.Now (now)
 import Foreign (F, ForeignError(..), fail)
 import Foreign.Generic (encodeJSON, decodeJSON)
-import MegagraphOperation (MegagraphUpdate)
+import MegagraphStateUpdate (MegagraphStateUpdate)
 
 type Metadata =
   { version   :: String
@@ -21,11 +21,11 @@ type WireDataRaw =
   }
 
 type WireData =
-  { op       :: MegagraphUpdate
+  { op       :: Array MegagraphStateUpdate
   , metadata :: Metadata
   }
 
-encodeWireData :: MegagraphUpdate -> Effect WireDataRaw
+encodeWireData :: Array MegagraphStateUpdate -> Effect WireDataRaw
 encodeWireData op = do
   timestamp <- now
   pure { op : encodeJSON op
