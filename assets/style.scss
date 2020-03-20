@@ -3,15 +3,13 @@
 
     --gold: #fc0;
     --aqua: #0dd;
+    --magenta: #d0f;
     --caramel: #f70;
     --gray: #aaac;
     --red: #f66b;
     --white: #fff;
     --black: #000;
 
-    // TODO: make this switchable once there's the semblance of a menu
-    // light mode
-    //--svg-background-color: #ffffff;
     --node-color: #000;
     --node-border-color: #0003;
     --focused-color: var(--gold);
@@ -19,7 +17,7 @@
     --focused-target-color: var(--caramel);
     --text-focused-color: var(--caramel);
     --highlighted-color: var(--aqua);
-    --node-mapping-edge-color: var(--aqua);
+    --node-mapping-edge-color: var(--magenta);
     --edge-mapping-edge-color: var(--caramel);
     --invalid-color: var(--red);
     --text-field-border-color: var(--gray);
@@ -30,21 +28,6 @@
     --text-color: #000;
     --divider-color: #444;
     --pending-color: var(--aqua);
-
-    // dark mode
-    //--svg-background-color: #000000;
-    //--node-color: #ffffff;
-    //--node-border-color: #ffffff33;
-    //--focused-color: #ffcc00;
-    //--highlighted-color: #0088ffbb;
-    //--invalid-color: #ff6666bb;
-    //--text-field-border-color: #aaaaaacc;
-    //--text-field-background-color: #1a1a1abb;
-    //--background-color: #1a1a1a;
-    //--edge-color: #ffffff;
-    //--transparent-white-color: #ffffff00;
-    //--text-color: #ffffff;
-    //--divider-color: #444444;
 }
 
 html {
@@ -90,10 +73,8 @@ input {
 }
 
 svg {
-    //z-index: -1;
     height: 100%;
     width: 100%;
-    //background-color: var(--svg-background-color);
     // To center in the pane:
     display: block;
     margin: auto;
@@ -106,7 +87,6 @@ svg {
 
 .nonsvg {
     z-index: 1;
-    // position: absolute;
 }
 
 .text-field {
@@ -264,6 +244,12 @@ foreignObject {
 .edgeBorder.invalid {
     stroke: var(--invalid-color);
     stroke-width: 25px;
+}
+
+.edgeBorder.pending {
+    stroke: var(--pending-color);
+    stroke-width: 25px;
+    opacity: 0.5;
 }
 
 .edgeHalo {

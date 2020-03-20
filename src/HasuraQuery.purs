@@ -1,7 +1,7 @@
 -- | A schema is a row type with items of:
 -- |   tableName :: Record tableRow
 -- |
--- | Mutations are type-safe, queries are TODO
+-- | Mutations are type-safe, queries are stringy
 module HasuraQuery where
 
 import Prelude
@@ -61,17 +61,17 @@ mutationToString (Mutation _ subMutation) =
   String.joinWith " " (NonEmpty.fromNonEmpty Array.cons subMutation) <>
   " }"
 
-renderQuery :: forall schema. String -> GraphQLQuery schema -> String
+renderQuery :: forall schema. UUID -> GraphQLQuery schema -> String
 renderQuery id query =
   stringify $ encodeJson $ { type : "start"
-                           , id : id
+                           , id : UUID.toString id
                            , payload : { query : queryToString query }
                            }
 
-renderMutation :: forall schema. String -> GraphQLMutation schema -> String
+renderMutation :: forall schema. UUID -> GraphQLMutation schema -> String
 renderMutation id mutation =
   stringify $ encodeJson $ { type : "start"
-                           , id : id
+                           , id : UUID.toString id
                            , payload : { query : mutationToString mutation }
                            }
 
@@ -200,6 +200,6 @@ instance consRowListEncodeJSON
 
 type GraphQLWebsocketResponse
   = { type :: String
-    , id :: String
+    , id :: UUID
     , payload :: Json
     }

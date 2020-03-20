@@ -12,10 +12,6 @@ import Megagraph (Graph, Mapping, _graph, _graphs, _mapping, _mappings, _panes, 
 import MegagraphOperation (CreateOperation(..), EquationOperation(..), GraphOperation(..), MappingOperation(..), MegagraphOperation(..), MegagraphUpdate)
 import Query (MegagraphSchema, renderEdgeMappingEdgeUpsertQuery, renderEdgeUpsertQuery, renderGraphUpsertQuery, renderMappingUpsertQuery, renderNodeMappingEdgeUpsertQuery, renderNodeUpsertQuery)
 
--- TODO see below TODO
---import UI.Panes (arrangePanes, insertPaneImpl, rescalePaneImpl)
-
-
 interpretGraphOperation :: GraphOperation -> Graph -> Graph
 interpretGraphOperation = case _ of
   UpdateNodes from to ->      \graph -> foldr updateNode graph to
@@ -69,20 +65,6 @@ interpretMegagraphOperation = case _ of
 applyMegagraphUpdate :: MegagraphUpdate -> AppState -> AppState
 applyMegagraphUpdate op state = foldl (flip interpretMegagraphOperation) state op
 
--- TODO use or remove
---removePaneImpl :: GraphId -> AppState -> AppState
---removePaneImpl graphId =
---  removeGraphData graphId
---  >>>
---  arrangePanes
---  -- Focus on the rightmost pane
---  >>> \appState -> case appState.graphData.panes
---                        # Map.values >>> Array.fromFoldable
---                        # Array.sortBy (comparing _.boundingRect.right)
---                        # Array.head of
---        Nothing -> appState
---        Just nextPane -> appState { focusedPane = Just nextPane.graphId }
-
 
 ------
 -- Hasura graphQL query translation
@@ -96,7 +78,7 @@ megagraphOperationToGraphMutation =
         UpdateEdges from to    -> renderEdgeUpsertQuery to
         UpdateTitle _ to       -> renderGraphUpsertQuery [{id: graphId, title: to}]
     GraphComponentEquationOperation graphId equationOp ->
-      case equationOp of -- TODO
+      case equationOp of
         InsertPathEquations pathEquations -> emptyMutation
         DeletePathEquations pathEquations -> emptyMutation
     MappingComponentOperation mappingId _ _ mappingOp ->

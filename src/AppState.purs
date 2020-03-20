@@ -5,6 +5,7 @@ import Prelude
 import ContentEditable.SVGComponent as SVGContentEditable
 import Data.Argonaut.Core (Json)
 import Data.Array as Array
+import Data.Either (Either)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', Traversal', lens, traversed, (%~), (?~))
 import Data.Lens.At (at)
@@ -38,6 +39,7 @@ appStateVersion = "0.0.0.0.0.0.0.1"
 
 data Action
   = DoMany (Array Action)
+  | ApplyMegagraphUpdate MegagraphUpdate
   | PreventDefault WE.Event
   | StopPropagation WE.Event
   | EvalQuery (Query Unit)
@@ -61,6 +63,7 @@ data Action
   | EdgeTextInput GraphId EdgeId String
   | TitleTextInput GraphId String
   | UpdateTitleValidity GraphId Boolean
+  | UpdateNodeValidity GraphId NodeId Boolean
   | AppCreateNode GraphView ME.MouseEvent
   | AppDeleteNode Node
   | AppCreateEdge EdgeMetadata
@@ -99,9 +102,11 @@ derive instance eqTextFieldElement :: Eq TextFieldElement
 
 type Input = Shape
 
+type CallbackId = UUID
+
 data Query a
   = UpdateBoundingRect a
-  | ReceiveOperation String Json a
+  | ReceiveOperation CallbackId Json a
   | QLoadGraph GraphId a
 
 data Message
@@ -163,11 +168,11 @@ type AppState
     , keyHoldState       :: KeyHoldState
     -- Each active conversation is kept track of via an id, with the handler
     -- for the next incoming message indexed by the id.
-    , callbacks          :: Map String (Json -> Maybe Action)
+    , callbacks          :: Map CallbackId (Json -> Either String Action)
     -- The elements pending a server query are kept track of in a Map,
     -- with the element id as the key and the callbackId / conversation id
     -- as the value.
-    , pending            :: Map UUID String
+    , pending            :: Map UUID CallbackId
     }
 
 emptyAppState :: WHE.DOMRect -> AppState
@@ -343,10 +348,10 @@ _spaceDown = prop (SProxy :: SProxy "spaceDown")
 _controlDown :: Lens' KeyHoldState Boolean
 _controlDown = prop (SProxy :: SProxy "controlDown")
 
-_callbacks :: Lens' AppState (Map String (Json -> Maybe Action))
+_callbacks :: Lens' AppState (Map CallbackId (Json -> Either String Action))
 _callbacks = prop (SProxy :: SProxy "callbacks")
 
-_pending :: Lens' AppState (Map UUID String)
+_pending :: Lens' AppState (Map UUID CallbackId)
 _pending = prop (SProxy :: SProxy "pending")
 
 ------

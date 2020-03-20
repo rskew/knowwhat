@@ -3,6 +3,7 @@ module Main where
 import Prelude
 
 import AppState (Message(..), Query(..))
+import Config as Config
 import Control.Coroutine as CR
 import Control.Coroutine.Aff (emit)
 import Control.Coroutine.Aff as CRA
@@ -90,20 +91,12 @@ wsSender :: WS.WebSocket -> CR.Consumer Message Aff Unit
 wsSender socket = CR.consumer \msg -> do
   case msg of
     SendOperation message -> do
-      -- Initialise the connection as per the graphql-over-websocket protocol
-      -- https://github.com/apollographql/subscriptions-transport-ws/blob/master/PROTOCOL.md
-      -- TODO do this in the connection init, not in app logic
-      liftEffect $ WS.sendString socket $ encodeJSON {type: "connection_init"}
-
       liftEffect $ WS.sendString socket message
   pure Nothing
 
 main :: Effect Unit
 main = do
-  -- TODO
-  -- connection <- WS.create config.webSocketAddress []
-  -- connection <- WS.create "ws://localhost:8111" []
-  connection <- WS.create "ws://localhost:8080/v1/graphql" []
+  connection <- WS.create Config.webSocketURL []
   HA.runHalogenAff do
     -- Give the connection a moment to connect
     body <- HA.awaitBody
@@ -121,12 +114,16 @@ main = do
     -- from our component
     ui.subscribe $ wsSender connection
 
-    -- Once the websocket connection is open, load the home graph
+    -- Once the websocket connection is open, initialise the connection and load the home graph.
     listener <- H.liftEffect $ EET.eventListener \ev -> do
-      ---- TODO use knowledge-neighborhood graph id from config
-      case UUID.parseUUID "7b2bf7f2-151c-412b-ad23-4ae1a3b22688" of
+      case UUID.parseUUID Config.homeGraphId of
         Nothing -> pure unit
-        Just graphId -> launchAff_ $ ui.query $ H.tell $ QLoadGraph graphId
+        Just graphId -> do
+          -- Initialise the connection as per the graphql-over-websocket protocol
+          -- https://github.com/apollographql/subscriptions-transport-ws/blob/master/PROTOCOL.md
+          WS.sendString connection $ encodeJSON {type: "connection_init"}
+          -- Trigger the app to load the home graph
+          launchAff_ $ ui.query $ H.tell $ QLoadGraph graphId
     H.liftEffect $ EET.addEventListener WSET.onOpen listener false (WS.toEventTarget connection)
 
     -- Connecting the consumer to the producer initializes both,

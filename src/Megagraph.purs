@@ -223,7 +223,7 @@ type NodeRow
     , positionY :: Number
     , text      :: String
     , isValid   :: Boolean
-    , deleted        :: Boolean
+    , deleted   :: Boolean
     )
 type Node = Record NodeRow
 
@@ -406,7 +406,7 @@ emptyMegagraph = { graphs : Map.empty
 _title :: forall r t. Lens' {title :: t | r} t
 _title = prop (SProxy :: SProxy "title")
 
-_isValid :: Lens' GraphTitle Boolean
+_isValid :: forall r. Lens' {isValid :: Boolean | r} Boolean
 _isValid = prop (SProxy :: SProxy "isValid")
 
 _text :: forall r. Lens' {text :: String | r} String
@@ -625,42 +625,3 @@ edgeArray graph =
 lookupEdgeById :: EdgeId -> Graph -> Maybe Edge
 lookupEdgeById edgeId graph = do
   Map.lookup edgeId graph.edges
-
--- TODO
--- why do I want this?
---edgeIdMap :: Graph -> Map EdgeId Edge
---edgeIdMap graph =
---  Map.fromFoldable $ (\edge -> Tuple edge.id edge) <$> edgeArray graphData
-
--- TODO don't need these if graphs keps separately
---allEdgesBetweenGraphs :: GraphData -> Array Edge
---allEdgesBetweenGraphs =
---  edgeArray >>> Array.filter \edge -> edge.id.sourceGraph /= edge.id.targetGraph
---
---separateGraphs :: Graph -> Map GraphId GraphData
---separateGraphs graphSmoosh =
---  graphIds
---  # Array.mapMaybe (\graphId -> Tuple graphId <$> selectGraphData graphId graphSmoosh)
---  # Map.fromFoldable
---  where
---    graphIds = Array.fromFoldable $ Map.keys graphSmoosh.panes
---
---selectGraphData :: GraphId -> GraphData -> Maybe GraphData
---selectGraphData graphId graphData =
---  let
---    singleGraphNodes = Map.filter (\node -> node.graphId == graphId) graphData.nodes
---
---    singleGraphEdges = do
---      nodeId <- Array.fromFoldable $ Map.keys singleGraphNodes
---      let nodeEdges = allEdgesTouchingNode nodeId graphData
---      nodeEdges.incoming <> nodeEdges.outgoing
---
---    newGraphData = batchInsertEdges
---                   (emptyGraphData { nodes = singleGraphNodes })
---                   singleGraphEdges
---  in do
---    pane  <- Map.lookup graphId graphData.panes
---    title <- Map.lookup graphId graphData.titles
---    pure $ newGraphData { panes  = Map.singleton graphId pane
---                        , titles = Map.singleton graphId title
---                        }

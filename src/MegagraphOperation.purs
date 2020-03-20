@@ -7,6 +7,7 @@ import Data.Foldable (foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.UUID (UUID)
 import Data.UUID as UUID
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
@@ -61,6 +62,21 @@ instance showMegagraphComponent :: Show MegagraphComponent where
     GraphComponent graphId -> "GraphComponent " <> show graphId
     MappingComponent mappingId source target ->
       "MappingComponent " <> show mappingId <> " from: " <> show source <> " to: " <> show target
+
+megagraphOperationTargets :: MegagraphOperation -> Array UUID
+megagraphOperationTargets = case _ of
+  GraphComponentOperation graphId op -> case op of
+    UpdateNodes _ nodes -> _.id <$> nodes
+    UpdateEdges _ edges -> _.id <$> edges
+    UpdateTitle _ _ -> [graphId]
+  GraphComponentEquationOperation graphId _ -> [graphId]
+  MappingComponentOperation _ _ _ op -> case op of
+    UpdateNodeMappingEdges _ nodeMappingEdges -> _.id <$> nodeMappingEdges
+    UpdateEdgeMappingEdges _ edgeMappingEdges -> _.id <$> edgeMappingEdges
+  CreateComponentOperation op -> case op of
+    CreateGraph graphId _ -> [graphId]
+    CreateMapping mappingId _ _ _ -> [mappingId]
+  MegagraphOperationNoOp -> []
 
 -- | Operations can be grouped together into a single update.
 -- | However, the interpreter converts each operation into an update before they

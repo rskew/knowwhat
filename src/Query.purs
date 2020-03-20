@@ -45,7 +45,6 @@ renderGraphUpsertQuery :: Array (Record GraphRow) -> GraphQLMutation MegagraphSc
 renderGraphUpsertQuery graphRows =
   upsertOperation (SProxy :: SProxy "graphs") graphRows
 
--- TODO build these with typelevel programming
 type GraphUpsertResponse
   = { data ::
       { insert_graphs ::
@@ -99,14 +98,20 @@ renderEdgeMappingEdgeUpsertQuery ::
   -> GraphQLMutation MegagraphSchema
 renderEdgeMappingEdgeUpsertQuery edgeMappingEdges = upsertOperation (SProxy :: SProxy "edgeMappingEdges") edgeMappingEdges
 
--- TODO type safety by constraining query subfields by schema fields
--- a.k.a using purescript's type system to validate the query format
--- against the schema and general well-formedness.
+type MegagraphUpsertResponse
+  = { data :: Json }
+
+parseMegagraphUpsertResponse :: Json -> Either String MegagraphUpsertResponse
+parseMegagraphUpsertResponse json =
+  decodeJson json
+
+
+------
+-- Queries
 --
--- Literally just a type-level version of the below query string that
--- can be checked against a schema with type-level slow-gramming
---
--- And then type-directed parsing of the response
+-- It would be nice to make these type-safe :)
+-- Pretty far down the roadmap though.
+
 graphFetchQuery :: GraphId -> Array GraphId -> GraphQLQuery MegagraphSchema
 graphFetchQuery graphId presentGraphIds =
   let

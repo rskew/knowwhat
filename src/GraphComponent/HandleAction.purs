@@ -3,7 +3,8 @@ module GraphComponent.HandleAction where
 import Prelude
 
 import AppOperation.Utils (removeEdgesOp, removeNodesOp)
-import AppState (Action(..), AppState, EdgeSourceElement(..), HistoryUpdate(..), HoveredElementId(..), Message(..), Query(..), Slots, TextFieldElement(..), _callbacks, _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _edgeTextField, _graphHistory, _history, _hoveredElements, _keyHoldState, _mappingHistory, _megagraph, _megagraphHistory, _nodeTextField, _pending, _spaceDown, _titleTextField, _undone, lookupMapping, updateHistory, updateUndone)
+import AppState (Action(..), AppState, CallbackId, EdgeSourceElement(..), HistoryUpdate(..), HoveredElementId(..), Message(..), Query(..), Slots, TextFieldElement(..), _callbacks, _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _edgeTextField, _graphHistory, _history, _hoveredElements, _keyHoldState, _mappingHistory, _megagraph, _megagraphHistory, _nodeTextField, _pending, _spaceDown, _titleTextField, _undone, lookupMapping, updateHistory, updateUndone)
+import Config as Config
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
 import Control.Monad.Except (runExcept)
@@ -12,7 +13,7 @@ import Data.Argonaut.Core (Json, stringify)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(..))
-import Data.Lens ((%~), (.~), (^?), (^.), (^..), traversed)
+import Data.Lens (traversed, (%~), (.~), (^.), (^..), (^?))
 import Data.Lens.At (at)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), isJust)
@@ -36,8 +37,8 @@ import HasuraQuery (renderMutation, renderQuery)
 import Interpreter (applyMegagraphUpdate, megagraphUpdateToQuery)
 import Math as Math
 import Megagraph (GraphEdgeSpacePoint2D(..), GraphSpacePoint2D(..), MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdge, _edgeMappingEdges, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _nodeMappingEdges, _origin, _pane, _panes, _position, _subgraph, _text, _title, _zoom, edgeArray, edgeMidpoint, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
-import MegagraphOperation (CreateOperation(..), GraphOperation(..), MappingOperation(..), MegagraphComponent(..), MegagraphOperation(..), MegagraphUpdate, createTargetsIfNotExist, encodeGraphAsMegagraphUpdate, encodeMappingAsMegagraphUpdate, encodeMegagraphAsMegagraphUpdate, invertMegagraphUpdate)
-import Query (graphFetchQuery, graphIdWithTitleQuery, nodesWithSubgraphQuery, parseGraphFetchResponse, parseGraphIdWithTitleResponse, parseGraphUpsertResponse, parseNodesWithSubgraphResponse, renderGraphUpsertQuery)
+import MegagraphOperation (CreateOperation(..), GraphOperation(..), MappingOperation(..), MegagraphComponent(..), MegagraphOperation(..), MegagraphUpdate, createTargetsIfNotExist, encodeGraphAsMegagraphUpdate, encodeMappingAsMegagraphUpdate, encodeMegagraphAsMegagraphUpdate, invertMegagraphUpdate, megagraphOperationTargets)
+import Query (graphFetchQuery, graphIdWithTitleQuery, nodesWithSubgraphQuery, parseGraphFetchResponse, parseGraphIdWithTitleResponse, parseGraphUpsertResponse, parseMegagraphUpsertResponse, parseNodesWithSubgraphResponse, renderGraphUpsertQuery)
 import UI.Constants (zoomScaling)
 import UI.Panes (arrangePanes, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Utils (tupleApply)
@@ -65,6 +66,8 @@ handleAction :: Action -> H.HalogenM AppState Action Slots Message Aff Unit
 handleAction = case _ of
   DoMany actions ->
     for_ actions handleAction
+
+  ApplyMegagraphUpdate op -> applyReceivedMegagraphUpdate op
 
   PreventDefault e -> do
     H.liftEffect $ WE.preventDefault e
@@ -94,11 +97,23 @@ handleAction = case _ of
     pure unit
 
   LoadGraph graphId -> do
+    callbackId <- H.liftEffect UUID.genUUID
+    let
+      callback = \msgJson -> do
+        {graph, mappings} <- parseGraphFetchResponse msgJson
+        let
+          graphOp = encodeGraphAsMegagraphUpdate graph
+          mappingUpdates = mappings <#> \mapping ->
+            encodeMappingAsMegagraphUpdate mapping
+        pure $ DoMany $ (ApplyMegagraphUpdate <$> Array.cons graphOp mappingUpdates)
+                        <> [UpdateFocusPane (GraphComponent graph.id)]
+    H.modify_ $ registerCallback callbackId callback [graphId]
     state <- H.get
-    let currentGraphIds = state.megagraph.graphs
-                          # Map.keys # Array.fromFoldable
+    let
+      currentGraphIds = state.megagraph.graphs
+                        # Map.keys # Array.fromFoldable
     H.liftEffect $ Console.log $ "Loading graph " <> show graphId
-    H.raise $ SendOperation $ renderQuery "" $ graphFetchQuery graphId currentGraphIds
+    H.raise $ SendOperation $ renderQuery callbackId $ graphFetchQuery graphId currentGraphIds
 
   UpdateContentEditableText graphId -> do
     state <- H.get
@@ -126,10 +141,31 @@ handleAction = case _ of
       Nothing -> pure unit
       Just node ->
         let
-          op = [GraphComponentOperation graphId $ UpdateNodes [node] [(node {text = text})]]
+          updateNodeTextOp = [GraphComponentOperation graphId $ UpdateNodes [node] [(node {text = text})]]
         in do
-          interpretAndSend op
+          interpretAndSend updateNodeTextOp
           handleAction $ UpdateFocus $ Just $ NodeElement node.graphId node.id
+          -- If node has a linked subgraph, keep the subgraph title in sync with the node text.
+          case node.subgraph of
+            Nothing -> pure unit
+            Just subgraphId ->
+              let
+                updateTitleOp = [GraphComponentOperation subgraphId $ UpdateTitle node.text (trim text)]
+              in do
+                -- Check uniqueness of title in the database
+                callbackId <- H.liftEffect UUID.genUUID
+                let
+                  callback = \msg ->
+                    case parseGraphUpsertResponse msg of
+                      Right 1 -> Right $ DoMany [ UpdateNodeValidity graphId nodeId true
+                                                , ApplyMegagraphUpdate updateTitleOp
+                                                , UpdateContentEditableText subgraphId
+                                                ]
+                      _ -> Right $ UpdateNodeValidity graphId nodeId false
+                H.modify_ $ registerCallback callbackId callback [nodeId]
+                H.raise $ SendOperation
+                          $ renderMutation callbackId
+                            $ renderGraphUpsertQuery [{id: subgraphId, title: trim text}]
 
   EdgeTextInput graphId edgeId text -> do
     state <- H.get
@@ -155,16 +191,19 @@ handleAction = case _ of
           let
             callback = \msg ->
               case parseGraphUpsertResponse msg of
-                Right 1 -> Just $ UpdateTitleValidity graphId true
-                _ -> Just $ UpdateTitleValidity graphId false
-          H.modify_ $ registerCallback callbackId callback graphId
+                Right 1 -> Right $ UpdateTitleValidity graphId true
+                _ -> Right $ UpdateTitleValidity graphId false
+          H.modify_ $ registerCallback callbackId callback [graphId]
           H.raise $ SendOperation
-                    $ renderMutation (UUID.toString callbackId)
+                    $ renderMutation callbackId
                     $ renderGraphUpsertQuery [{id: graphId, title: trim newTitleText}]
           H.modify_ $ applyMegagraphUpdate op
 
   UpdateTitleValidity graphId isValid ->
     H.modify_ $ _megagraph <<< _graph graphId <<< _title <<< _isValid .~ isValid
+
+  UpdateNodeValidity graphId nodeId isValid ->
+    H.modify_ $ _megagraph <<< _graph graphId <<< _node nodeId <<< _isValid .~ isValid
 
   BackgroundDragStart graphId initialGraphOrigin mouseEvent -> do
     state <- H.get
@@ -522,6 +561,8 @@ handleAction = case _ of
             target = GraphComponent node.graphId
           interpretAndSend op
           H.modify_ $ updateHistory (Insert op) target
+          handleAction $ UnHover $ NodeBorderId node.graphId node.id
+          handleAction $ UnHover $ NodeHaloId node.graphId node.id
 
   AppCreateEdge edgeMetadata ->
     if edgeMetadata.source == edgeMetadata.target
@@ -544,6 +585,8 @@ handleAction = case _ of
     interpretAndSend op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UpdateFocus $ Just $ NodeElement edge.graphId edge.source
+    handleAction $ UnHover $ EdgeBorderId (GraphComponent edge.graphId) edge.id
+    handleAction $ UnHover $ EdgeHaloId (GraphComponent edge.graphId) edge.id
 
   AppCreateNodeMappingEdge edgeId sourceNodeId sourceGraphId targetNodeId targetGraphId -> do
     state <- H.get
@@ -561,6 +604,10 @@ handleAction = case _ of
   AppDeleteNodeMappingEdge mappingId edgeId -> do
     state <- H.get
     H.modify_ $ _megagraph <<< _mapping mappingId <<< _nodeMappingEdges <<< at edgeId .~ Nothing
+    case state.megagraph ^? _mapping mappingId of
+      Nothing -> pure unit
+      Just mapping ->
+        handleAction $ UnHover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) edgeId
 
   AppCreateEdgeMappingEdge edgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId -> do
     state <- H.get
@@ -578,6 +625,10 @@ handleAction = case _ of
   AppDeleteEdgeMappingEdge mappingId edgeId -> do
     state <- H.get
     H.modify_ $ _megagraph <<< _mapping mappingId <<< _edgeMappingEdges <<< at edgeId .~ Nothing
+    case state.megagraph ^? _mapping mappingId of
+      Nothing -> pure unit
+      Just mapping ->
+        handleAction $ UnHover $ EdgeBorderId (MappingComponent mapping.id mapping.sourceGraph mapping.targetGraph) edgeId
 
   UpdateNodeSubgraph graphId nodeId maybeSubgraphId -> do
     state <- H.get
@@ -804,34 +855,11 @@ handleQuery = case _ of
 
   ReceiveOperation callbackId msgJson a -> Just a <$ do
     state <- H.get
-    -- TODO
-    H.liftEffect $ Console.log $ stringify msgJson
     case Map.lookup callbackId state.callbacks of
-      Just callback ->
-        case callback msgJson of
-          Nothing -> pure unit
-          Just action -> do
-            handleAction action
-            -- cleanup app state
-            H.modify_ $ _callbacks <<< at callbackId .~ Nothing
-            H.modify_ $ _pending %~ Map.filter ((/=) callbackId)
-      -- No callback was registered, so the default case is that a graph was
-      -- loaded.
-      Nothing -> do
-        case parseGraphFetchResponse msgJson of
-          Left err -> do
-            H.liftEffect $ Console.log err
-            H.liftEffect $ Console.log $ stringify msgJson
-          Right {graph, mappings} ->
-            let
-              graphOp = encodeGraphAsMegagraphUpdate graph
-              mappingUpdates = mappings <#> \mapping ->
-                encodeMappingAsMegagraphUpdate mapping
-            in do
-              applyReceivedMegagraphUpdate graphOp
-              for_ mappingUpdates \op ->
-                applyReceivedMegagraphUpdate op
-              handleAction $ UpdateFocusPane (GraphComponent graph.id)
+      Just callback -> callCallback callbackId callback msgJson
+      Nothing -> H.liftEffect $ Console.log
+                 $ "Error: message recieved without handler ready. ID: "
+                 <> show callbackId <> " msgJson: " <> stringify msgJson
 
   QLoadGraph graphId a -> Just a <$ do
     handleAction $ LoadGraph graphId
@@ -858,12 +886,22 @@ redoOp op target = do
   H.modify_ $ updateHistory (Insert op) target
   H.modify_ $ updateUndone Pop target
 
+-- | Interpret the operation, send the operation to the backend,
+-- | and register a callback to track when the backend has
+-- | actioned the operation.
 interpretAndSend :: MegagraphUpdate -> H.HalogenM AppState Action Slots Message Aff Unit
 interpretAndSend op = do
+  callbackId <- H.liftEffect UUID.genUUID
+  let
+    targets = Array.concatMap megagraphOperationTargets op
+    callback = \msg -> do
+      megagraphUpsertResponse <- parseMegagraphUpsertResponse msg
+      pure $ DoMany []
+  H.modify_ $ registerCallback callbackId callback targets
   state <- H.get
   let
     preprocessedOp = createTargetsIfNotExist state.megagraph op
-    query = renderMutation "default" $ megagraphUpdateToQuery preprocessedOp
+    query = renderMutation callbackId $ megagraphUpdateToQuery preprocessedOp
   H.raise $ SendOperation $ query
   H.modify_ $ applyMegagraphUpdate preprocessedOp
 
@@ -871,11 +909,29 @@ interpretAndSend op = do
 ------
 -- Callback helpers
 
-registerCallback :: UUID -> (Json -> Maybe Action) -> UUID -> AppState -> AppState
-registerCallback callbackId callback elementId =
-  (_callbacks %~ Map.insert (UUID.toString callbackId) callback)
+registerCallback :: UUID -> (Json -> Either String Action) -> Array UUID -> AppState -> AppState
+registerCallback callbackId callback elementIds =
+  (_callbacks %~ Map.insert callbackId callback)
   >>>
-  (_pending %~ Map.insert elementId (UUID.toString callbackId))
+  (_pending %~ Map.union (Map.fromFoldable (elementIds <#> \elementId -> Tuple elementId callbackId)))
+
+callCallback :: CallbackId -> (Json -> Either String Action) -> Json -> H.HalogenM AppState Action Slots Message Aff Unit
+callCallback callbackId callback msgJson = do
+  case callback msgJson of
+    Left err -> do
+      H.liftEffect $ Console.log "callback failed:"
+      H.liftEffect $ Console.log err
+      H.liftEffect $ Console.log $ stringify msgJson
+    Right action -> do
+      handleAction action
+      -- cleanup app state
+      H.modify_ $ _callbacks <<< at callbackId .~ Nothing
+      H.modify_ $ _pending %~ Map.filter ((/=) callbackId)
+      -- TODO
+      H.modify_ $ _pending .~ Map.empty
+  state <- H.get
+  H.liftEffect $ Console.log "pending:"
+  H.liftEffect $ Console.log $ show state.pending
 
 
 ------
@@ -964,10 +1020,10 @@ handleKeypress keyboardEvent = do
                        let
                          callback = \msg ->
                            case parseGraphIdWithTitleResponse msg of
-                             Left err -> Nothing
-                             Right maybeGraphRow -> Just $ UpdateNodeSubgraph graphId nodeId (maybeGraphRow <#> _.id)
-                       H.modify_ $ registerCallback callbackId callback nodeId
-                       H.raise $ SendOperation $ renderQuery (UUID.toString callbackId) $ graphIdWithTitleQuery $ trim nodeText
+                             Left err -> Left err
+                             Right maybeGraphRow -> Right $ UpdateNodeSubgraph graphId nodeId (maybeGraphRow <#> _.id)
+                       H.modify_ $ registerCallback callbackId callback [nodeId]
+                       H.raise $ SendOperation $ renderQuery callbackId $ graphIdWithTitleQuery $ trim nodeText
                  _ -> pure unit
 
         "o" -> do
@@ -1026,10 +1082,6 @@ handleKeypress keyboardEvent = do
             interpretAndSend op
             H.modify_ arrangePanes
 
-        -- TODO: highlighting
-        ---- Highlight currently focused node/edge
-        --"h" -> H.modify_ $ _graphAtId %~ toggleHighlightFocus
-
         -- jump Down into the subgraph of the focused node
         "d" -> do
           state <- H.get
@@ -1054,22 +1106,20 @@ handleKeypress keyboardEvent = do
               Just (GraphComponent graphId) -> do
                 callbackId <- H.liftEffect UUID.genUUID
                 let
-                  callback = \msg ->
-                    case parseNodesWithSubgraphResponse msg of
-                      Left err -> Nothing
-                      Right nodes -> Just $ DoMany $ [RemovePane graphId] <> (LoadGraph <$> (nodes <#> _.graphId))
-                H.modify_ $ registerCallback callbackId callback graphId
-                H.raise $ SendOperation $ renderQuery (UUID.toString callbackId) $ nodesWithSubgraphQuery graphId
+                  callback = \msg -> do
+                    nodes <- parseNodesWithSubgraphResponse msg
+                    pure $ DoMany $ [RemovePane graphId] <> (LoadGraph <$> (nodes <#> _.graphId))
+                H.modify_ $ registerCallback callbackId callback [graphId]
+                H.raise $ SendOperation $ renderQuery callbackId $ nodesWithSubgraphQuery graphId
               _ -> pure unit
 
         -- load the Knowledge navigator
         "k" -> do
           state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
-            -- TODO
-            pure unit
-            --H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            --H.raise $ SendOperation $ AppOperation config.knowledgeNavigatorId $
-            --  insertPane config.knowledgeNavigatorId
+          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
+            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+            case UUID.parseUUID Config.homeGraphId of
+              Nothing -> pure unit
+              Just homeGraphId -> handleAction $ LoadGraph homeGraphId
 
         _ -> pure unit

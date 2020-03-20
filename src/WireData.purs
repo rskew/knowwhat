@@ -3,15 +3,12 @@ module WireData where
 import Prelude
 
 import Data.DateTime.Instant (Instant)
+import Config as Config
 import Effect (Effect)
 import Effect.Now (now)
 import Foreign (F, ForeignError(..), fail)
 import Foreign.Generic (encodeJSON, decodeJSON)
 import MegagraphOperation (MegagraphUpdate)
-
--- TODO get from Config
-version :: String
-version = "0.0.0.0.0.0.1"
 
 type Metadata =
   { version   :: String
@@ -32,7 +29,7 @@ encodeWireData :: MegagraphUpdate -> Effect WireDataRaw
 encodeWireData op = do
   timestamp <- now
   pure { op : encodeJSON op
-       , metadata : { version : version
+       , metadata : { version : Config.version
                     , timestamp : timestamp
                     }
        }

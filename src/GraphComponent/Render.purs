@@ -66,16 +66,15 @@ renderGraphNode state pane node =
     nodeBorderClasses =
         joinWith " " $ Array.catMaybes
         [ Just "nodeBorder"
-        -- TODO: use highlighting
-        --, if (Set.member node.id state.graphData.highlighted)
-        --  then Just "highlighted"
-        --  else Nothing
         , if hoveredOverBorder
              &&
              (not drawingEdgeOverNode)
              &&
              (not nodeFocused)
           then Just "hovered"
+          else Nothing
+        , if not node.isValid
+          then Just "invalid"
           else Nothing
         ]
     haloClasses =
@@ -187,6 +186,7 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
   GraphSpacePoint2D targetPos <- lookupNodePositionInPane state mapping.targetGraph nodeMappingEdge.targetNode renderPane
   let
     focused = state.focus == Just (NodeMappingEdgeElement mapping.id nodeMappingEdge.id)
+    edgePendingServerResponse = isJust $ Map.lookup nodeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "nodeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
@@ -196,6 +196,9 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
         else Nothing
       , if focused
         then Just "focused"
+        else Nothing
+      , if edgePendingServerResponse
+        then Just "pending"
         else Nothing
       ]
     targetHasSubgraph =
@@ -257,6 +260,7 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
     sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePosGraphSpace
     targetPosPageSpace = graphSpaceToPageSpace targetPane targetPosGraphSpace
     focused = state.focus == Just (EdgeMappingEdgeElement mapping.id edgeMappingEdge.id)
+    edgePendingServerResponse = isJust $ Map.lookup edgeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "edgeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
@@ -266,6 +270,9 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
         else Nothing
       , if focused
         then Just "focused"
+        else Nothing
+      , if edgePendingServerResponse
+        then Just "pending"
         else Nothing
       ]
     markerRef = "url(#arrow-to-edge)"
@@ -323,6 +330,7 @@ renderEdge state renderPane edge = do
     borderHovered = state.hoveredElements # Set.member (EdgeBorderId (GraphComponent edge.graphId) edge.id)
     haloHovered = state.hoveredElements # Set.member (EdgeHaloId (GraphComponent edge.graphId) edge.id)
     edgeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (EdgeTextField edge.graphId edge.id)
+    edgePendingServerResponse = isJust $ Map.lookup edge.id state.pending
     edgeClasses = joinWith " " $ Array.catMaybes
                   [ Just "edge"
                   , if focused
@@ -337,6 +345,9 @@ renderEdge state renderPane edge = do
       [ Just "edgeBorder"
       , if borderHovered
         then Just "hovered"
+        else Nothing
+      , if edgePendingServerResponse
+        then Just "pending"
         else Nothing
       ]
     edgeHaloClasses =
@@ -547,6 +558,7 @@ renderSinglePane state renderPane graph =
                             # Map.values >>> Array.fromFoldable
                             # Array.filter (\graph' -> graph'.id /= graph.id)
                             # Array.concatMap (Array.fromFoldable <<< Map.values <<< _.nodes)
+                            # Array.filter (\node -> not node.deleted)
 
     ghostNodes            = Array.catMaybes $ (allNodesInOtherGraphs <#> renderGhostNode state renderPane)
 
