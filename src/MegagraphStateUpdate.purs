@@ -132,18 +132,14 @@ encodeNodeMappingEdgesAsMegagraphStateUpdates mapping nodeMappingEdges =
   let
     deletedNodeMappingEdges = _{deleted = true} <$> nodeMappingEdges
   in
-    [ CreateMapping mapping.id mapping.sourceGraph mapping.targetGraph mapping.title
-    , UpdateNodeMappingEdges deletedNodeMappingEdges nodeMappingEdges
-    ]
+    [UpdateNodeMappingEdges deletedNodeMappingEdges nodeMappingEdges]
 
 encodeEdgeMappingEdgesAsMegagraphStateUpdates :: Mapping -> Array EdgeMappingEdge -> Array MegagraphStateUpdate
 encodeEdgeMappingEdgesAsMegagraphStateUpdates mapping edgeMappingEdges =
   let
     deletedEdgeMappingEdges = _{deleted = true} <$> edgeMappingEdges
   in
-    [ CreateMapping mapping.id mapping.sourceGraph mapping.targetGraph mapping.title
-    , UpdateEdgeMappingEdges deletedEdgeMappingEdges edgeMappingEdges
-    ]
+    [UpdateEdgeMappingEdges deletedEdgeMappingEdges edgeMappingEdges]
 
 encodeMappingAsMegagraphStateUpdates :: Mapping -> Array MegagraphStateUpdate
 encodeMappingAsMegagraphStateUpdates mapping =
@@ -153,7 +149,8 @@ encodeMappingAsMegagraphStateUpdates mapping =
     edgeMappingEdgesOps = encodeEdgeMappingEdgesAsMegagraphStateUpdates mapping
                           $ Array.fromFoldable mapping.edgeMappingEdges
   in
-    nodeMappingEdgesOps <> edgeMappingEdgesOps
+    [ CreateMapping mapping.id mapping.sourceGraph mapping.targetGraph mapping.title
+    ] <> nodeMappingEdgesOps <> edgeMappingEdgesOps
 
 encodeMegagraphAsMegagraphStateUpdates :: Megagraph -> Array MegagraphStateUpdate
 encodeMegagraphAsMegagraphStateUpdates megagraph =

@@ -426,6 +426,9 @@ _edge edgeId = _edges <<< at edgeId <<< traversed
 _position :: Lens' Node GraphSpacePoint2D
 _position = lens nodePosition updateNodePosition
 
+_deleted :: forall r. Lens' {deleted :: Boolean | r} Boolean
+_deleted = prop (SProxy :: SProxy "deleted")
+
 _nodeText :: NodeId -> Traversal' Graph String
 _nodeText nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "text")
 

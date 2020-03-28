@@ -61,15 +61,15 @@ mutationToString (Mutation _ subMutation) =
   String.joinWith " " (NonEmpty.fromNonEmpty Array.cons subMutation) <>
   " }"
 
-renderQuery :: forall schema. UUID -> GraphQLQuery schema -> String
-renderQuery id query =
+renderQuery :: forall schema. GraphQLQuery schema -> UUID -> String
+renderQuery query id =
   stringify $ encodeJson $ { type : "start"
                            , id : UUID.toString id
                            , payload : { query : queryToString query }
                            }
 
-renderMutation :: forall schema. UUID -> GraphQLMutation schema -> String
-renderMutation id mutation =
+renderMutation :: forall schema. GraphQLMutation schema -> UUID -> String
+renderMutation mutation id =
   stringify $ encodeJson $ { type : "start"
                            , id : UUID.toString id
                            , payload : { query : mutationToString mutation }

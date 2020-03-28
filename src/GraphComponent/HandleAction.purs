@@ -164,7 +164,7 @@ handleAction = case _ of
           megagraphMutation = UpdateNodeText node text
         applyMegagraphMutation
           megagraphMutation
-          { onFail: const $ DoNothing
+          { onFail: ConsoleLog
           , onSuccess: DoMany [ case node.subgraph of
                                   Nothing -> DoNothing
                                   Just subgraphId -> UpdateContentEditableText subgraphId
@@ -314,10 +314,13 @@ handleAction = case _ of
     case state.megagraph ^? _graph graphId <<< _node nodeId of
       Nothing -> pure unit
       Just node ->
-        let
-          op = StateUpdate [UpdateNodes [(node {positionX = initialNodePos.x, positionY = initialNodePos.y})] [node]]
-        in
-          H.modify_ $ updateHistory (Insert op) (GraphComponent graphId)
+        if initialNodePos == {x: node.positionX, y: node.positionY}
+        then pure unit
+        else
+          let
+            op = StateUpdate [UpdateNodes [(node {positionX = initialNodePos.x, positionY = initialNodePos.y})] [node]]
+          in
+            H.modify_ $ updateHistory (Insert op) (GraphComponent graphId)
 
   NodeMappingEdgeDragStart mappingId initialNodeMappingEdge mouseEvent -> do
     state <- H.get
@@ -359,12 +362,15 @@ handleAction = case _ of
     case state.megagraph ^? _mapping mapping.id <<< _nodeMappingEdge nodeMappingEdgeId of
       Nothing -> pure unit
       Just nodeMappingEdge ->
-        let
-          initialNodeMappingEdge = nodeMappingEdge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius}
-          op = StateUpdate [UpdateNodeMappingEdges [initialNodeMappingEdge] [nodeMappingEdge]]
-          target = MappingComponent mapping.id
-        in
-          H.modify_ $ updateHistory (Insert op) target
+        if initialMidpoint == {angle: nodeMappingEdge.midpointAngle, radius: nodeMappingEdge.midpointRadius}
+        then pure unit
+        else
+          let
+            initialNodeMappingEdge = nodeMappingEdge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius}
+            op = StateUpdate [UpdateNodeMappingEdges [initialNodeMappingEdge] [nodeMappingEdge]]
+            target = MappingComponent mapping.id
+          in
+            H.modify_ $ updateHistory (Insert op) target
 
   EdgeMappingEdgeDragStart mappingId initialEdgeMappingEdge mouseEvent -> do
     state <- H.get
@@ -414,12 +420,15 @@ handleAction = case _ of
     case state.megagraph ^? _mapping mapping.id <<< _edgeMappingEdge edgeMappingEdgeId of
       Nothing -> pure unit
       Just edgeMappingEdge ->
-        let
-          initialEdgeMappingEdge = edgeMappingEdge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius}
-          op = StateUpdate [UpdateEdgeMappingEdges [initialEdgeMappingEdge] [edgeMappingEdge]]
-          target = MappingComponent mapping.id
-        in
-          H.modify_ $ updateHistory (Insert op) target
+        if initialMidpoint == {angle: edgeMappingEdge.midpointAngle, radius: edgeMappingEdge.midpointRadius}
+        then pure unit
+        else
+          let
+            initialEdgeMappingEdge = edgeMappingEdge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius}
+            op = StateUpdate [UpdateEdgeMappingEdges [initialEdgeMappingEdge] [edgeMappingEdge]]
+            target = MappingComponent mapping.id
+          in
+            H.modify_ $ updateHistory (Insert op) target
 
   EdgeDragStart graphId edgeId initialMidpoint mouseEvent -> do
     H.subscribe' \subscriptionId ->
@@ -458,11 +467,14 @@ handleAction = case _ of
     case state.megagraph ^? _graph graphId <<< _edge edgeId of
       Nothing -> pure unit
       Just edge ->
-        let
-          op = StateUpdate [UpdateEdges [(edge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius})] [edge]]
-          target = GraphComponent graphId
-        in
-          H.modify_ $ updateHistory (Insert op) target
+        if initialMidpoint == {angle: edge.midpointAngle, radius: edge.midpointRadius}
+        then pure unit
+        else
+          let
+            op = StateUpdate [UpdateEdges [(edge {midpointAngle = initialMidpoint.angle, midpointRadius = initialMidpoint.radius})] [edge]]
+            target = GraphComponent graphId
+          in
+            H.modify_ $ updateHistory (Insert op) target
 
   EdgeDrawStart pane sourceElement mouseEvent -> do
     state <- H.get
@@ -573,13 +585,13 @@ handleAction = case _ of
             edgeArray graph
             # Array.filter (\edge ->
                              edge.source == node.id || edge.target == node.id)
-          nodeMappingEdgesTouchingNode =
-            state.megagraph.mappings
-            # Map.values # Array.fromFoldable
-            # Array.concatMap (\mapping -> mapping.nodeMappingEdges
-                                           # Map.values # Array.fromFoldable)
-            # Array.filter (\edge ->
-                             edge.sourceNode == node.id || edge.targetNode == node.id)
+          --nodeMappingEdgesTouchingNode =
+          --  state.megagraph.mappings
+          --  # Map.values # Array.fromFoldable
+          --  # Array.concatMap (\mapping -> mapping.nodeMappingEdges
+          --                                 # Map.values # Array.fromFoldable)
+          --  # Array.filter (\edge ->
+          --                   edge.sourceNode == node.id || edge.targetNode == node.id)
           focus = case Array.head edgesTouchingNode of
             Just edge ->
               case edge.source == node.id, edge.target == node.id of
@@ -588,15 +600,19 @@ handleAction = case _ of
                 _, _ -> Nothing
             Nothing -> Nothing
         in do
-          for_ edgesTouchingNode $ handleAction <<< AppDeleteEdge
-          for_ nodeMappingEdgesTouchingNode $ handleAction <<< AppDeleteNodeMappingEdge
+          --for_ edgesTouchingNode $ handleAction <<< AppDeleteEdge
+          --for_ nodeMappingEdgesTouchingNode $ handleAction <<< AppDeleteNodeMappingEdge
           let
-            op = StateUpdate $ [UpdateNodes [node] [node {deleted = true}]]
+            op = StateUpdate $ [ UpdateNodes [node] [node {deleted = true}]
+                               , UpdateEdges edgesTouchingNode (edgesTouchingNode <#> _{deleted = true})
+                               ]
             target = GraphComponent node.graphId
           applyMegagraphMutation_ op
           H.modify_ $ updateHistory (Insert op) target
-          handleAction $ UnHover $ NodeBorderId node.graphId node.id
-          handleAction $ UnHover $ NodeHaloId node.graphId node.id
+          --handleAction $ UnHover $ NodeBorderId node.graphId node.id
+          --handleAction $ UnHover $ NodeHaloId node.graphId node.id
+          -- UnHover everything
+          H.modify_ $ _hoveredElements .~ Set.empty
           handleAction $ UpdateFocus focus
 
   AppCreateEdge edgeMetadata ->
@@ -624,7 +640,7 @@ handleAction = case _ of
                          edge'.sourceEdge == edge.id || edge'.targetEdge == edge.id)
       op = StateUpdate [UpdateEdges [edge] [edge {deleted = true}]]
       target = GraphComponent edge.graphId
-    for_ edgeMappingEdgesTouchingEdge $ handleAction <<< AppDeleteEdgeMappingEdge
+    -- for_ edgeMappingEdgesTouchingEdge $ handleAction <<< AppDeleteEdgeMappingEdge
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UnHover $ EdgeBorderId (GraphComponent edge.graphId) edge.id
@@ -640,12 +656,17 @@ handleAction = case _ of
       target = MappingComponent mappingId
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
+    handleAction $ UpdateFocusPane target
 
-  AppDeleteNodeMappingEdge nodeMappingEdge -> do
-    void $ H.query _liveMegagraph unit $ H.tell
-      $ LiveMegagraph.Mutate (StateUpdate [UpdateNodeMappingEdges [nodeMappingEdge] [nodeMappingEdge {deleted = true}]])
-                             {onFail: const DoNothing, onSuccess: DoNothing}
-    handleAction $ UnHover $ EdgeBorderId (MappingComponent nodeMappingEdge.mappingId) nodeMappingEdge.id
+  AppDeleteNodeMappingEdge nodeMappingEdge ->
+    let
+      op = StateUpdate [UpdateNodeMappingEdges [nodeMappingEdge] [nodeMappingEdge {deleted = true}]]
+      target = MappingComponent nodeMappingEdge.mappingId
+    in do
+    applyMegagraphMutation_ op
+    H.modify_ $ updateHistory (Insert op) target
+    handleAction $ UnHover $ EdgeBorderId target nodeMappingEdge.id
+    handleAction $ UpdateFocusPane target
 
   AppCreateEdgeMappingEdge edgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId -> do
     state <- H.get
@@ -656,12 +677,17 @@ handleAction = case _ of
       target = MappingComponent mappingId
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
+    handleAction $ UpdateFocusPane target
 
-  AppDeleteEdgeMappingEdge edgeMappingEdge -> do
-    void $ H.query _liveMegagraph unit $ H.tell
-      $ LiveMegagraph.Mutate (StateUpdate [UpdateEdgeMappingEdges [edgeMappingEdge] [edgeMappingEdge {deleted = true}]])
-                             {onFail: const DoNothing, onSuccess: DoNothing}
+  AppDeleteEdgeMappingEdge edgeMappingEdge ->
+    let
+      op = StateUpdate [UpdateEdgeMappingEdges [edgeMappingEdge] [edgeMappingEdge {deleted = true}]]
+      target = MappingComponent edgeMappingEdge.mappingId
+    in do
+    applyMegagraphMutation_ op
+    H.modify_ $ updateHistory (Insert op) target
     handleAction $ UnHover $ EdgeBorderId (MappingComponent edgeMappingEdge.mappingId) edgeMappingEdge.id
+    handleAction $ UpdateFocusPane target
 
   UpdateNodeSubgraph graphId nodeId -> do
     state <- H.get
@@ -761,9 +787,20 @@ handleAction = case _ of
 
   Undo (MappingComponent mappingId) -> do
     state <- H.get
+    -- TODO
+    H.liftEffect $ Console.log $ "Undoing op for mapping " <> show mappingId
     case state.megagraphHistory.mappingHistory ^? at mappingId <<< traversed <<< _history >>= Array.uncons of
-      Nothing -> pure unit
-      Just {head, tail} -> undoOp head (MappingComponent mappingId)
+      Nothing ->  do
+        -- TODO
+        H.liftEffect $ Console.log "couldn't get history entry"
+        if isJust $ Map.lookup mappingId state.megagraphHistory.mappingHistory
+        then H.liftEffect $ Console.log "history exists"
+        else H.liftEffect $ Console.log "history does not exist"
+        pure unit
+      Just {head, tail} -> do
+        -- TODO
+        H.liftEffect $ Console.log $ "undoing " <> show head
+        undoOp head (MappingComponent mappingId)
 
   Redo (GraphComponent graphId) -> do
     state <- H.get
@@ -866,13 +903,15 @@ handleQuery = case _ of
 
 createMappingIfNotExist :: AppState -> GraphId -> GraphId -> H.HalogenM AppState Action Slots Message Aff MappingId
 createMappingIfNotExist state sourceGraphId targetGraphId =
-  case List.head $ Map.values
-       $ Map.filter (\mapping -> mapping.sourceGraph == sourceGraphId && mapping.targetGraph == targetGraphId)
-                    state.megagraph.mappings of
+  case state.megagraph.mappings
+       # Map.values
+       # List.filter (\mapping -> mapping.sourceGraph == sourceGraphId && mapping.targetGraph == targetGraphId)
+       # List.head
+  of
     Just mapping -> pure mapping.id
     Nothing -> do
       mappingId <- H.liftEffect UUID.genUUID
-      void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.Mutate (StateUpdate [CreateMapping mappingId sourceGraphId targetGraphId ""]) {onFail: const DoNothing, onSuccess: DoNothing}
+      applyMegagraphMutation_ $ StateUpdate [CreateMapping mappingId sourceGraphId targetGraphId ""]
       pure mappingId
 
 applyReceivedMegagraphUpdate :: Array MegagraphStateUpdate -> H.HalogenM AppState Action Slots Message Aff Unit
@@ -893,7 +932,7 @@ undoOp megagraphMutation target =
           Just subgraphId -> UpdateContentEditableText subgraphId
       _ -> DoNothing
   in do
-    applyMegagraphMutation reversedLastOp {onFail: const DoNothing, onSuccess: onSuccess}
+    applyMegagraphMutation reversedLastOp {onFail: ConsoleLog, onSuccess: onSuccess}
     H.modify_ $ updateHistory Pop target
     H.modify_ $ updateUndone (Insert megagraphMutation) target
 
@@ -907,7 +946,7 @@ redoOp megagraphMutation target =
           Just subgraphId -> UpdateContentEditableText subgraphId
       _ -> DoNothing
   in do
-    applyMegagraphMutation megagraphMutation {onFail: const DoNothing, onSuccess: onSuccess}
+    applyMegagraphMutation megagraphMutation {onFail: ConsoleLog, onSuccess: onSuccess}
     H.modify_ $ updateHistory (Insert megagraphMutation) target
     H.modify_ $ updateUndone Pop target
 
@@ -962,7 +1001,9 @@ handleKeypress keyboardEvent = do
         -- Undo
         "z" -> do
           state <- H.get
-          if isJust state.textFocused || not state.keyHoldState.controlDown then pure unit else do
+          if isJust state.textFocused || not state.keyHoldState.controlDown
+          then pure unit
+          else do
             H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
             case state.focusedPane of
               Nothing -> pure unit

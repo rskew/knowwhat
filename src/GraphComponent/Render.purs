@@ -3,8 +3,8 @@ module GraphComponent.Render where
 import Prelude
 
 import AppState (Action(..), AppState, DrawingEdge, EdgeSourceElement(..), HoveredElementId(..), Slots, TextFieldElement(..), _drawingEdges, _edgeTextField, _liveMegagraph, _nodeTextField, _pane, _titleTextField)
-import ContentEditable.SVGComponent as SVGContentEditable
 import CSS as CSS
+import ContentEditable.SVGComponent as SVGContentEditable
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
 import Data.Lens ((^.), (^?), traversed)
@@ -24,7 +24,7 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import LiveMegagraph (MegagraphMutation(..))
 import LiveMegagraph as LiveMegagraph
-import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _graph, _isValid, _node, _nodes, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
+import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _deleted, _edge, _graph, _isValid, _node, _nodes, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..))
 import Svg.Attributes as SA
 import Svg.Elements as SE
@@ -580,14 +580,20 @@ renderSinglePane state renderPane graph =
     keyedNodeMappingEdges = allMappings # Array.concatMap \mapping ->
                               mapping.nodeMappingEdges
                               # Array.fromFoldable
-                              # Array.filter (\edge -> not edge.deleted)
+                              # Array.filter (\edge ->
+                                               (not edge.deleted)
+                                               && (Just true /= state.megagraph ^? _graph mapping.sourceGraph <<< _node edge.sourceNode <<< _deleted)
+                                               && (Just true /= state.megagraph ^? _graph mapping.targetGraph <<< _node edge.targetNode <<< _deleted))
                               <#> renderNodeMappingEdge state renderPane mapping
                               # Array.catMaybes
 
     keyedEdgeMappingEdges = allMappings # Array.concatMap \mapping ->
                               mapping.edgeMappingEdges
                               # Array.fromFoldable
-                              # Array.filter (\edge -> not edge.deleted)
+                              # Array.filter (\edge ->
+                                               (not edge.deleted)
+                                               && (Just true /= state.megagraph ^? _graph mapping.sourceGraph <<< _edge edge.sourceEdge <<< _deleted)
+                                               && (Just true /= state.megagraph ^? _graph mapping.targetGraph <<< _edge edge.targetEdge <<< _deleted))
                               <#> renderEdgeMappingEdge state renderPane mapping
                               # Array.catMaybes
 

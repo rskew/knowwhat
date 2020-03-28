@@ -1,3 +1,11 @@
+-- | A LiveMegagraph is a megagraph that is synced with a database
+-- | on the other end of a GraphQL-over-websocket connection.
+-- |
+-- | The GraphQL-over-websocket details should be separated into their own
+-- | library, but that should ideally come with some type-checking of queries
+-- | and mutations, which will be some work to implement for the general case.
+-- | So, for now, this module does everything, including registering and
+-- | calling channels for individual messages over the websocket connection :D
 module LiveMegagraph where
 
 import Prelude
@@ -21,6 +29,8 @@ import Data.Traversable (for_)
 import Data.UUID (UUID)
 import Data.UUID as UUID
 import Effect.Aff (Aff)
+import Effect.Aff.AVar (AVar)
+import Effect.Aff.AVar as AVar
 import Effect.Console as Console
 import Foreign (readString)
 import Foreign.Class (class Encode, class Decode)
@@ -72,11 +82,11 @@ invertMegagraphMutation = case _ of
   LinkNodeSubgraph node ->  LinkNodeSubgraph $ node {subgraph = Nothing}
   StateUpdate op -> StateUpdate $ invertMegagraphStateUpdates op
 
-type CallbackId = UUID
+type ChannelId = UUID
 
 type State pa
   = { megagraph :: Megagraph
-    , callbacks :: Map CallbackId (Json -> Action pa)
+    , channels :: Map ChannelId (AVar Json)
     , webSocketConnection :: WS.WebSocket
     , messageQueue :: Array String
     }
@@ -84,7 +94,7 @@ type State pa
 emptyState :: forall pa. WS.WebSocket -> State pa
 emptyState connection
   = { megagraph: emptyMegagraph
-    , callbacks: Map.empty
+    , channels: Map.empty
     , webSocketConnection: connection
     , messageQueue: []
     }
@@ -92,8 +102,8 @@ emptyState connection
 _megagraph :: forall pa. Lens' (State pa) Megagraph
 _megagraph = prop (SProxy :: SProxy "megagraph")
 
-_callbacks :: forall pa. Lens' (State pa) (Map CallbackId (Json -> Action pa))
-_callbacks = prop (SProxy :: SProxy "callbacks")
+_channels :: forall pa. Lens' (State pa) (Map ChannelId (AVar Json))
+_channels = prop (SProxy :: SProxy "channels")
 
 _messageQueue :: forall pa. Lens' (State pa) (Array String)
 _messageQueue = prop (SProxy :: SProxy "messageQueue")
@@ -103,11 +113,8 @@ data Action pa
   | WebSocketConnectionInit
   | DoMany (Array (Action pa))
   | InterpretStateUpdates (Array MegagraphStateUpdate)
-  | SendMutation CallbackId (Json -> Action pa) (Array MegagraphStateUpdate)
-  | SendQuery CallbackId (Json -> Action pa) (GraphQLQuery MegagraphSchema)
-  | SendMessage String
-  | RegisterCallback CallbackId (Json -> Action pa)
-  | CallCallback CallbackId Json
+  | RegisterChannel ChannelId (AVar Json)
+  | PutInChannel ChannelId Json
   | RaiseParentAction pa
   | DecodeWebSocketEvent EE.Event
   | MessageParseError String Json
@@ -129,7 +136,7 @@ type Input = WS.WebSocket
 
 type Slots = ()
 
--- | The parent component's action type returned from callbacks
+-- | The parent component's action type returned from channels
 liveMegagraph :: forall pa. H.Component HH.HTML (Query pa) Input (Message pa) Aff
 liveMegagraph =
   H.mkComponent
@@ -149,7 +156,7 @@ render state =
   let
     classes = joinWith " " $ Array.catMaybes
               [ Just "pendingIndicator"
-              , if not Map.isEmpty state.callbacks
+              , if not Map.isEmpty state.channels
                 then Just "pending"
                 else Nothing
               ]
@@ -187,34 +194,17 @@ handleAction = case _ of
     state <- H.get
     H.raise $ MegagraphUpdated state.megagraph
 
-  SendMutation callbackId callback megagraphUpdate -> do
-    handleAction $ RegisterCallback callbackId callback
-    handleAction $ SendMessage $ renderMutation callbackId $ megagraphUpdateToQuery megagraphUpdate
+  RegisterChannel channelId avar ->
+    H.modify_ $ _channels <<< at channelId ?~ avar
 
-  SendQuery callbackId callback query -> do
-    handleAction $ RegisterCallback callbackId callback
-    handleAction $ SendMessage $ renderQuery callbackId query
-
-  SendMessage message -> do
+  PutInChannel channelId msgJson -> do
     state <- H.get
-    webSocketState <- H.liftEffect $ WS.readyState state.webSocketConnection
-    case webSocketState of
-      Open -> do
-        H.liftEffect $ WS.sendString state.webSocketConnection message
-      -- If connection isn't open yet, enqueue message
-      _ -> H.modify_ $ _messageQueue %~ Array.cons message
-
-  RegisterCallback callbackId callback ->
-    H.modify_ $ _callbacks <<< at callbackId ?~ callback
-
-  CallCallback callbackId msgJson -> do
-    state <- H.get
-    case Map.lookup callbackId state.callbacks of
+    case Map.lookup channelId state.channels of
       Nothing -> H.liftEffect $ Console.log
-                 $ "Mesage reveived by no callback registered, msg: " <> stringify msgJson
-                 <> " for callbackId: " <> show callbackId
-      Just callback -> handleAction $ callback msgJson
-    H.modify_ $ _callbacks <<< at callbackId .~ Nothing
+                 $ "Mesage reveived by no channel registered, msg: " <> stringify msgJson
+                 <> " for channelId: " <> show channelId
+      Just avar -> H.liftAff $ AVar.put msgJson avar
+    H.modify_ $ _channels <<< at channelId .~ Nothing
 
   RaiseParentAction parentAction -> H.raise $ ReturnAction parentAction
 
@@ -230,7 +220,7 @@ handleAction = case _ of
              >>= decodeJson
         of
           Right (response :: GraphQLWebsocketResponse) ->
-            handleAction $ CallCallback response.id response.payload
+            handleAction $ PutInChannel response.id response.payload
           Left err ->
             case (jsonParser msg >>= decodeJson) :: Either String {type :: String, id :: String} of
               Right response ->
@@ -277,34 +267,31 @@ handleQuery = case _ of
       --   - if not, indicate local version of node is invalid
       -- - if node has no subgraph, update db with new node text
       UpdateNodeText node text ->
-        case node.subgraph of
-          Nothing -> pure unit
-          Just subgraphId ->
-            let
-              updateTitleOp = [UpdateTitle subgraphId (trim node.text) (trim text)]
-              updateNodeTextOp = [UpdateNodes [node] [node {text = trim text, isValid = true}]]
-              updateNodeValidityOp isValid = [UpdateNodes [node] [node {isValid = isValid}]]
-            in do
-              updateNodeTextCallbackId <- H.liftEffect UUID.genUUID
+        let
+          updateNodeTextOp = [UpdateNodes [node] [node {text = trim text, isValid = true}]]
+          updateNodeText = do
+            response <- sendMutation updateNodeTextOp
+            case parseNodeUpsertResponse response of
+              Right 1 -> handleAction $ RaiseParentAction onSuccess
+              _ -> handleAction $ RaiseParentAction $ onFail "Couldn't update node text in database"
+        in do
+          handleAction $ InterpretStateUpdates updateNodeTextOp
+          case node.subgraph of
+            Nothing -> updateNodeText
+            Just subgraphId ->
               let
-                updateNodeTextCallback = \msg ->
-                  case parseNodeUpsertResponse msg of
-                    Right 1 -> RaiseParentAction onSuccess
-                    _ -> RaiseParentAction $ onFail "Couldn't update node text in database"
-              updateTitleTextCallbackId <- H.liftEffect UUID.genUUID
-              let
-                -- Check uniqueness of title in the database
-                callback = \msg ->
-                  case parseGraphUpsertResponse msg of
-                    -- If title can be updated, update node text in db, update title text locally
-                    Right 1 -> DoMany [ SendMutation updateNodeTextCallbackId updateNodeTextCallback updateNodeTextOp
-                                      , InterpretStateUpdates updateTitleOp
-                                      ]
-                    _ -> DoMany [ UpdateNodeValidity node.graphId node.id false
-                                , RaiseParentAction $ onFail "Graph title update failed"
-                                ]
-              handleAction $ SendMutation updateTitleTextCallbackId callback updateTitleOp
-              handleAction $ InterpretStateUpdates updateNodeTextOp
+                updateTitleOp = [UpdateTitle subgraphId (trim node.text) (trim text)]
+                updateNodeValidityOp isValid = [UpdateNodes [node] [node {isValid = isValid}]]
+              in do
+                response <- sendMutation updateTitleOp
+                case parseGraphUpsertResponse response of
+                  -- If title can be updated, update node text in db, update title text locally
+                  Right 1 -> do
+                    handleAction $ InterpretStateUpdates updateTitleOp
+                    updateNodeText
+                  _ -> do
+                    handleAction $ UpdateNodeValidity node.graphId node.id false
+                    handleAction $ RaiseParentAction $ onFail "Graph title update failed"
 
       -- | When updating a graph title:
       -- | - update local state
@@ -314,101 +301,104 @@ handleQuery = case _ of
       UpdateTitleText graphId from to ->
         let
           updateTitleOp = [UpdateTitle graphId from (trim to)]
-          updateNodesTextOp :: Array Node -> Array MegagraphStateUpdate
           updateNodesTextOp nodes = [UpdateNodes nodes (nodes <#> _{text = trim to, isValid = true})]
         in do
-          updateNodesTextCallbackId <- H.liftEffect UUID.genUUID
-          let
-            updateNodesTextCallback nodes = \msg ->
-              case parseNodeUpsertResponse msg of
-                Right n -> if n == Array.length nodes
-                           then DoMany [ InterpretStateUpdates $ updateNodesTextOp nodes
-                                       , RaiseParentAction onSuccess
-                                       ]
-                           else RaiseParentAction $ onFail "Not all nodes could be updated with subgraph title"
-                _ -> RaiseParentAction $ onFail "Failed to update node text with subgraph title"
-          getNodesWithSubgraphCallbackId <- H.liftEffect UUID.genUUID
-          let
-            getNodesWithSubgraphCallback = \msg ->
-              case parseNodesWithSubgraphResponse msg of
-                Right nodes -> DoMany [ SendMutation
-                                          updateNodesTextCallbackId
-                                          (updateNodesTextCallback nodes)
-                                          (updateNodesTextOp nodes)
-                                      ]
-                _ -> RaiseParentAction $ onFail "Failed to query nodes with updated subgraph"
-          updateTitleCallbackId <- H.liftEffect UUID.genUUID
-          let
-            updateTitleCallback = \msg ->
-              case parseGraphUpsertResponse msg of
-                Right 1 -> DoMany [ UpdateTitleValidity graphId true
-                                  , SendQuery getNodesWithSubgraphCallbackId getNodesWithSubgraphCallback $ nodesWithSubgraphQuery graphId
-                                  ]
-                _ -> DoMany [ UpdateTitleValidity graphId false
-                            , RaiseParentAction $ onFail "Graph title update failed"
-                            ]
-          handleAction $ SendMutation updateTitleCallbackId updateTitleCallback updateTitleOp
           handleAction $ InterpretStateUpdates updateTitleOp
+          response <- sendMutation updateTitleOp
+          case parseGraphUpsertResponse response of
+            Right 1 -> do
+              handleAction $ UpdateTitleValidity graphId true
+              response' <- sendQuery $ nodesWithSubgraphQuery graphId
+              case parseNodesWithSubgraphResponse response' of
+                Right nodes -> do
+                  response'' <- sendMutation $ updateNodesTextOp nodes
+                  case parseNodeUpsertResponse response'' of
+                    Right n -> if n == Array.length nodes
+                               then do
+                                 handleAction $ InterpretStateUpdates $ updateNodesTextOp nodes
+                                 handleAction $ RaiseParentAction onSuccess
+                               else
+                                 handleAction $ RaiseParentAction $ onFail "Not all nodes could be updated with subgraph title"
+                    _ -> handleAction $ RaiseParentAction $ onFail "Failed to update node text with subgraph title"
+                _ -> handleAction $ RaiseParentAction $ onFail "Failed to query nodes with updated subgraph"
+            _ -> do
+              handleAction $ UpdateTitleValidity graphId false
+              handleAction $ RaiseParentAction $ onFail "Graph title update failed"
 
       LinkNodeSubgraph node -> do
-        updateNodeSubgraphCallbackId <- H.liftEffect UUID.genUUID
-        let
-          updateNodeSubgraphCallback = \msg ->
-            case parseNodeUpsertResponse msg of
-              Right 1 -> RaiseParentAction onSuccess
-              _ -> RaiseParentAction $ onFail "Error updating node subgraph"
-        graphIdWithTitleCallbackId <- H.liftEffect UUID.genUUID
-        let
-          graphIdWithTitleCallback = \msg ->
-            case parseGraphIdWithTitleResponse msg of
-              Left err -> RaiseParentAction $ onFail err
-              Right maybeGraphRow -> case maybeGraphRow of
-                Nothing -> RaiseParentAction $ onSuccess
-                Just graphRow ->
-                  let
-                    op = [UpdateNodes [node] [node {subgraph = Just graphRow.id}]]
-                  in
-                    DoMany [ SendMutation updateNodeSubgraphCallbackId updateNodeSubgraphCallback op
-                           , InterpretStateUpdates op
-                           ]
-        handleAction $ SendQuery graphIdWithTitleCallbackId graphIdWithTitleCallback $ graphIdWithTitleQuery $ trim node.text
+        response <- sendQuery $ graphIdWithTitleQuery $ trim node.text
+        case parseGraphIdWithTitleResponse response of
+          Left err -> handleAction $ RaiseParentAction $ onFail err
+          Right maybeGraphRow -> case maybeGraphRow of
+            Nothing -> handleAction $ RaiseParentAction onSuccess
+            Just graphRow ->
+              let
+                op = [UpdateNodes [node] [node {subgraph = Just graphRow.id}]]
+              in do
+                response' <- sendMutation op
+                case parseNodeUpsertResponse response' of
+                  Right 1 -> handleAction $ RaiseParentAction onSuccess
+                  _ -> handleAction $ RaiseParentAction $ onFail "Error updating node subgraph"
+                handleAction $ InterpretStateUpdates op
 
       StateUpdate megagraphStateUpdates -> do
-        callbackId <- H.liftEffect UUID.genUUID
-        let
-          callback = \msg ->
-            parseMegagraphUpsertResponse msg
-            # either (RaiseParentAction <<< onFail) (const $ RaiseParentAction onSuccess)
-        handleAction $ DoMany
-          [ SendMutation callbackId callback megagraphStateUpdates
-          , InterpretStateUpdates megagraphStateUpdates
-          ]
+        handleAction $ InterpretStateUpdates megagraphStateUpdates
+        response <- sendMutation megagraphStateUpdates
+        -- TODO
+        H.liftEffect $ Console.log $ show megagraphStateUpdates
+        case parseMegagraphUpsertResponse response of
+          Left err -> handleAction $ RaiseParentAction $ onFail err
+          Right _ -> handleAction $ RaiseParentAction onSuccess
 
   LoadGraph graphId a -> Just a <$ do
-    callbackId <- H.liftEffect UUID.genUUID
-    let
-      callback = \msgJson -> do
-        case parseGraphFetchResponse msgJson of
-          Left err -> MessageParseError err msgJson
-          Right {graph, mappings} ->
-            let
-              graphOp = encodeGraphAsMegagraphStateUpdates graph
-              mappingUpdates = mappings # Array.concatMap \mapping ->
-                encodeMappingAsMegagraphStateUpdates mapping
-            in
-              InterpretStateUpdates $ graphOp <> mappingUpdates
     state <- H.get
     let
       currentGraphIds = state.megagraph.graphs
                         # Map.keys # Array.fromFoldable
     H.liftEffect $ Console.log $ "Loading graph " <> show graphId
-    handleAction $ SendQuery callbackId callback $ graphFetchQuery graphId currentGraphIds
+    response <- sendQuery $ graphFetchQuery graphId currentGraphIds
+    case parseGraphFetchResponse response of
+      Left err -> handleAction $ MessageParseError err response
+      Right {graph, mappings} ->
+        let
+          graphOp = encodeGraphAsMegagraphStateUpdates graph
+          mappingUpdates = mappings # Array.concatMap \mapping ->
+            encodeMappingAsMegagraphStateUpdates mapping
+        in
+          handleAction $ InterpretStateUpdates $ graphOp <> mappingUpdates
 
   Drop (GraphComponent graphId) a -> Just a <$ do
     H.modify_ $ _megagraph <<< _graphs <<< at graphId .~ Nothing
 
   Drop (MappingComponent mappingId) a -> Just a <$ do
     H.modify_ $ _megagraph <<< _mappings <<< at mappingId .~ Nothing
+
+type HalogenApp pa = H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff
+
+sendQuery :: forall pa. GraphQLQuery MegagraphSchema -> HalogenApp pa Json
+sendQuery query = sendGraphQL $ renderQuery query
+
+sendMutation :: forall pa. Array MegagraphStateUpdate -> HalogenApp pa Json
+sendMutation op = sendGraphQL $ renderMutation $ megagraphUpdateToQuery op
+
+sendGraphQL :: forall pa. (UUID -> String) -> HalogenApp pa Json
+sendGraphQL query = do
+  channelId <- H.liftEffect UUID.genUUID
+  avar <- H.liftAff AVar.empty
+  handleAction $ RegisterChannel channelId avar
+  sendMessage $ query channelId
+  -- Wait for channel to be called with response
+  H.liftAff $ AVar.take avar
+
+sendMessage :: forall pa. String -> HalogenApp pa Unit
+sendMessage message = do
+  state <- H.get
+  webSocketState <- H.liftEffect $ WS.readyState state.webSocketConnection
+  case webSocketState of
+    Open -> do
+      H.liftEffect $ WS.sendString state.webSocketConnection message
+    -- If connection isn't open yet, enqueue message
+    _ -> H.modify_ $ _messageQueue %~ Array.cons message
 
 
 -- Utils

@@ -357,7 +357,7 @@ _graphHistory :: Lens' History (Map GraphId ComponentHistory)
 _graphHistory = prop (SProxy :: SProxy "graphHistory")
 
 _mappingHistory :: Lens' History (Map MappingId ComponentHistory)
-_mappingHistory = prop (SProxy :: SProxy "graphHistory")
+_mappingHistory = prop (SProxy :: SProxy "mappingHistory")
 
 _history :: Lens' ComponentHistory (Array MegagraphMutation)
 _history = prop (SProxy :: SProxy "history")
