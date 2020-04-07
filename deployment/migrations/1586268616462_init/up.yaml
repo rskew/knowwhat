@@ -1,0 +1,161 @@
+- args:
+    tables:
+    - object_relationships:
+      - name: edge
+        using:
+          foreign_key_constraint_on: targetEdge
+      - name: edgeBySourceedge
+        using:
+          foreign_key_constraint_on: sourceEdge
+      - name: mapping
+        using:
+          foreign_key_constraint_on: mappingId
+      table:
+        name: edgeMappingEdges
+        schema: public
+    - array_relationships:
+      - name: edgeMappingEdges
+        using:
+          foreign_key_constraint_on:
+            column: sourceEdge
+            table:
+              name: edgeMappingEdges
+              schema: public
+      - name: edgeMappingEdgesByTargetedge
+        using:
+          foreign_key_constraint_on:
+            column: targetEdge
+            table:
+              name: edgeMappingEdges
+              schema: public
+      object_relationships:
+      - name: graph
+        using:
+          foreign_key_constraint_on: graphId
+      - name: node
+        using:
+          foreign_key_constraint_on: target
+      - name: nodeBySource
+        using:
+          foreign_key_constraint_on: source
+      table:
+        name: edges
+        schema: public
+    - array_relationships:
+      - name: edges
+        using:
+          foreign_key_constraint_on:
+            column: graphId
+            table:
+              name: edges
+              schema: public
+      - name: mappings
+        using:
+          foreign_key_constraint_on:
+            column: sourceGraph
+            table:
+              name: mappings
+              schema: public
+      - name: mappingsByTargetgraph
+        using:
+          foreign_key_constraint_on:
+            column: targetGraph
+            table:
+              name: mappings
+              schema: public
+      - name: nodes
+        using:
+          foreign_key_constraint_on:
+            column: graphId
+            table:
+              name: nodes
+              schema: public
+      - name: nodesBySubgraph
+        using:
+          foreign_key_constraint_on:
+            column: subgraph
+            table:
+              name: nodes
+              schema: public
+      table:
+        name: graphs
+        schema: public
+    - array_relationships:
+      - name: edgeMappingEdges
+        using:
+          foreign_key_constraint_on:
+            column: mappingId
+            table:
+              name: edgeMappingEdges
+              schema: public
+      - name: nodeMappingEdges
+        using:
+          foreign_key_constraint_on:
+            column: mappingId
+            table:
+              name: nodeMappingEdges
+              schema: public
+      object_relationships:
+      - name: graph
+        using:
+          foreign_key_constraint_on: targetGraph
+      - name: graphBySourcegraph
+        using:
+          foreign_key_constraint_on: sourceGraph
+      table:
+        name: mappings
+        schema: public
+    - object_relationships:
+      - name: mapping
+        using:
+          foreign_key_constraint_on: mappingId
+      - name: node
+        using:
+          foreign_key_constraint_on: targetNode
+      - name: nodeBySourcenode
+        using:
+          foreign_key_constraint_on: sourceNode
+      table:
+        name: nodeMappingEdges
+        schema: public
+    - array_relationships:
+      - name: edges
+        using:
+          foreign_key_constraint_on:
+            column: source
+            table:
+              name: edges
+              schema: public
+      - name: edgesByTarget
+        using:
+          foreign_key_constraint_on:
+            column: target
+            table:
+              name: edges
+              schema: public
+      - name: nodeMappingEdges
+        using:
+          foreign_key_constraint_on:
+            column: sourceNode
+            table:
+              name: nodeMappingEdges
+              schema: public
+      - name: nodeMappingEdgesByTargetnode
+        using:
+          foreign_key_constraint_on:
+            column: targetNode
+            table:
+              name: nodeMappingEdges
+              schema: public
+      object_relationships:
+      - name: graph
+        using:
+          foreign_key_constraint_on: subgraph
+      - name: graphByGraphid
+        using:
+          foreign_key_constraint_on: graphId
+      table:
+        name: nodes
+        schema: public
+    version: 2
+  type: replace_metadata

@@ -56,6 +56,7 @@ import Web.UIEvent.KeyboardEvent.EventTypes as KET
 import Web.UIEvent.WheelEvent as WhE
 import WireData (WireDataRaw, decodeWireData, encodeWireData)
 
+
 foreign import loadFile :: Effect Unit
 foreign import saveJSON :: String -> String -> Effect Unit
 
@@ -118,10 +119,15 @@ handleAction = case _ of
     void $ H.subscribe $ ES.eventListenerEventSource KET.keyup   (HTMLDocument.toEventTarget document) (map Keyup <<< KE.fromEvent)
 
     -- Load the home graph
-    case UUID.parseUUID Config.homeGraphId of
-      Nothing -> pure unit
-      Just graphId ->
-        void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.LoadGraph graphId
+    void $ H.query _liveMegagraph unit $ H.tell
+      $ LiveMegagraph.LoadGraphWithTitle Config.homeGraphTitle {onFail: const CreateNewHomeGraph, onSuccess: DoNothing}
+
+  CreateNewHomeGraph -> do
+    newGraphId <- H.liftEffect genUUID
+    let megagraphMutation = StateUpdate [CreateGraph newGraphId Config.homeGraphTitle]
+    applyMegagraphMutation_ megagraphMutation
+    H.modify_ arrangePanes
+
 
   NewPane graphId -> do
     state <- H.get
@@ -866,7 +872,7 @@ handleAction = case _ of
         H.liftEffect $ Console.log $ "Failed to parse JSON: " <> errors
       Right wireData -> do
         H.liftEffect $ Console.log $ "Loading saved graph encoded with version "
-                                     <> wireData.metadata.version
+                                     <> wireData.version
         state <- H.get
         -- TODO wire data is megagraph
         H.modify_ $ applyMegagraphStateUpdates wireData.op
@@ -955,12 +961,20 @@ redoOp megagraphMutation target =
 -- | actioned the operation.
 applyMegagraphMutation :: MegagraphMutation -> {onFail :: String -> Action, onSuccess :: Action} -> H.HalogenM AppState Action Slots Message Aff Unit
 applyMegagraphMutation megagraphMutation callbacks =
-  -- TODO use pending for keeping track of individual elements sync state?
   void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.Mutate megagraphMutation callbacks
+
 
 applyMegagraphMutation_ :: MegagraphMutation -> H.HalogenM AppState Action Slots Message Aff Unit
 applyMegagraphMutation_ megagraphMutation =
   applyMegagraphMutation megagraphMutation {onFail: ConsoleLog, onSuccess: DoNothing}
+
+loadGraph :: GraphId -> H.HalogenM AppState Action Slots Message Aff Unit
+loadGraph graphId = void $ H.query _liveMegagraph unit $ H.tell
+                    $ LiveMegagraph.LoadGraph graphId {onFail: ConsoleLog, onSuccess: DoNothing}
+
+loadGraphWithTitle :: String -> H.HalogenM AppState Action Slots Message Aff Unit
+loadGraphWithTitle title = void $ H.query _liveMegagraph unit $ H.tell
+                    $ LiveMegagraph.LoadGraphWithTitle title {onFail: ConsoleLog, onSuccess: DoNothing}
 
 
 ------
@@ -1025,6 +1039,9 @@ handleKeypress keyboardEvent = do
             -- Load saved graph from local JSON file
             H.liftEffect loadFile
 
+        -- {ctrl} Save the current graph to a local file
+        -- {ctrl+space} Connect the focused node to an existing graph which has
+        --              the node text as its title.
         "s" -> do
           state <- H.get
           if not state.keyHoldState.controlDown
@@ -1058,7 +1075,7 @@ handleKeypress keyboardEvent = do
                 Just (NodeElement graphId nodeId) ->
                   case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
                     Nothing -> pure unit
-                    Just subgraphId -> void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.LoadGraph subgraphId
+                    Just subgraphId -> loadGraph subgraphId
                 _ -> pure unit
 
         -- Delete node/edge currently in focus
@@ -1094,7 +1111,6 @@ handleKeypress keyboardEvent = do
             newGraphId <- H.liftEffect genUUID
             let megagraphMutation = StateUpdate [CreateGraph newGraphId (UUID.toString newGraphId)]
             applyMegagraphMutation_ megagraphMutation
-            void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.Mutate megagraphMutation {onFail: const DoNothing, onSuccess: DoNothing}
             H.modify_ arrangePanes
 
         -- jump Down into the subgraph of the focused node
@@ -1108,7 +1124,7 @@ handleKeypress keyboardEvent = do
                   Nothing -> pure unit
                   Just subgraphId -> do
                     handleAction $ RemovePane graphId
-                    void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.LoadGraph subgraphId
+                    loadGraph subgraphId
               _ -> pure unit
 
         -- Jump Up to the graphs that have nodes that point to the current graph
@@ -1130,14 +1146,11 @@ handleKeypress keyboardEvent = do
             --    H.raise $ SendOperation $ renderQuery callbackId $ nodesWithSubgraphQuery graphId
             --  _ -> pure unit
 
-        -- load the Knowledge navigator
-        "k" -> do
+        -- load home graph
+        "h" -> do
           state <- H.get
           if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
             H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            case UUID.parseUUID Config.homeGraphId of
-              Nothing -> pure unit
-              Just homeGraphId ->
-                void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.LoadGraph homeGraphId
+            loadGraphWithTitle Config.homeGraphTitle
 
         _ -> pure unit

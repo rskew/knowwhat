@@ -6,10 +6,8 @@ module HasuraQuery where
 
 import Prelude
 
-import Data.Argonaut.Core (Json, stringify)
-import Data.Argonaut.Encode (encodeJson)
-import Data.Array as Array
 import Data.Array (length)
+import Data.Array as Array
 import Data.Array.NonEmpty (fromNonEmpty, toNonEmpty)
 import Data.NonEmpty (NonEmpty)
 import Data.NonEmpty as NonEmpty
@@ -17,6 +15,7 @@ import Data.String as String
 import Data.Tuple (Tuple(..))
 import Data.UUID (UUID)
 import Data.UUID as UUID
+import Foreign (Foreign)
 import Foreign.Class (class Encode)
 import Foreign.Generic (encodeJSON)
 import Prim.Row (class Cons)
@@ -63,17 +62,17 @@ mutationToString (Mutation _ subMutation) =
 
 renderQuery :: forall schema. GraphQLQuery schema -> UUID -> String
 renderQuery query id =
-  stringify $ encodeJson $ { type : "start"
-                           , id : UUID.toString id
-                           , payload : { query : queryToString query }
-                           }
+  encodeJSON $ { type : "start"
+               , id : UUID.toString id
+               , payload : { query : queryToString query }
+               }
 
 renderMutation :: forall schema. GraphQLMutation schema -> UUID -> String
 renderMutation mutation id =
-  stringify $ encodeJson $ { type : "start"
-                           , id : UUID.toString id
-                           , payload : { query : mutationToString mutation }
-                           }
+  encodeJSON $ { type : "start"
+               , id : UUID.toString id
+               , payload : { query : mutationToString mutation }
+               }
 
 upsertOperation ::
   forall schema tableName tableRow tableRowL r.
@@ -201,5 +200,5 @@ instance consRowListEncodeJSON
 type GraphQLWebsocketResponse
   = { type :: String
     , id :: UUID
-    , payload :: Json
+    , payload :: {data :: Foreign}
     }

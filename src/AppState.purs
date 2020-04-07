@@ -48,6 +48,7 @@ data Action
   | StopPropagation WE.Event
   | EvalQuery (Query Unit)
   | Init
+  | CreateNewHomeGraph
   | NewPane GraphId
   | UpdateContentEditableText GraphId
   | NodeTextInput GraphId NodeId String

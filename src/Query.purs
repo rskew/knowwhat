@@ -2,10 +2,7 @@ module Query where
 
 import Prelude
 
-import Data.Argonaut.Core (Json)
-import Data.Argonaut.Decode (decodeJson)
 import Data.Array as Array
-import Data.Either (Either(..))
 import Data.Lens ((.~))
 import Data.Map (Map)
 import Data.Map as Map
@@ -15,6 +12,8 @@ import Data.String as String
 import Data.Tuple (Tuple(..))
 import Data.UUID (UUID)
 import Data.UUID as UUID
+import Foreign (F, Foreign, ForeignError(..), fail)
+import Foreign.Generic (decode)
 import HasuraQuery (class RowListEncodeJSON, GraphQLMutation, GraphQLQuery(..), upsertOperation)
 import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMappingEdgeRow, EdgeRow, Graph, GraphId, Mapping, MappingId, Node, NodeId, NodeMappingEdge, NodeMappingEdgeRow, NodeRow, _nodes, _text, _title, batchInsertEdges, emptyGraph)
 import Record.Extra (class Keys)
@@ -46,17 +45,15 @@ renderGraphUpsertQuery graphRows =
   upsertOperation (SProxy :: SProxy "graphs") graphRows
 
 type GraphUpsertResponse
-  = { data ::
-      { insert_graphs ::
-        { affected_rows :: Int
-        }
+  = { insert_graphs ::
+      { affected_rows :: Int
       }
     }
 
-parseGraphUpsertResponse :: Json -> Either String Int
-parseGraphUpsertResponse json = do
-  graphUpsertResponse :: GraphUpsertResponse <- decodeJson json
-  pure $ graphUpsertResponse.data.insert_graphs.affected_rows
+parseGraphUpsertResponse :: Foreign -> F Int
+parseGraphUpsertResponse response = do
+  graphUpsertResponse :: GraphUpsertResponse <- decode response
+  pure $ graphUpsertResponse.insert_graphs.affected_rows
 
 renderNodeUpsertQuery ::
   forall nodeRowL.
@@ -68,17 +65,15 @@ renderNodeUpsertQuery ::
 renderNodeUpsertQuery nodes = upsertOperation (SProxy :: SProxy "nodes") nodes
 
 type NodeUpsertResponse
-  = { data ::
-      { insert_nodes ::
-        { affected_rows :: Int
-        }
+  = { insert_nodes ::
+      { affected_rows :: Int
       }
     }
 
-parseNodeUpsertResponse :: Json -> Either String Int
-parseNodeUpsertResponse json = do
-  nodeUpsertResponse :: NodeUpsertResponse <- decodeJson json
-  pure $ nodeUpsertResponse.data.insert_nodes.affected_rows
+parseNodeUpsertResponse :: Foreign -> F Int
+parseNodeUpsertResponse response = do
+  nodeUpsertResponse :: NodeUpsertResponse <- decode response
+  pure $ nodeUpsertResponse.insert_nodes.affected_rows
 
 renderEdgeUpsertQuery ::
   forall edgeRowL.
@@ -110,13 +105,6 @@ renderEdgeMappingEdgeUpsertQuery ::
   => Array EdgeMappingEdge
   -> GraphQLMutation MegagraphSchema
 renderEdgeMappingEdgeUpsertQuery edgeMappingEdges = upsertOperation (SProxy :: SProxy "edgeMappingEdges") edgeMappingEdges
-
-type MegagraphUpsertResponse
-  = { data :: Json }
-
-parseMegagraphUpsertResponse :: Json -> Either String MegagraphUpsertResponse
-parseMegagraphUpsertResponse json =
-  decodeJson json
 
 
 ------
@@ -194,48 +182,46 @@ graphFetchQuery graphId presentGraphIds =
       \}"
 
 type GraphFetchResponse
-  = { data ::
-      { graphs :: Array
-        { id :: GraphId
-        , title :: String
-        , nodes :: Array (Record NodeRow)
-        , edges :: Array (Record EdgeRow)
+  = { graphs :: Array
+      { id :: GraphId
+      , title :: String
+      , nodes :: Array (Record NodeRow)
+      , edges :: Array (Record EdgeRow)
+      }
+    , mappings :: Array
+      { id :: MappingId
+      , title :: String
+      , sourceGraph :: GraphId
+      , targetGraph :: GraphId
+      , nodeMappingEdges :: Array
+        { id :: EdgeId
+        , mappingId :: MappingId
+        , sourceNode :: NodeId
+        , targetNode :: NodeId
+        , midpointAngle :: Number
+        , midpointRadius :: Number
+        , deleted :: Boolean
         }
-      , mappings :: Array
-        { id :: MappingId
-        , title :: String
-        , sourceGraph :: GraphId
-        , targetGraph :: GraphId
-        , nodeMappingEdges :: Array
-          { id :: EdgeId
-          , mappingId :: MappingId
-          , sourceNode :: NodeId
-          , targetNode :: NodeId
-          , midpointAngle :: Number
-          , midpointRadius :: Number
-          , deleted :: Boolean
-          }
-        , edgeMappingEdges :: Array
-          { id :: EdgeId
-          , mappingId :: MappingId
-          , sourceEdge :: EdgeId
-          , targetEdge :: EdgeId
-          , midpointAngle :: Number
-          , midpointRadius :: Number
-          , deleted :: Boolean
-          }
+      , edgeMappingEdges :: Array
+        { id :: EdgeId
+        , mappingId :: MappingId
+        , sourceEdge :: EdgeId
+        , targetEdge :: EdgeId
+        , midpointAngle :: Number
+        , midpointRadius :: Number
+        , deleted :: Boolean
         }
       }
     }
 
-parseGraphFetchResponse :: Json -> Either String {graph :: Graph, mappings :: Array Mapping}
-parseGraphFetchResponse json =
+parseGraphFetchResponse :: Foreign -> F {graph :: Graph, mappings :: Array Mapping}
+parseGraphFetchResponse response =
   let
     rect = { width : 0.0, left : 0.0, right : 0.0, height : 0.0, top : 0.0, bottom : 0.0 }
   in do
-    graphFetchResponse :: GraphFetchResponse <- decodeJson json
-    graph <- case Array.head graphFetchResponse.data.graphs of
-      Nothing -> Left "No graph returned from query"
+    graphFetchResponse :: GraphFetchResponse <- decode response
+    graph <- case Array.head graphFetchResponse.graphs of
+      Nothing -> fail $ ForeignError "No graph returned from query"
       Just graphData ->
         let
           nodes = Map.fromFoldable (map (\row -> Tuple row.id row) graphData.nodes)
@@ -245,7 +231,7 @@ parseGraphFetchResponse json =
                # _title <<< _text .~ graphData.title
                # batchInsertEdges graphData.edges
     let
-      rawMappings = graphFetchResponse.data.mappings
+      rawMappings = graphFetchResponse.mappings
       mappings = rawMappings <#> \rawMapping ->
         rawMapping { nodeMappingEdges = elementArrayToMap rawMapping.nodeMappingEdges
                    , edgeMappingEdges = elementArrayToMap rawMapping.edgeMappingEdges
@@ -265,18 +251,16 @@ graphIdWithTitleQuery title =
     \}"
 
 type GraphIdWithTitleResponse
-  = { data ::
-      { graphs :: Array
-        { id :: GraphId
-        , title :: String
-        }
+  = { graphs :: Array
+      { id :: GraphId
+      , title :: String
       }
     }
 
-parseGraphIdWithTitleResponse :: Json -> Either String (Maybe (Record GraphRow))
-parseGraphIdWithTitleResponse json = do
-  graphIdWithTitleResponse :: GraphIdWithTitleResponse <- decodeJson json
-  pure $ Array.head graphIdWithTitleResponse.data.graphs
+parseGraphIdWithTitleResponse :: Foreign -> F (Maybe (Record GraphRow))
+parseGraphIdWithTitleResponse response = do
+  graphIdWithTitleResponse :: GraphIdWithTitleResponse <- decode response
+  pure $ Array.head graphIdWithTitleResponse.graphs
 
 -- | Ask for the nodes that have the given graph as a subgraph
 nodesWithSubgraphQuery :: GraphId -> GraphQLQuery MegagraphSchema
@@ -295,15 +279,13 @@ nodesWithSubgraphQuery graphId =
     \}"
 
 type NodesWithSubgraphResponse
-  = { data ::
-      { nodes :: Array (Record NodeRow)
-      }
+  = { nodes :: Array (Record NodeRow)
     }
 
-parseNodesWithSubgraphResponse :: Json -> Either String (Array Node)
-parseNodesWithSubgraphResponse json = do
-  nodesWithSubgraphResponse :: NodesWithSubgraphResponse <- decodeJson json
-  pure $ nodesWithSubgraphResponse.data.nodes
+parseNodesWithSubgraphResponse :: Foreign -> F (Array Node)
+parseNodesWithSubgraphResponse response = do
+  nodesWithSubgraphResponse :: NodesWithSubgraphResponse <- decode response
+  pure $ nodesWithSubgraphResponse.nodes
 
 elementArrayToMap :: forall r. Array {id :: UUID | r } -> Map UUID {id :: UUID | r}
 elementArrayToMap = Map.fromFoldable <<< map \mappingEdge -> Tuple mappingEdge.id mappingEdge

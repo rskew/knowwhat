@@ -11,15 +11,13 @@ module LiveMegagraph where
 import Prelude
 
 import Control.Monad.Except (runExcept)
-import Data.Argonaut.Core (Json, stringify)
-import Data.Argonaut.Decode (decodeJson)
-import Data.Argonaut.Parser (jsonParser)
 import Data.Array as Array
 import Data.Either (Either(..), either)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Lens', (.~), (%~), (?~))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
+import Data.List.Types (toList)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
@@ -32,9 +30,9 @@ import Effect.Aff (Aff)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Console as Console
-import Foreign (readString)
+import Foreign (Foreign, F, MultipleErrors, readString, renderForeignError, typeOf, unsafeFromForeign)
 import Foreign.Class (class Encode, class Decode)
-import Foreign.Generic (genericEncode, genericDecode, defaultOptions, encodeJSON)
+import Foreign.Generic (decode, decodeJSON, genericEncode, genericDecode, defaultOptions, encodeJSON)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
@@ -43,7 +41,7 @@ import HasuraQuery (GraphQLQuery, GraphQLWebsocketResponse, renderMutation, rend
 import Interpreter (interpretMegagraphStateUpdate, megagraphUpdateToQuery)
 import Megagraph (GraphId, Megagraph, Node, NodeId, _graph, _graphs, _isValid, _mappings, _node, _title, emptyMegagraph)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeGraphAsMegagraphStateUpdates, encodeMappingAsMegagraphStateUpdates, invertMegagraphStateUpdates)
-import Query (MegagraphSchema, graphFetchQuery, graphIdWithTitleQuery, nodesWithSubgraphQuery, parseGraphFetchResponse, parseGraphIdWithTitleResponse, parseGraphUpsertResponse, parseMegagraphUpsertResponse, parseNodeUpsertResponse, parseNodesWithSubgraphResponse)
+import Query (MegagraphSchema, graphFetchQuery, graphIdWithTitleQuery, nodesWithSubgraphQuery, parseGraphFetchResponse, parseGraphIdWithTitleResponse, parseGraphUpsertResponse, parseNodeUpsertResponse, parseNodesWithSubgraphResponse)
 import Web.Event.Event as EE
 import Web.Event.EventTarget as ET
 import Web.Socket.Event.EventTypes as WSET
@@ -86,7 +84,7 @@ type ChannelId = UUID
 
 type State pa
   = { megagraph :: Megagraph
-    , channels :: Map ChannelId (AVar Json)
+    , channels :: Map ChannelId (AVar Foreign)
     , webSocketConnection :: WS.WebSocket
     , messageQueue :: Array String
     }
@@ -102,7 +100,7 @@ emptyState connection
 _megagraph :: forall pa. Lens' (State pa) Megagraph
 _megagraph = prop (SProxy :: SProxy "megagraph")
 
-_channels :: forall pa. Lens' (State pa) (Map ChannelId (AVar Json))
+_channels :: forall pa. Lens' (State pa) (Map ChannelId (AVar Foreign))
 _channels = prop (SProxy :: SProxy "channels")
 
 _messageQueue :: forall pa. Lens' (State pa) (Array String)
@@ -113,17 +111,17 @@ data Action pa
   | WebSocketConnectionInit
   | DoMany (Array (Action pa))
   | InterpretStateUpdates (Array MegagraphStateUpdate)
-  | RegisterChannel ChannelId (AVar Json)
-  | PutInChannel ChannelId Json
+  | RegisterChannel ChannelId (AVar Foreign)
+  | PutInChannel ChannelId Foreign
   | RaiseParentAction pa
   | DecodeWebSocketEvent EE.Event
-  | MessageParseError String Json
   | UpdateNodeValidity GraphId NodeId Boolean
   | UpdateTitleValidity GraphId Boolean
 
 data Query pa a
   = Mutate MegagraphMutation {onFail :: String -> pa, onSuccess :: pa} a
-  | LoadGraph GraphId a
+  | LoadGraph GraphId {onFail :: String -> pa, onSuccess :: pa} a
+  | LoadGraphWithTitle String {onFail :: String -> pa, onSuccess :: pa} a
   | Drop MegagraphComponent a
 
 data Message pa
@@ -197,13 +195,14 @@ handleAction = case _ of
   RegisterChannel channelId avar ->
     H.modify_ $ _channels <<< at channelId ?~ avar
 
-  PutInChannel channelId msgJson -> do
+  PutInChannel channelId msg -> do
     state <- H.get
     case Map.lookup channelId state.channels of
       Nothing -> H.liftEffect $ Console.log
-                 $ "Mesage reveived by no channel registered, msg: " <> stringify msgJson
+                 $ "Mesage received by no channel registered, msg: " <> unsafeFromForeign msg
+                 <> " of type " <> typeOf msg
                  <> " for channelId: " <> show channelId
-      Just avar -> H.liftAff $ AVar.put msgJson avar
+      Just avar -> H.liftAff $ AVar.put msg avar
     H.modify_ $ _channels <<< at channelId .~ Nothing
 
   RaiseParentAction parentAction -> H.raise $ ReturnAction parentAction
@@ -215,21 +214,19 @@ handleAction = case _ of
     of
       Nothing -> pure unit
       Just msg ->
-        -- TODO argonaut type with optional fields for less nested casing
-        case jsonParser msg
-             >>= decodeJson
+        case runExcept $ decodeJSON msg
         of
-          Right (response :: GraphQLWebsocketResponse) ->
-            handleAction $ PutInChannel response.id response.payload
+          Right (response :: GraphQLWebsocketResponse) -> do
+            handleAction $ PutInChannel response.id response.payload.data
           Left err ->
-            case (jsonParser msg >>= decodeJson) :: Either String {type :: String, id :: String} of
+            case (runExcept $ decodeJSON msg) :: Either MultipleErrors {type :: String, id :: String} of
               Right response ->
                 case response.type of
                   "complete" ->
                     H.liftEffect $ Console.log $ "message with id: \"" <> response.id <> "\" complete"
                   _ -> H.liftEffect $ Console.log $ show response
               Left err' ->
-                case (jsonParser msg >>= decodeJson) :: Either String {type :: String} of
+                case (runExcept $ decodeJSON msg) :: Either MultipleErrors {type :: String} of
                   Right response ->
                     case response.type of
                       "connection_ack" ->
@@ -238,11 +235,8 @@ handleAction = case _ of
                         H.liftEffect $ Console.log "received keep-alive"
                       _ -> H.liftEffect $ Console.log $ show response
                   Left err'' -> do
-                    H.liftEffect $ Console.log err''
+                    H.liftEffect $ Console.log $ "Unhandled websocket message: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err'')
                     H.liftEffect $ Console.log msg
-
-  MessageParseError err msgJson ->
-    H.liftEffect $ Console.log $ "Message parse error: " <> err <> " for message " <> stringify msgJson
 
   UpdateNodeValidity graphId nodeId isValid -> do
     H.modify_ $ _megagraph <<< _graph graphId <<< _node nodeId <<< _isValid .~ isValid
@@ -271,7 +265,7 @@ handleQuery = case _ of
           updateNodeTextOp = [UpdateNodes [node] [node {text = trim text, isValid = true}]]
           updateNodeText = do
             response <- sendMutation updateNodeTextOp
-            case parseNodeUpsertResponse response of
+            case runExcept $ parseNodeUpsertResponse response of
               Right 1 -> handleAction $ RaiseParentAction onSuccess
               _ -> handleAction $ RaiseParentAction $ onFail "Couldn't update node text in database"
         in do
@@ -284,7 +278,7 @@ handleQuery = case _ of
                 updateNodeValidityOp isValid = [UpdateNodes [node] [node {isValid = isValid}]]
               in do
                 response <- sendMutation updateTitleOp
-                case parseGraphUpsertResponse response of
+                case runExcept $ parseGraphUpsertResponse response of
                   -- If title can be updated, update node text in db, update title text locally
                   Right 1 -> do
                     handleAction $ InterpretStateUpdates updateTitleOp
@@ -305,14 +299,14 @@ handleQuery = case _ of
         in do
           handleAction $ InterpretStateUpdates updateTitleOp
           response <- sendMutation updateTitleOp
-          case parseGraphUpsertResponse response of
+          case runExcept $ parseGraphUpsertResponse response of
             Right 1 -> do
               handleAction $ UpdateTitleValidity graphId true
               response' <- sendQuery $ nodesWithSubgraphQuery graphId
-              case parseNodesWithSubgraphResponse response' of
+              case runExcept $ parseNodesWithSubgraphResponse response' of
                 Right nodes -> do
                   response'' <- sendMutation $ updateNodesTextOp nodes
-                  case parseNodeUpsertResponse response'' of
+                  case runExcept $ parseNodeUpsertResponse response'' of
                     Right n -> if n == Array.length nodes
                                then do
                                  handleAction $ InterpretStateUpdates $ updateNodesTextOp nodes
@@ -327,8 +321,9 @@ handleQuery = case _ of
 
       LinkNodeSubgraph node -> do
         response <- sendQuery $ graphIdWithTitleQuery $ trim node.text
-        case parseGraphIdWithTitleResponse response of
-          Left err -> handleAction $ RaiseParentAction $ onFail err
+        case runExcept $ parseGraphIdWithTitleResponse response of
+          Left err -> handleAction $ RaiseParentAction $ onFail
+                      $ joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err
           Right maybeGraphRow -> case maybeGraphRow of
             Nothing -> handleAction $ RaiseParentAction onSuccess
             Just graphRow ->
@@ -336,7 +331,7 @@ handleQuery = case _ of
                 op = [UpdateNodes [node] [node {subgraph = Just graphRow.id}]]
               in do
                 response' <- sendMutation op
-                case parseNodeUpsertResponse response' of
+                case runExcept $ parseNodeUpsertResponse response' of
                   Right 1 -> handleAction $ RaiseParentAction onSuccess
                   _ -> handleAction $ RaiseParentAction $ onFail "Error updating node subgraph"
                 handleAction $ InterpretStateUpdates op
@@ -344,28 +339,38 @@ handleQuery = case _ of
       StateUpdate megagraphStateUpdates -> do
         handleAction $ InterpretStateUpdates megagraphStateUpdates
         response <- sendMutation megagraphStateUpdates
-        -- TODO
-        H.liftEffect $ Console.log $ show megagraphStateUpdates
-        case parseMegagraphUpsertResponse response of
-          Left err -> handleAction $ RaiseParentAction $ onFail err
+        case runExcept $ (decode response :: F {data :: Foreign}) of
+          Left err -> handleAction $ RaiseParentAction $ onFail
+                      $ joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err
           Right _ -> handleAction $ RaiseParentAction onSuccess
 
-  LoadGraph graphId a -> Just a <$ do
+  LoadGraph graphId {onFail, onSuccess} a -> Just a <$ do
     state <- H.get
     let
       currentGraphIds = state.megagraph.graphs
                         # Map.keys # Array.fromFoldable
     H.liftEffect $ Console.log $ "Loading graph " <> show graphId
     response <- sendQuery $ graphFetchQuery graphId currentGraphIds
-    case parseGraphFetchResponse response of
-      Left err -> handleAction $ MessageParseError err response
+    case runExcept $ parseGraphFetchResponse response of
+      Left err -> handleAction $ RaiseParentAction $ onFail
+                  $ "Unable to parse graphFetchResponse: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err)
       Right {graph, mappings} ->
         let
           graphOp = encodeGraphAsMegagraphStateUpdates graph
           mappingUpdates = mappings # Array.concatMap \mapping ->
             encodeMappingAsMegagraphStateUpdates mapping
-        in
+        in do
           handleAction $ InterpretStateUpdates $ graphOp <> mappingUpdates
+          handleAction $ RaiseParentAction onSuccess
+
+  LoadGraphWithTitle title {onFail, onSuccess} a -> Just a <$ do
+    response <- sendQuery $ graphIdWithTitleQuery $ trim title
+    case runExcept $ parseGraphIdWithTitleResponse response of
+      Left err -> handleAction $ RaiseParentAction $ onFail
+                  $ "Unable to parse graphIdWithTitleResponse: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err)
+      Right maybeGraphRow -> case maybeGraphRow of
+        Nothing -> handleAction $ RaiseParentAction $ onFail $ "No graph with title " <> title
+        Just graphRow -> void $ handleQuery $ LoadGraph graphRow.id {onFail, onSuccess} a
 
   Drop (GraphComponent graphId) a -> Just a <$ do
     H.modify_ $ _megagraph <<< _graphs <<< at graphId .~ Nothing
@@ -375,13 +380,13 @@ handleQuery = case _ of
 
 type HalogenApp pa = H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff
 
-sendQuery :: forall pa. GraphQLQuery MegagraphSchema -> HalogenApp pa Json
+sendQuery :: forall pa. GraphQLQuery MegagraphSchema -> HalogenApp pa Foreign
 sendQuery query = sendGraphQL $ renderQuery query
 
-sendMutation :: forall pa. Array MegagraphStateUpdate -> HalogenApp pa Json
+sendMutation :: forall pa. Array MegagraphStateUpdate -> HalogenApp pa Foreign
 sendMutation op = sendGraphQL $ renderMutation $ megagraphUpdateToQuery op
 
-sendGraphQL :: forall pa. (UUID -> String) -> HalogenApp pa Json
+sendGraphQL :: forall pa. (UUID -> String) -> HalogenApp pa Foreign
 sendGraphQL query = do
   channelId <- H.liftEffect UUID.genUUID
   avar <- H.liftAff AVar.empty
