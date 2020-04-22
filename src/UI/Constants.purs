@@ -3,6 +3,7 @@ module UI.Constants where
 import AppState (Shape)
 import Megagraph (Point2D)
 import Prelude
+import Math as Math
 
 nodeRadius :: Number
 nodeRadius = 7.0
@@ -54,3 +55,12 @@ edgeMappingEdgeBeginMarkerRadius = 3.0
 
 pendingIndicatorHeightPx :: Number
 pendingIndicatorHeightPx = 3.0
+
+bezierControlPointShift :: Number
+bezierControlPointShift = 120.0
+
+selfEdgeInitialAngle :: Number
+selfEdgeInitialAngle = - Math.pi / 4.0
+
+selfEdgeInitialRadius :: Number
+selfEdgeInitialRadius = 120.0

@@ -15,7 +15,7 @@ import Data.Set as Set
 import Data.String (joinWith)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (Aff)
-import GraphComponent.Utils (bezierControlPointFromParabolaPoints, drawingEdgeWithinNodeHalo, lookupNodePositionInPane, parallelParabola)
+import GraphComponent.Utils (bezierControlPointFromParabolaPoints, cubicSvgBezierPath, drawingEdgeWithinNodeHalo, lookupNodePositionInPane, parallelParabola, quadraticSvgBezierPath)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.CSS as HCSS
@@ -30,7 +30,7 @@ import Svg.Attributes as SA
 import Svg.Elements as SE
 import Svg.Elements.Keyed as SK
 import Svg.Types as SVGT
-import UI.Constants (defaultTextFieldShape, defaultTitleShape, edgeHaloOffset, edgeTextBoxOffset, groupNodeRadius, haloRadius, invalidIndicatorOffset, invalidIndicatorSize, maxTextFieldShape, maxTitleShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset)
+import UI.Constants (bezierControlPointShift, defaultTextFieldShape, defaultTitleShape, edgeHaloOffset, edgeTextBoxOffset, groupNodeRadius, haloRadius, invalidIndicatorOffset, invalidIndicatorSize, maxTextFieldShape, maxTitleShape, nodeBorderRadius, nodeRadius, nodeTextBoxOffset)
 import UI.SvgDefs (svgDefs)
 import Web.UIEvent.MouseEvent as ME
 
@@ -188,8 +188,6 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
   GraphSpacePoint2D targetPos <- lookupNodePositionInPane state mapping.targetGraph nodeMappingEdge.targetNode renderPane
   let
     focused = state.focus == Just (NodeMappingEdgeElement mapping.id nodeMappingEdge.id)
-    -- TODO
-    -- edgePendingServerResponse = isJust $ Map.lookup nodeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "nodeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
@@ -200,10 +198,6 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
       , if focused
         then Just "focused"
         else Nothing
-      -- TODO
-      --, if edgePendingServerResponse
-      --  then Just "pending"
-      --  else Nothing
       ]
     targetHasSubgraph =
       isJust $ state.megagraph ^? _graph mapping.targetGraph <<< _node nodeMappingEdge.targetNode <<< _subgraph <<< traversed
@@ -264,8 +258,6 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
     sourcePosPageSpace = graphSpaceToPageSpace sourcePane sourcePosGraphSpace
     targetPosPageSpace = graphSpaceToPageSpace targetPane targetPosGraphSpace
     focused = state.focus == Just (EdgeMappingEdgeElement mapping.id edgeMappingEdge.id)
-    -- TODO
-    -- edgePendingServerResponse = isJust $ Map.lookup edgeMappingEdge.id state.pending
     edgeClasses = joinWith " " $ ["edge", "edgeMappingEdge"] <> if focused then ["focused"] else []
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
@@ -276,10 +268,6 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
       , if focused
         then Just "focused"
         else Nothing
-      -- TODO
-      --, if edgePendingServerResponse
-      --  then Just "pending"
-      --  else Nothing
       ]
     markerRef = "url(#arrow-to-edge)"
     targetHasSubgraph = false
@@ -336,7 +324,6 @@ renderEdge state renderPane edge = do
     borderHovered = state.hoveredElements # Set.member (EdgeBorderId (GraphComponent edge.graphId) edge.id)
     haloHovered = state.hoveredElements # Set.member (EdgeHaloId (GraphComponent edge.graphId) edge.id)
     edgeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (EdgeTextField edge.graphId edge.id)
-    -- edgePendingServerResponse = isJust $ Map.lookup edge.id state.pending
     edgeClasses = joinWith " " $ Array.catMaybes
                   [ Just "edge"
                   , if focused
@@ -352,10 +339,6 @@ renderEdge state renderPane edge = do
       , if borderHovered
         then Just "hovered"
         else Nothing
-      -- TODO
-      --, if edgePendingServerResponse
-      --  then Just "pending"
-      --  else Nothing
       ]
     edgeHaloClasses =
       joinWith " " $ Array.catMaybes
@@ -383,18 +366,16 @@ renderEdge state renderPane edge = do
     bezierParabola = {p0: sourcePos, p1: midpointGraphSpace, p2: targetPos}
     haloParabolaPos = parallelParabola edgeHaloOffset bezierParabola
     haloParabolaNeg = parallelParabola (- edgeHaloOffset) bezierParabola
-    bezierControlPoint = bezierControlPointFromParabolaPoints bezierParabola
-    bezierControlPointHaloPos = bezierControlPointFromParabolaPoints haloParabolaPos
-    bezierControlPointHaloNeg = bezierControlPointFromParabolaPoints haloParabolaNeg
+    bezierPath = if edge.source == edge.target
+                 then cubicSvgBezierPath bezierControlPointShift
+                 else quadraticSvgBezierPath
   pure $ Tuple edgeKey $
     SE.g
     []
     -- Edge halo for drawing edge-mapping edges
     [ SE.path
       [ SA.class_ edgeHaloClasses
-      , SA.d [ SVGT.Abs (SVGT.M haloParabolaPos.p0.x haloParabolaPos.p0.y)
-             , SVGT.Abs (SVGT.Q bezierControlPointHaloPos.x bezierControlPointHaloPos.y haloParabolaPos.p2.x haloParabolaPos.p2.y)
-             ]
+      , bezierPath haloParabolaPos
       , HE.onMouseDown \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
                                            , EdgeDrawStart renderPane (EdgeSource edge.id) e
                                            ]
@@ -403,9 +384,7 @@ renderEdge state renderPane edge = do
       ]
     , SE.path
       [ SA.class_ edgeHaloClasses
-      , SA.d [ SVGT.Abs (SVGT.M haloParabolaNeg.p0.x haloParabolaNeg.p0.y)
-             , SVGT.Abs (SVGT.Q bezierControlPointHaloNeg.x bezierControlPointHaloNeg.y haloParabolaNeg.p2.x haloParabolaNeg.p2.y)
-             ]
+      , bezierPath haloParabolaNeg
       , HE.onMouseDown \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
                                            , EdgeDrawStart renderPane (EdgeSource edge.id) e
                                            ]
@@ -415,17 +394,13 @@ renderEdge state renderPane edge = do
     -- Edge line
     , SE.path
       [ SA.class_ edgeClasses
-      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
-             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
-             ]
+      , bezierPath bezierParabola
       , SA.markerEnd markerRef
       ]
     -- Edge border for grabbing and dragging
     , SE.path
       [ SA.class_ edgeBorderClasses
-      , SA.d [ SVGT.Abs (SVGT.M sourcePos.x sourcePos.y)
-             , SVGT.Abs (SVGT.Q bezierControlPoint.x bezierControlPoint.y targetPos.x targetPos.y)
-             ]
+      , bezierPath bezierParabola
       , HE.onMouseDown \e -> Just $ DoMany [ StopPropagation (ME.toEvent e)
                                            , EdgeDragStart edge.graphId edge.id (edgeMidpoint edge) e
                                            ]
@@ -539,15 +514,10 @@ renderTitleInvalidIndicator state graphId =
       Nothing -> ""
       Just true -> ""
       Just false -> " invalid"
-    -- TODO
-    --pending = case Map.lookup graphId state.pending of
-    --  Nothing -> ""
-    --  Just _ -> " pending"
   in
     Tuple (show graphId <> "_titleInvalidIndicator") $
       SE.rect
-      -- TODO
-      [ SA.class_ $ "invalidIndicator" <> invalid --<> pending
+      [ SA.class_ $ "invalidIndicator" <> invalid
       , SA.width  $ show invalidIndicatorSize
       , SA.height $ show invalidIndicatorSize
       , SA.x $ show invalidIndicatorOffset.x

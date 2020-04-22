@@ -480,8 +480,7 @@ insertNode node graph =
   graph { nodes = graph.nodes # Map.insert node.id node }
 
 updateNode :: Node -> Graph -> Graph
-updateNode node graph =
-  graph # _nodes %~ Map.insert node.id node
+updateNode node = _nodes <<< at node.id ?~ node
 
 deleteNode :: NodeId -> Graph -> Graph
 deleteNode nodeId graph =

@@ -1,6 +1,18 @@
-.cache
-node_modules
-output
-.spago
+# Parcel
+/.cache/
+/dist/
+
+# Spago
+/.spago/
+
+# Purescript
+/generated-docs/
+/output/
+/.psc-ide-port
+
+# NPM
+/node_modules/
+
+# Emacs
 TAGS
-dist
+.#*

@@ -37,7 +37,7 @@ import LiveMegagraph as LiveMegagraph
 import Math as Math
 import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), MappingId, _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates)
-import UI.Constants (zoomScaling, pendingIndicatorHeightPx)
+import UI.Constants (pendingIndicatorHeightPx, selfEdgeInitialAngle, selfEdgeInitialRadius, zoomScaling)
 import UI.Panes (arrangePanes, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Utils (tupleApply)
 import Web.Event.Event as WE
@@ -622,17 +622,17 @@ handleAction = case _ of
           handleAction $ UpdateFocus focus
 
   AppCreateEdge edgeMetadata ->
-    if edgeMetadata.source == edgeMetadata.target
-    then pure unit
-    else
-      let
-        newEdge = freshEdge edgeMetadata
-        op = StateUpdate [UpdateEdges [newEdge {deleted = true}] [newEdge]]
-        target = GraphComponent edgeMetadata.graphId
-      in do
-        applyMegagraphMutation_ op
-        H.modify_ $ updateHistory (Insert op) target
-        handleAction $ UpdateFocus $ Just $ EdgeElement edgeMetadata.graphId edgeMetadata.id
+    let
+      midpoint = if edgeMetadata.source == edgeMetadata.target
+                 then {angle: selfEdgeInitialAngle, radius: selfEdgeInitialRadius}
+                 else {angle: 0.0, radius: 0.0}
+      newEdge = (freshEdge edgeMetadata) {midpointAngle = midpoint.angle, midpointRadius = midpoint.radius}
+      op = StateUpdate [UpdateEdges [newEdge {deleted = true}] [newEdge]]
+      target = GraphComponent edgeMetadata.graphId
+    in do
+      applyMegagraphMutation_ op
+      H.modify_ $ updateHistory (Insert op) target
+      handleAction $ UpdateFocus $ Just $ EdgeElement edgeMetadata.graphId edgeMetadata.id
 
   AppDeleteEdge edge -> do
     state <- H.get
@@ -793,20 +793,9 @@ handleAction = case _ of
 
   Undo (MappingComponent mappingId) -> do
     state <- H.get
-    -- TODO
-    H.liftEffect $ Console.log $ "Undoing op for mapping " <> show mappingId
     case state.megagraphHistory.mappingHistory ^? at mappingId <<< traversed <<< _history >>= Array.uncons of
-      Nothing ->  do
-        -- TODO
-        H.liftEffect $ Console.log "couldn't get history entry"
-        if isJust $ Map.lookup mappingId state.megagraphHistory.mappingHistory
-        then H.liftEffect $ Console.log "history exists"
-        else H.liftEffect $ Console.log "history does not exist"
-        pure unit
-      Just {head, tail} -> do
-        -- TODO
-        H.liftEffect $ Console.log $ "undoing " <> show head
-        undoOp head (MappingComponent mappingId)
+      Nothing -> pure unit
+      Just {head, tail} -> undoOp head (MappingComponent mappingId)
 
   Redo (GraphComponent graphId) -> do
     state <- H.get
@@ -874,7 +863,6 @@ handleAction = case _ of
         H.liftEffect $ Console.log $ "Loading saved graph encoded with version "
                                      <> wireData.version
         state <- H.get
-        -- TODO wire data is megagraph
         H.modify_ $ applyMegagraphStateUpdates wireData.op
         H.modify_ arrangePanes
         -- Keep text fields in sync
@@ -1123,8 +1111,8 @@ handleKeypress keyboardEvent = do
                 case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
                   Nothing -> pure unit
                   Just subgraphId -> do
-                    handleAction $ RemovePane graphId
                     loadGraph subgraphId
+                    handleAction $ RemovePane graphId
               _ -> pure unit
 
         -- Jump Up to the graphs that have nodes that point to the current graph
@@ -1133,18 +1121,16 @@ handleKeypress keyboardEvent = do
           state <- H.get
           if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
             H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            -- TODO
-            --case state.focusedPane of
-            --  Just (GraphComponent graphId) -> do
-            --    callbackId <- H.liftEffect UUID.genUUID
-            --    let
-            --      callback = \msg -> do
-            --        nodes <- parseNodesWithSubgraphResponse msg
-            --        pure $ DoMany $ [RemovePane graphId] <> (LoadGraph <$> (nodes <#> _.graphId))
-            --    -- TODO
-            --    -- H.modify_ $ registerCallback callbackId callback [graphId]
-            --    H.raise $ SendOperation $ renderQuery callbackId $ nodesWithSubgraphQuery graphId
-            --  _ -> pure unit
+            case state.focusedPane of
+              Just (GraphComponent graphId) -> do
+                maybeNodesWithSubgraph <- H.query _liveMegagraph unit $ H.request
+                                          $ LiveMegagraph.NodesWithSubgraph graphId {onFail: ConsoleLog, onSuccess: DoNothing}
+                case maybeNodesWithSubgraph of
+                  Nothing -> pure unit
+                  Just nodesWithSubgraph -> do
+                    for_ nodesWithSubgraph \node -> loadGraph node.graphId
+                    handleAction $ RemovePane graphId
+              _ -> pure unit
 
         -- load home graph
         "h" -> do

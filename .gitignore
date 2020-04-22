@@ -16,9 +16,3 @@
 # Emacs
 TAGS
 .#*
-
-# SQLite
-*.sqlite
-
-# Dev log
-/devlog.md

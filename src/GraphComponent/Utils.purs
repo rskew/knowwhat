@@ -8,9 +8,12 @@ import Data.Int (toNumber)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..))
+import Halogen.HTML.Properties as HP
 import Math as Math
 import Megagraph (GraphId, GraphSpacePoint2D(..), Node, NodeId, PageSpacePoint2D(..), Point2D, Point2DPolar, GraphView, graphSpaceToPageSpace, nodePosition, pageSpaceToGraphSpace)
 import MegagraphStateUpdate (MegagraphStateUpdate(..))
+import Svg.Attributes as SA
+import Svg.Types as SVGT
 import UI.Constants (haloRadius)
 import Web.UIEvent.MouseEvent as ME
 
@@ -75,6 +78,58 @@ bezierControlPointFromParabolaPoints parabola =
   { x : 2.0 * parabola.p1.x - (parabola.p0.x + parabola.p2.x) / 2.0
   , y : 2.0 * parabola.p1.y - (parabola.p0.y + parabola.p2.y) / 2.0
   }
+
+quadraticSvgBezierPath :: forall r i. Parabola -> HP.IProp (d :: String | r) i
+quadraticSvgBezierPath parabola =
+  let
+    quadraticBezierControlPoint = bezierControlPointFromParabolaPoints parabola
+  in
+    SA.d [ SVGT.Abs (SVGT.M parabola.p0.x parabola.p0.y)
+         , SVGT.Abs (SVGT.Q quadraticBezierControlPoint.x quadraticBezierControlPoint.y parabola.p2.x parabola.p2.y)
+         ]
+
+-- | Add some extra curviness to an otherwise parabolic edge by splitting the
+-- | single control point of a quadratic bezier into two (making a cubic bezier),
+-- | and moving these apart along the direction of the start and end-points (or
+-- | the direction orthogonal to the vector between the midpoint of the start and
+-- | end-points and the quadratic bezier control point).
+-- |
+-- | This is done by taking the vector between the midpoint of the two endpoints
+-- | and the quadratic control point $v_1$, and moving the cubic control points perpendicular
+-- | to $v_1$ in either direction.
+cubicBezierControlPoints :: Parabola -> Number -> Tuple Point2D Point2D
+cubicBezierControlPoints parabola shiftAmount =
+  let
+    quadraticBezierControlPoint = bezierControlPointFromParabolaPoints parabola
+    endpointMidpoint = { x: 0.5 * (parabola.p0.x + parabola.p2.x)
+                       , y: 0.5 * (parabola.p0.y + parabola.p2.y)
+                       }
+    v1 = { x: quadraticBezierControlPoint.x - endpointMidpoint.x
+         , y: quadraticBezierControlPoint.y - endpointMidpoint.y
+         }
+    dotProd v w = v.x*w.x + v.y*w.y
+    v1Norm = Math.sqrt $ dotProd v1 v1
+    v1OrthogonalUnit = {x: -v1.y / v1Norm, y: v1.x / v1Norm}
+    v1OrthogonalShift = { x: v1OrthogonalUnit.x * shiftAmount
+                        , y: v1OrthogonalUnit.y * shiftAmount
+                        }
+    controlPointA = quadraticBezierControlPoint - v1OrthogonalShift
+    controlPointB = quadraticBezierControlPoint + v1OrthogonalShift
+  in
+    if dotProd (controlPointB - controlPointA) (parabola.p2 - parabola.p0) > 0.0
+    -- control points are aligned with curve direction
+    then Tuple controlPointA controlPointB
+    -- control points are anti-aligned with curve direction
+    else Tuple controlPointB controlPointA
+
+cubicSvgBezierPath :: forall r i. Number -> Parabola -> HP.IProp (d :: String | r) i
+cubicSvgBezierPath shift parabola =
+  let
+    Tuple controlPointA controlPointB = cubicBezierControlPoints parabola shift
+  in
+    SA.d [ SVGT.Abs (SVGT.M parabola.p0.x parabola.p0.y)
+         , SVGT.Abs (SVGT.C controlPointA.x controlPointA.y controlPointB.x controlPointB.y parabola.p2.x parabola.p2.y)
+         ]
 
 parallelParabola :: Number -> Parabola -> Parabola
 parallelParabola offset parabola =

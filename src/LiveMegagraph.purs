@@ -49,7 +49,7 @@ import Web.Socket.Event.MessageEvent as ME
 import Web.Socket.ReadyState (ReadyState(..))
 import Web.Socket.WebSocket as WS
 
-  -- | State updates that require specific interactions with the backend.
+-- | State updates requiring different interactions with the backend.
 data MegagraphMutation
   = UpdateNodeText Node String
   | UpdateTitleText GraphId String String
@@ -82,14 +82,14 @@ invertMegagraphMutation = case _ of
 
 type ChannelId = UUID
 
-type State pa
+type State
   = { megagraph :: Megagraph
     , channels :: Map ChannelId (AVar Foreign)
     , webSocketConnection :: WS.WebSocket
     , messageQueue :: Array String
     }
 
-emptyState :: forall pa. WS.WebSocket -> State pa
+emptyState :: WS.WebSocket -> State
 emptyState connection
   = { megagraph: emptyMegagraph
     , channels: Map.empty
@@ -97,13 +97,13 @@ emptyState connection
     , messageQueue: []
     }
 
-_megagraph :: forall pa. Lens' (State pa) Megagraph
+_megagraph :: Lens' State Megagraph
 _megagraph = prop (SProxy :: SProxy "megagraph")
 
-_channels :: forall pa. Lens' (State pa) (Map ChannelId (AVar Foreign))
+_channels :: Lens' State (Map ChannelId (AVar Foreign))
 _channels = prop (SProxy :: SProxy "channels")
 
-_messageQueue :: forall pa. Lens' (State pa) (Array String)
+_messageQueue :: Lens' State (Array String)
 _messageQueue = prop (SProxy :: SProxy "messageQueue")
 
 data Action pa
@@ -122,6 +122,7 @@ data Query pa a
   = Mutate MegagraphMutation {onFail :: String -> pa, onSuccess :: pa} a
   | LoadGraph GraphId {onFail :: String -> pa, onSuccess :: pa} a
   | LoadGraphWithTitle String {onFail :: String -> pa, onSuccess :: pa} a
+  | NodesWithSubgraph GraphId {onFail :: String -> pa, onSuccess :: pa} (Array Node -> a)
   | Drop MegagraphComponent a
 
 data Message pa
@@ -149,7 +150,7 @@ liveMegagraph =
 editorRef :: H.RefLabel
 editorRef = H.RefLabel "editor"
 
-render :: forall pa. State pa -> H.ComponentHTML (Action pa) Slots Aff
+render :: forall pa. State -> H.ComponentHTML (Action pa) Slots Aff
 render state =
   let
     classes = joinWith " " $ Array.catMaybes
@@ -164,7 +165,7 @@ render state =
     ]
     []
 
-handleAction :: forall pa. Action pa -> H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff Unit
+handleAction :: forall pa. Action pa -> H.HalogenM State (Action pa) Slots (Message pa) Aff Unit
 handleAction = case _ of
   Init -> do
     state <- H.get
@@ -249,17 +250,17 @@ handleAction = case _ of
     H.raise $ MegagraphUpdated state.megagraph
 
 handleQuery :: forall pa a.
-               Query pa a -> H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff (Maybe a)
+               Query pa a -> H.HalogenM State (Action pa) Slots (Message pa) Aff (Maybe a)
 handleQuery = case _ of
   Mutate megagraphMutation {onFail, onSuccess} a -> Just a <$
     case megagraphMutation of
-      -- When updating node text:
-      -- - update local node text state
-      -- - if node has subgraph:
-      --   - check if new text is a valid (unique) title
-      --   - if so, update title locally and in db, update node text in db
-      --   - if not, indicate local version of node is invalid
-      -- - if node has no subgraph, update db with new node text
+      -- | When updating node text:
+      -- | - update local node text state
+      -- | - if node has subgraph:
+      -- |   - check if new text is a valid (unique) title
+      -- |   - if so, update title locally and in db, update node text in db
+      -- |   - if not, indicate local version of node is invalid
+      -- | - if node has no subgraph, update db with new node text
       UpdateNodeText node text ->
         let
           updateNodeTextOp = [UpdateNodes [node] [node {text = trim text, isValid = true}]]
@@ -367,10 +368,21 @@ handleQuery = case _ of
     response <- sendQuery $ graphIdWithTitleQuery $ trim title
     case runExcept $ parseGraphIdWithTitleResponse response of
       Left err -> handleAction $ RaiseParentAction $ onFail
-                  $ "Unable to parse graphIdWithTitleResponse: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err)
+                    $ "Unable to parse graphIdWithTitleResponse: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err)
       Right maybeGraphRow -> case maybeGraphRow of
         Nothing -> handleAction $ RaiseParentAction $ onFail $ "No graph with title " <> title
         Just graphRow -> void $ handleQuery $ LoadGraph graphRow.id {onFail, onSuccess} a
+
+  NodesWithSubgraph graphId {onFail, onSuccess} next -> do
+    response <- sendQuery $ nodesWithSubgraphQuery graphId
+    case runExcept $ parseNodesWithSubgraphResponse response of
+      Left err -> do
+        handleAction $ RaiseParentAction $ onFail
+          $ "Unable to parse nodesWithSubgraphResponse: " <> (joinWith " " $ Array.fromFoldable $ toList $ renderForeignError <$> err)
+        pure Nothing
+      Right nodesWithSubgraph -> do
+        handleAction $ RaiseParentAction $ onSuccess
+        pure $ Just $ next nodesWithSubgraph
 
   Drop (GraphComponent graphId) a -> Just a <$ do
     H.modify_ $ _megagraph <<< _graphs <<< at graphId .~ Nothing
@@ -378,7 +390,7 @@ handleQuery = case _ of
   Drop (MappingComponent mappingId) a -> Just a <$ do
     H.modify_ $ _megagraph <<< _mappings <<< at mappingId .~ Nothing
 
-type HalogenApp pa = H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff
+type HalogenApp pa = H.HalogenM State (Action pa) Slots (Message pa) Aff
 
 sendQuery :: forall pa. GraphQLQuery MegagraphSchema -> HalogenApp pa Foreign
 sendQuery query = sendGraphQL $ renderQuery query
@@ -412,7 +424,7 @@ subscribeWithAction :: forall pa.
                        EE.EventType
                        -> ET.EventTarget
                        -> (EE.Event -> Action pa)
-                       -> H.HalogenM (State pa) (Action pa) Slots (Message pa) Aff Unit
+                       -> H.HalogenM State (Action pa) Slots (Message pa) Aff Unit
 subscribeWithAction eventType eventTarget action =
   H.subscribe' \subscriptionId ->
     ES.effectEventSource \emitter -> do

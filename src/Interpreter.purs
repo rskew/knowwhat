@@ -22,7 +22,6 @@ interpretMegagraphStateUpdate = case _ of
     \megagraph -> foldr (\edgeMappingEdge -> _mapping edgeMappingEdge.mappingId %~ updateEdgeMappingEdge edgeMappingEdge) megagraph to
   InsertPathEquations graphId pathEquations -> _graph graphId %~ \graph -> foldr insertPathEquation graph pathEquations
   DeletePathEquations graphId pathEquations -> _graph graphId %~ \graph -> foldr deletePathEquation graph pathEquations
-
   CreateGraph graphId title ->
     let
       newGraph = emptyGraph graphId # _title <<< _text .~ title
