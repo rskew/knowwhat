@@ -1,4 +1,4 @@
-# Workflow
+# Knowwhat
 
 Graph drawing for mindmapping, knowledge engineering and creative-tool-making.
 

@@ -1,6 +1,6 @@
 {
-  "name": "workflow",
-  "version": "0.1.0",
+  "name": "knowwhat",
+  "version": "0.0.2",
   "description": "Graph drawing for mindmapping, knowledge engineering and creative-tool-making.",
   "scripts": {
     "clean": "rm -rf .cache .spago dist node_modules output",
@@ -10,14 +10,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rskew/workflow.git"
+    "url": "git+https://github.com/rskew/knowwhat.git"
   },
   "author": "Rowan Skewes",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/rskew/workflow/issues"
+    "url": "https://github.com/rskew/knowwhat/issues"
   },
-  "homepage": "https://github.com/rskew/workflow#README",
+  "homepage": "https://github.com/rskew/knowwhat#README",
   "dependencies": {
     "file-saver": "^2.0.2",
     "sqlite3": "^4.1.0",
