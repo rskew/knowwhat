@@ -195,6 +195,7 @@ type AppState
     , textFocused        :: Maybe { historyUpdater :: (String -> Maybe (Tuple MegagraphMutation MegagraphComponent))
                                   , textFieldElement :: TextFieldElement
                                   }
+    , selectedEdges      :: Set (Tuple GraphId EdgeId)
     , keyHoldState       :: KeyHoldState
     , webSocketConnection :: WS.WebSocket
     }
@@ -210,6 +211,7 @@ emptyAppState rect connection
     , focus              : Nothing
     , focusedPane        : Nothing
     , textFocused        : Nothing
+    , selectedEdges      : Set.empty
     , keyHoldState       : { spaceDown : false, controlDown : false }
     , webSocketConnection : connection
     }
@@ -381,6 +383,8 @@ _spaceDown = prop (SProxy :: SProxy "spaceDown")
 _controlDown :: Lens' KeyHoldState Boolean
 _controlDown = prop (SProxy :: SProxy "controlDown")
 
+_selectedEdges :: Lens' AppState (Set (Tuple GraphId EdgeId))
+_selectedEdges = prop (SProxy :: SProxy "selectedEdges")
 
 ------
 -- Utils

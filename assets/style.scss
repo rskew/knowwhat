@@ -2,7 +2,7 @@
     --pane-border-width: 4px;
 
     --gold: #fc0;
-    --aqua: #0dd;
+    --aqua: #0dd7;
     --magenta: #d0f;
     --caramel: #f70;
     --gray: #aaac;
@@ -28,6 +28,8 @@
     --text-color: #000;
     --divider-color: #444;
     --pending-color: var(--aqua);
+    --selected-color: var(--aqua);
+    --equated-color: var(--magenta);
 }
 
 html {
@@ -240,15 +242,20 @@ foreignObject {
     stroke-width: 1.5px;
 }
 
+.edge.textFocused {
+    stroke: var(--text-focused-color);
+    stroke-width: 3px;
+}
+
+.edge.inPathEquation {
+    stroke: var(--equated-color);
+    stroke-width: 3px;
+}
+
 .edge.focused {
     stroke: var(--focused-color);
     stroke-width: 3px;
     fill: none;
-}
-
-.edge.textFocused {
-    stroke: var(--text-focused-color);
-    stroke-width: 3px;
 }
 
 .edgeBorder {
@@ -260,6 +267,11 @@ foreignObject {
 
 .edgeBorder.hovered {
     opacity: 1.0;
+}
+
+.edgeBorder.selected {
+    opacity: 1.0;
+    stroke: var(--selected-color);
 }
 
 .edgeBorder.invalid {

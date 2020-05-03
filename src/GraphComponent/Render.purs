@@ -7,6 +7,7 @@ import CSS as CSS
 import ContentEditable.SVGComponent as SVGContentEditable
 import DOM.HTML.Indexed.InputType (InputType(..))
 import Data.Array as Array
+import Data.Foldable (any)
 import Data.Lens ((^.), (^?), traversed)
 import Data.Lens.At (at)
 import Data.Map as Map
@@ -24,7 +25,7 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import LiveMegagraph (MegagraphMutation(..))
 import LiveMegagraph as LiveMegagraph
-import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _deleted, _edge, _graph, _isValid, _node, _nodes, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
+import Megagraph (Edge, EdgeMappingEdge, Graph, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MegagraphElement(..), Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _deleted, _edge, _graph, _isValid, _node, _nodes, _pathEquations, _position, _subgraph, _title, edgeArray, edgeMidpoint, graphEdgeSpaceToGraphSpace, graphSpaceToPageSpace, lookupEdgeById, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..))
 import Svg.Attributes as SA
 import Svg.Elements as SE
@@ -53,17 +54,12 @@ renderGraphNode state pane node =
                                          NodeSource drawingEdgeSourceNode -> drawingEdgeSourceNode /= node.id)
       # Map.size
       # \n -> n > 0
-    -- nodePendingServerResponse = isJust $ Map.lookup node.id state.pending
     nodeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (NodeTextField node.graphId node.id)
     nodeClasses =
       joinWith " " $ Array.catMaybes
       [ Just "node"
-      , if nodeFocused
-        then Just "focused"
-        else Nothing
-      , if nodeTextFocused
-        then Just "textFocused"
-        else Nothing
+      , if nodeFocused then Just "focused" else Nothing
+      , if nodeTextFocused then Just "textFocused" else Nothing
       ]
     nodeBorderClasses =
         joinWith " " $ Array.catMaybes
@@ -75,25 +71,14 @@ renderGraphNode state pane node =
              (not nodeFocused)
           then Just "hovered"
           else Nothing
-        , if not node.isValid
-          then Just "invalid"
-          else Nothing
+        , if not node.isValid then Just "invalid" else Nothing
         ]
     haloClasses =
       joinWith " " $ Array.catMaybes
       [ Just "nodeHalo"
-      , if hoveredOverHalo
-        then Just "hovered"
-        else Nothing
-      , if nodeFocused
-        then Just "focused"
-        else Nothing
-      , if drawingEdgeOverNode
-        then Just "ready"
-        else Nothing
-      --, if nodePendingServerResponse
-      --  then Just "pending"
-      --  else Nothing
+      , if hoveredOverHalo then Just "hovered" else Nothing
+      , if nodeFocused then Just "focused" else Nothing
+      , if drawingEdgeOverNode then Just "ready" else Nothing
       ]
     textBoxHTML textBoxOffset =
       [ SE.g
@@ -195,9 +180,7 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
       , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id) nodeMappingEdge.id)
         then Just "hovered"
         else Nothing
-      , if focused
-        then Just "focused"
-        else Nothing
+      , if focused then Just "focused" else Nothing
       ]
     targetHasSubgraph =
       isJust $ state.megagraph ^? _graph mapping.targetGraph <<< _node nodeMappingEdge.targetNode <<< _subgraph <<< traversed
@@ -265,9 +248,7 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
       , if state.hoveredElements # Set.member (EdgeBorderId (MappingComponent mapping.id) edgeMappingEdge.id)
         then Just "hovered"
         else Nothing
-      , if focused
-        then Just "focused"
-        else Nothing
+      , if focused then Just "focused" else Nothing
       ]
     markerRef = "url(#arrow-to-edge)"
     targetHasSubgraph = false
@@ -324,28 +305,27 @@ renderEdge state renderPane edge = do
     borderHovered = state.hoveredElements # Set.member (EdgeBorderId (GraphComponent edge.graphId) edge.id)
     haloHovered = state.hoveredElements # Set.member (EdgeHaloId (GraphComponent edge.graphId) edge.id)
     edgeTextFocused = (state.textFocused <#> _.textFieldElement) == Just (EdgeTextField edge.graphId edge.id)
+    edgeSelected = state.selectedEdges # Set.member (Tuple edge.graphId edge.id)
+    edgeInPathEquation = case state.megagraph ^? _graph edge.graphId <<< _pathEquations of
+      Nothing -> false
+      Just equations -> any (\pathEquation -> not pathEquation.deleted && Array.elem edge.id (pathEquation.pathA <> pathEquation.pathB))
+                            equations
     edgeClasses = joinWith " " $ Array.catMaybes
                   [ Just "edge"
-                  , if focused
-                    then Just "focused"
-                    else Nothing
-                  , if edgeTextFocused
-                    then Just "textFocused"
-                    else Nothing
+                  , if focused then Just "focused" else Nothing
+                  , if edgeTextFocused then Just "textFocused" else Nothing
+                  , if edgeInPathEquation then Just "inPathEquation" else Nothing
                   ]
     edgeBorderClasses =
       joinWith " " $ Array.catMaybes
       [ Just "edgeBorder"
-      , if borderHovered
-        then Just "hovered"
-        else Nothing
+      , if borderHovered then Just "hovered" else Nothing
+      , if edgeSelected then Just "selected" else Nothing
       ]
     edgeHaloClasses =
       joinWith " " $ Array.catMaybes
       [ Just "edgeHalo"
-      , if haloHovered
-        then Just "hovered"
-        else Nothing
+      , if haloHovered then Just "hovered" else Nothing
       , if (haloHovered || borderHovered) && drawingEdgeFromDifferentGraphEdgeExists
         then Just "ready"
         else Nothing

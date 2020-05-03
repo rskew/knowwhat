@@ -223,8 +223,7 @@ handleAction = case _ of
             case (runExcept $ decodeJSON msg) :: Either MultipleErrors {type :: String, id :: String} of
               Right response ->
                 case response.type of
-                  "complete" ->
-                    H.liftEffect $ Console.log $ "message with id: \"" <> response.id <> "\" complete"
+                  "complete" -> pure unit
                   _ -> H.liftEffect $ Console.log $ show response
               Left err' ->
                 case (runExcept $ decodeJSON msg) :: Either MultipleErrors {type :: String} of

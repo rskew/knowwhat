@@ -7,9 +7,9 @@ import Data.Foldable (foldl, foldr)
 import Data.Lens ((%~), (.~), (?~))
 import Data.Lens.At (at)
 import HasuraQuery (GraphQLMutation, emptyMutation)
-import Megagraph (Megagraph, _graph, _graphs, _mapping, _mappings, _text, _title, deletePathEquation, emptyGraph, emptyMapping, insertPathEquation, updateEdge, updateEdgeMappingEdge, updateNode, updateNodeMappingEdge, updateTitle)
+import Megagraph (Megagraph, _graph, _graphs, _mapping, _mappings, _text, _title, emptyGraph, emptyMapping, updateEdge, updateEdgeMappingEdge, updateNode, updateNodeMappingEdge, updatePathEquation, updateTitle)
 import MegagraphStateUpdate (MegagraphStateUpdate(..))
-import Query (MegagraphSchema, renderEdgeMappingEdgeUpsertQuery, renderEdgeUpsertQuery, renderGraphUpsertQuery, renderMappingUpsertQuery, renderNodeMappingEdgeUpsertQuery, renderNodeUpsertQuery)
+import Query (MegagraphSchema, renderEdgeMappingEdgeUpsertQuery, renderEdgeUpsertQuery, renderGraphUpsertQuery, renderMappingUpsertQuery, renderNodeMappingEdgeUpsertQuery, renderNodeUpsertQuery, renderPathEquationUpsertQuery)
 
 interpretMegagraphStateUpdate :: MegagraphStateUpdate -> Megagraph -> Megagraph
 interpretMegagraphStateUpdate = case _ of
@@ -20,8 +20,7 @@ interpretMegagraphStateUpdate = case _ of
     \megagraph -> foldr (\nodeMappingEdge -> _mapping nodeMappingEdge.mappingId %~ updateNodeMappingEdge nodeMappingEdge) megagraph to
   UpdateEdgeMappingEdges from to ->
     \megagraph -> foldr (\edgeMappingEdge -> _mapping edgeMappingEdge.mappingId %~ updateEdgeMappingEdge edgeMappingEdge) megagraph to
-  InsertPathEquations graphId pathEquations -> _graph graphId %~ \graph -> foldr insertPathEquation graph pathEquations
-  DeletePathEquations graphId pathEquations -> _graph graphId %~ \graph -> foldr deletePathEquation graph pathEquations
+  UpdatePathEquation from to -> _graph to.graphId %~ updatePathEquation to
   CreateGraph graphId title ->
     let
       newGraph = emptyGraph graphId # _title <<< _text .~ title
@@ -43,9 +42,8 @@ megagraphOperationToGraphMutation =
   case _ of
     UpdateNodes _ to    -> renderNodeUpsertQuery to
     UpdateEdges _ to    -> renderEdgeUpsertQuery to
-    UpdateTitle graphId _ to       -> renderGraphUpsertQuery [{id: graphId, title: to}]
-    InsertPathEquations graphId pathEquations -> emptyMutation
-    DeletePathEquations graphId pathEquations -> emptyMutation
+    UpdateTitle graphId _ to -> renderGraphUpsertQuery [{id: graphId, title: to}]
+    UpdatePathEquation from to -> renderPathEquationUpsertQuery to
     UpdateNodeMappingEdges _ to -> renderNodeMappingEdgeUpsertQuery to
     UpdateEdgeMappingEdges _ to -> renderEdgeMappingEdgeUpsertQuery to
     CreateGraph graphId title -> renderGraphUpsertQuery [{id: graphId, title: title}]

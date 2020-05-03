@@ -13,12 +13,12 @@ From the repo root, run `docker-compose -f deployment/docker-compose.yml up`, th
 
 Double-click on the background to add a new node, and explore from there.
 
-The interface is still under development. The best way to find out what commands are supported is to look at the `handleKeypress` function in `src/GraphComponent/handleAction.purs`.
+The interface is under development. The best way to find out what commands are supported is to look at the `handleKeypress` function in `src/GraphComponent/handleAction.purs`.
 
 
 ## Development
 
-For development, you still need to bring up the system with `docker-compose`, but rather than use the nginx fileserver container with the built-in version of the frontend, run a local devserver with [parcel](https://parceljs.org/) so you can view your changes right away.
+For development, bring up the backend with `docker-compose`. In stead of the nginx fileserver container with the built-in version of the frontend, run a local devserver for your modified frontend with [parcel](https://parceljs.org/).
 
 We use [spago](https://github.com/spacchetti/spago) to manage our Purescript dependencies.
 While this is installed as a `dev-dependency` in `package.json` you may want to install it directly to make it easier to manage these dependencies directly.

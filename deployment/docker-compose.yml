@@ -18,14 +18,16 @@ services:
       - ${PWD}/deployment/db_data:/var/lib/postgresql/data
 
   graphql-engine:
-    image: hasura/graphql-engine:v1.1.0.cli-migrations
+    image: hasura/graphql-engine:v1.2.0.cli-migrations
     ports:
       - "8086:8080"
     depends_on:
       - "postgres"
     restart: always
     volumes:
-      - ${PWD}/deployment/migrations:/hasura-migrations
+      # Follow these instructions to re-generate the database migration
+      # https://hasura.io/docs/1.0/graphql/manual/migrations/config-v1/manage-migrations.html#manage-migrations-v1
+      - ${PWD}/deployment/hasura/migrations:/hasura-migrations
     environment:
       HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:@postgres:5432/postgres
       HASURA_GRAPHQL_ENABLE_CONSOLE: "true" # set to "false" to disable console

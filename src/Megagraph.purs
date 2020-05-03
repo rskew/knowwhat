@@ -7,7 +7,7 @@ module Megagraph where
 import Prelude
 
 import Data.Array as Array
-import Data.Foldable (foldr)
+import Data.Foldable (all, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Lens (Lens', Traversal', lens, traversed, (%~), (.~), (?~))
@@ -19,6 +19,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
+import Data.Tuple (Tuple(..), fst)
 import Data.UUID (UUID)
 import Data.UUID as UUID
 import Foreign.Class (class Encode, class Decode)
@@ -246,24 +247,26 @@ data MegagraphElement
   | EdgeMappingEdgeElement MappingId EdgeId
 
 derive instance eqMegagraphElement :: Eq MegagraphElement
+
 derive instance ordMegagraphElement :: Ord MegagraphElement
+
 derive instance genericMegagraphElement :: Generic MegagraphElement _
 
 instance showMegagraphElement :: Show MegagraphElement where
   show = genericShow
 
-data PathEquation = PathEquation (Array EdgeId) (Array EdgeId)
+type PathEquationId = UUID
 
-derive instance eqPathEquation :: Eq PathEquation
-derive instance ordPathEquation :: Ord PathEquation
-derive instance genericPathEquation :: Generic PathEquation _
-instance decodePathEquation :: Decode PathEquation where
-  decode = genericDecode defaultOptions
-instance encodePathEquation :: Encode PathEquation where
-  encode = genericEncode defaultOptions
-instance showPathEquation :: Show PathEquation where
-  show (PathEquation leftPath rightPath) =
-    "PathEquation: " <> show leftPath <> " == " <> show rightPath
+type PathEquation
+  = { id :: PathEquationId
+    , graphId :: GraphId
+    , pathA :: Array EdgeId
+    , pathB :: Array EdgeId
+    , deleted :: Boolean
+    }
+
+freshPathEquation :: PathEquationId -> GraphId -> PathEquation
+freshPathEquation id graphId = {id: id, graphId: graphId, pathA: [], pathB: [], deleted: false}
 
 type GraphTitle
   = { text :: String
@@ -278,7 +281,7 @@ type Graph
     , title :: GraphTitle
     , nodes :: Map NodeId Node
     , edges ::  Map EdgeId Edge
-    , pathEquations :: Set PathEquation
+    , pathEquations :: Map PathEquationId PathEquation
     }
 
 emptyGraph :: GraphId -> Graph
@@ -289,7 +292,7 @@ emptyGraph id
               }
     , nodes : Map.empty
     , edges : Map.empty
-    , pathEquations : Set.empty
+    , pathEquations : Map.empty
     }
 
 
@@ -435,7 +438,7 @@ _nodeText nodeId = prop (SProxy :: SProxy "nodes") <<< at nodeId <<< traversed <
 _nodeSubgraph :: NodeId -> Traversal' Graph (Maybe GraphId)
 _nodeSubgraph nodeId = _nodes <<< at nodeId <<< traversed <<< prop (SProxy :: SProxy "subgraph")
 
-_pathEquations :: Lens' Graph (Set PathEquation)
+_pathEquations :: Lens' Graph (Map PathEquationId PathEquation)
 _pathEquations = prop (SProxy :: SProxy "pathEquations")
 
 _graphs :: Lens' Megagraph (Map GraphId Graph)
@@ -542,13 +545,13 @@ connectSubgraph :: NodeId -> Maybe GraphId -> Graph -> Graph
 connectSubgraph nodeId maybeGraphId =
   _nodeSubgraph nodeId .~ maybeGraphId
 
-insertPathEquation :: PathEquation -> Graph -> Graph
-insertPathEquation pathEquation =
-  _pathEquations %~ Set.insert pathEquation
+updatePathEquation :: PathEquation -> Graph -> Graph
+updatePathEquation pathEquation =
+  _pathEquations %~ Map.insert pathEquation.id pathEquation
 
 deletePathEquation :: PathEquation -> Graph -> Graph
 deletePathEquation pathEquation =
-  _pathEquations %~ Set.delete pathEquation
+  _pathEquations %~ Map.insert pathEquation.id (pathEquation {deleted = true})
 
 updateNodeMappingEdge :: NodeMappingEdge -> Mapping -> Mapping
 updateNodeMappingEdge nodeMappingEdge =
@@ -577,6 +580,75 @@ updateEdgeMappingEdgeMidpoint edgeMappingEdgeId (PageEdgeSpacePoint2D newMidpoin
 -- | Not typesafe, don't use with Edge!
 mappingEdgeMidpoint :: forall r. {midpointAngle :: Number, midpointRadius :: Number | r} -> PageEdgeSpacePoint2D
 mappingEdgeMidpoint mappingEdge = PageEdgeSpacePoint2D {angle: mappingEdge.midpointAngle, radius: mappingEdge.midpointRadius}
+
+
+------
+-- Path Equations
+
+-- | For a path equation to be valid, it has to have two non-intersecting paths
+-- | from the same source to the same target.
+-- | All the edges have to be from the same graph.
+edgeSetIsValidPathEquation :: Graph -> Set (Tuple GraphId EdgeId) -> Boolean
+edgeSetIsValidPathEquation graph graphIdEdgeIdSet =
+  -- edgeSet is non-empty
+  (Set.size graphIdEdgeIdSet > 0)
+  &&
+  -- All edges are part of the same graph
+  (all (fst >>> (==) graph.id) graphIdEdgeIdSet)
+  &&
+  -- Each node is counted twice when counting sources and targets.
+  -- The source node will be counted twice for both initial edges of the paths,
+  -- the target node will be counted twice for both final edges of the paths,
+  -- and each intermediate node will be counted twice for its entering and leaving
+  -- edges.
+  -- This guarantees that the paths don't intersect, and that they are unbroken.
+  (all ((==) 2) nodeCounts)
+  &&
+  (Set.size graphIdEdgeIdSet == Array.length edges)
+  where
+    edges = graphIdEdgeIdSet
+            # Set.map (\(Tuple graphId edgeId) -> lookupEdgeById edgeId graph)
+            # Array.fromFoldable
+            # Array.catMaybes
+    nodeCounts = foldr countNode Map.empty edges
+    countNode edge nodeCounts' =
+      nodeCounts'
+      # Map.alter inc edge.source
+      # Map.alter inc edge.target
+    inc = case _ of
+      Just n -> Just (n + 1)
+      Nothing -> Just 1
+
+edgeSetToPathEquation :: Graph -> PathEquationId -> Set (Tuple GraphId EdgeId) -> Maybe PathEquation
+edgeSetToPathEquation graph id graphIdEdgeIdSet =
+  if not edgeSetIsValidPathEquation graph graphIdEdgeIdSet then Nothing else do
+    Tuple pathA pathB <- pathsFromEdgeSet edges
+    graphId <- _.graphId <$> Set.findMin edges
+    pure $ (freshPathEquation id graphId) {pathA = _.id <$> pathA, pathB = _.id <$> pathB}
+    where
+      edges = graphIdEdgeIdSet
+              # Set.mapMaybe (\(Tuple graphId edgeId) -> lookupEdgeById edgeId graph)
+      sourceNodeId :: Set Edge -> Maybe NodeId
+      sourceNodeId edgeSet = Set.findMin $ Set.filter (not <<< flip Set.member targets) sources
+        where
+          sources = Set.map _.source edgeSet
+          targets = Set.map _.target edgeSet
+      pathFromSource :: NodeId -> Set Edge -> Array Edge
+      pathFromSource source edgeSet =
+        case Set.findMin $ Set.filter (\edge -> edge.source == source) edgeSet of
+          Nothing -> []
+          Just firstEdge ->
+            let
+              rest = pathFromSource firstEdge.target edgeSet
+            in
+              Array.cons firstEdge rest
+      pathsFromEdgeSet :: Set Edge -> Maybe (Tuple (Array Edge) (Array Edge))
+      pathsFromEdgeSet edgeSet = do
+        source <- sourceNodeId edgeSet
+        let
+          pathA = pathFromSource source edgeSet
+          pathB = pathFromSource source (foldr Set.delete edgeSet pathA)
+        pure $ Tuple pathA pathB
 
 
 ------

@@ -15,7 +15,7 @@ import Data.String (codePointFromChar, fromCodePointArray)
 import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..))
 import Data.UUID as UUID
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, Mapping, MappingId, Megagraph, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation(..), emptyGraph, emptyMapping, freshEdge, freshNode, updateEdge, updateNode)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, Graph, GraphEdgeSpacePoint2D(..), GraphId, Mapping, MappingId, Megagraph, Node, NodeMappingEdge, PageEdgeSpacePoint2D(..), PathEquation, emptyGraph, emptyMapping, freshEdge, freshNode, freshPathEquation, updateEdge, updateNode)
 import MegagraphStateUpdate (MegagraphStateUpdate(..))
 import Record (merge)
 import Test.QuickCheck (class Arbitrary, arbitrary)
@@ -253,7 +253,8 @@ pathEquationGen :: Graph -> Gen PathEquation
 pathEquationGen graph = do
   pathA <- chooseEdges graph
   pathB <- chooseEdges graph
-  pure $ PathEquation (_.id <$> pathA) (_.id <$> pathB)
+  id <- genHackyUUID
+  pure $ (freshPathEquation id graph.id) {pathA = _.id <$> pathA, pathB = _.id <$> pathB}
 
 choosePathEquation :: Graph -> Maybe (Gen PathEquation)
 choosePathEquation graph =
@@ -263,16 +264,9 @@ choosePathEquation graph =
         map NonEmptyArray.toNonEmpty <<< NonEmptyArray.fromArray <<< Array.fromFoldable
 
 equationOperationGen :: Graph -> Gen (Maybe MegagraphStateUpdate)
-equationOperationGen graph =
-  oneOf $ NonEmpty
-    ( do
-        pathEquations <- arrayOf $ pathEquationGen graph
-        pure $ Just $ InsertPathEquations graph.id pathEquations )
-    [ sequence do
-        genPathEquation <- choosePathEquation graph
-        pure do
-          pathEquations <- arrayOf genPathEquation
-          pure $ DeletePathEquations graph.id pathEquations ]
+equationOperationGen graph = do
+  pathEquation <- pathEquationGen graph
+  pure $ Just $ UpdatePathEquation (pathEquation {deleted = not pathEquation.deleted}) pathEquation
 
 mappingOperationGen :: Mapping -> Graph -> Graph -> Gen (Maybe MegagraphStateUpdate)
 mappingOperationGen mapping sourceGraph targetGraph =

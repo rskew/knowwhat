@@ -3,10 +3,10 @@
     - object_relationships:
       - name: edge
         using:
-          foreign_key_constraint_on: targetEdge
-      - name: edgeBySourceedge
-        using:
           foreign_key_constraint_on: sourceEdge
+      - name: edgeByTargetedge
+        using:
+          foreign_key_constraint_on: targetEdge
       - name: mapping
         using:
           foreign_key_constraint_on: mappingId
@@ -28,16 +28,23 @@
             table:
               name: edgeMappingEdges
               schema: public
+      - name: pathEquations
+        using:
+          foreign_key_constraint_on:
+            column: edgeId
+            table:
+              name: pathEquations
+              schema: public
       object_relationships:
       - name: graph
         using:
           foreign_key_constraint_on: graphId
       - name: node
         using:
-          foreign_key_constraint_on: target
-      - name: nodeBySource
-        using:
           foreign_key_constraint_on: source
+      - name: nodeByTarget
+        using:
+          foreign_key_constraint_on: target
       table:
         name: edges
         schema: public
@@ -77,6 +84,13 @@
             table:
               name: nodes
               schema: public
+      - name: pathEquations
+        using:
+          foreign_key_constraint_on:
+            column: graphId
+            table:
+              name: pathEquations
+              schema: public
       table:
         name: graphs
         schema: public
@@ -98,10 +112,10 @@
       object_relationships:
       - name: graph
         using:
-          foreign_key_constraint_on: targetGraph
-      - name: graphBySourcegraph
-        using:
           foreign_key_constraint_on: sourceGraph
+      - name: graphByTargetgraph
+        using:
+          foreign_key_constraint_on: targetGraph
       table:
         name: mappings
         schema: public
@@ -111,10 +125,10 @@
           foreign_key_constraint_on: mappingId
       - name: node
         using:
-          foreign_key_constraint_on: targetNode
-      - name: nodeBySourcenode
-        using:
           foreign_key_constraint_on: sourceNode
+      - name: nodeByTargetnode
+        using:
+          foreign_key_constraint_on: targetNode
       table:
         name: nodeMappingEdges
         schema: public
@@ -150,12 +164,22 @@
       object_relationships:
       - name: graph
         using:
+          foreign_key_constraint_on: graphId
+      - name: graphBySubgraph
+        using:
           foreign_key_constraint_on: subgraph
-      - name: graphByGraphid
+      table:
+        name: nodes
+        schema: public
+    - object_relationships:
+      - name: edge
+        using:
+          foreign_key_constraint_on: edgeId
+      - name: graph
         using:
           foreign_key_constraint_on: graphId
       table:
-        name: nodes
+        name: pathEquations
         schema: public
     version: 2
   type: replace_metadata

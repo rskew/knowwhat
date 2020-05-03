@@ -18,8 +18,7 @@ data MegagraphStateUpdate
   | UpdateEdgeMappingEdges (Array EdgeMappingEdge) (Array EdgeMappingEdge)
   | CreateGraph GraphId String
   | CreateMapping MappingId GraphId GraphId String
-  | InsertPathEquations GraphId (Array PathEquation)
-  | DeletePathEquations GraphId (Array PathEquation)
+  | UpdatePathEquation     PathEquation            PathEquation
   | MegagraphStateUpdateNoOp
 
 data MegagraphComponent
@@ -51,8 +50,7 @@ megagraphStateUpdateElementIds = case _ of
   UpdateEdgeMappingEdges _ edgeMappingEdges -> _.id <$> edgeMappingEdges
   CreateGraph graphId _ -> [graphId]
   CreateMapping mappingId _ _ _ -> [mappingId]
-  InsertPathEquations graphId _ -> [graphId]
-  DeletePathEquations graphId _ -> [graphId]
+  UpdatePathEquation _ pathEquation -> [pathEquation.graphId]
   MegagraphStateUpdateNoOp -> []
 
 derive instance genericMegagraphStateUpdate :: Generic MegagraphStateUpdate _
@@ -68,8 +66,7 @@ invertMegagraphStateUpdate = case _ of
   UpdateTitle graphId from to -> UpdateTitle graphId to from
   UpdateNodeMappingEdges from to -> UpdateNodeMappingEdges to from
   UpdateEdgeMappingEdges from to -> UpdateEdgeMappingEdges to from
-  InsertPathEquations graphId pathEquations -> DeletePathEquations graphId pathEquations
-  DeletePathEquations graphId pathEquations -> InsertPathEquations graphId pathEquations
+  UpdatePathEquation from to -> UpdatePathEquation to from
   CreateGraph _ _ -> MegagraphStateUpdateNoOp
   CreateMapping _ _ _ _ -> MegagraphStateUpdateNoOp
   MegagraphStateUpdateNoOp -> MegagraphStateUpdateNoOp
@@ -85,10 +82,8 @@ instance showMegagraphStateUpdate :: Show MegagraphStateUpdate where
       "UpdateEdges from: " <> show from <> " to: " <> show to
     UpdateTitle graphId from to ->
       "UpdateTitle for graph " <> show graphId <> " from " <> from <> " to: " <> to
-    InsertPathEquations graphId pathEquations ->
-      "InsertPathEquations " <> show graphId <> show pathEquations
-    DeletePathEquations graphId pathEquations ->
-      "DeletePathEquations " <> show graphId <> show pathEquations
+    UpdatePathEquation from to ->
+      "UpdatePathEquation from: " <> show from <> " to: " <> show to
     UpdateNodeMappingEdges from to ->
       "UpdateNodeMappingEdges from: " <> show from <> " to: " <> show to
     UpdateEdgeMappingEdges from to ->
@@ -113,9 +108,9 @@ encodeEdgesAsMegagraphStateUpdates graphId edges =
   in
     [UpdateEdges deletedEdges edges]
 
-encodePathEquationsAsMegagraphStateUpdates :: GraphId -> Array PathEquation -> Array MegagraphStateUpdate
-encodePathEquationsAsMegagraphStateUpdates graphId pathEquations =
-  [InsertPathEquations graphId pathEquations]
+encodePathEquationAsMegagraphStateUpdates :: PathEquation -> Array MegagraphStateUpdate
+encodePathEquationAsMegagraphStateUpdates pathEquation =
+  [UpdatePathEquation (pathEquation {deleted = not pathEquation.deleted}) pathEquation]
 
 encodeGraphAsMegagraphStateUpdates :: Graph -> Array MegagraphStateUpdate
 encodeGraphAsMegagraphStateUpdates graph =
@@ -123,7 +118,7 @@ encodeGraphAsMegagraphStateUpdates graph =
     createOp = [CreateGraph graph.id graph.title.text]
     nodeOps = encodeNodesAsMegagraphStateUpdates graph.id (Array.fromFoldable $ Map.values graph.nodes)
     edgeOps = encodeEdgesAsMegagraphStateUpdates graph.id (edgeArray graph)
-    pathEquationOps = encodePathEquationsAsMegagraphStateUpdates graph.id $ Array.fromFoldable graph.pathEquations
+    pathEquationOps = Array.concat $ encodePathEquationAsMegagraphStateUpdates <$> Array.fromFoldable graph.pathEquations
   in
     createOp <> nodeOps <> edgeOps <> pathEquationOps
 

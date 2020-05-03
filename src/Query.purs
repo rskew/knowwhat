@@ -3,11 +3,13 @@ module Query where
 import Prelude
 
 import Data.Array as Array
+import Data.Array.NonEmpty (head, toArray)
 import Data.Lens ((.~))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.NonEmpty as NonEmpty
+import Data.Set as Set
 import Data.String as String
 import Data.Tuple (Tuple(..))
 import Data.UUID (UUID)
@@ -15,13 +17,28 @@ import Data.UUID as UUID
 import Foreign (F, Foreign, ForeignError(..), fail)
 import Foreign.Generic (decode)
 import HasuraQuery (class RowListEncodeJSON, GraphQLMutation, GraphQLQuery(..), upsertOperation)
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMappingEdgeRow, EdgeRow, Graph, GraphId, Mapping, MappingId, Node, NodeId, NodeMappingEdge, NodeMappingEdgeRow, NodeRow, _nodes, _text, _title, batchInsertEdges, emptyGraph)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMappingEdgeRow, EdgeRow, Graph, GraphId, Mapping, MappingId, Node, NodeId, NodeMappingEdge, NodeMappingEdgeRow, NodeRow, PathEquation, PathEquationId, _nodes, _text, _title, batchInsertEdges, edgeSetToPathEquation, emptyGraph)
 import Record.Extra (class Keys)
 import Type.Prelude (class RowToList, RProxy(..), SProxy(..))
 
 type GraphRow
   = ( id :: GraphId
     , title :: String
+    )
+
+-- | Since we can't create tables on the fly easily with Hasura,
+-- | store all edges in all equations in one ginormous table
+-- | with each row corresponding to a single edge in a single
+-- | equation.
+-- | The two paths can be reconstructed from the set of edges,
+-- | so it's fine to just associate the edges with the equation ID
+-- | and not the path they're from.
+type PathEquationRow
+  = ( pathEquationId :: PathEquationId
+    , graphId :: GraphId
+    , edgeId :: EdgeId
+    , deleted :: Boolean
+    , id :: String
     )
 
 type MappingRow
@@ -35,6 +52,7 @@ type MegagraphSchema
   = ( graphs :: Record GraphRow
     , nodes :: Node
     , edges :: Edge
+    , pathEquations :: Record PathEquationRow
     , mappings :: Record MappingRow
     , nodeMappingEdges :: NodeMappingEdge
     , edgeMappingEdges :: EdgeMappingEdge
@@ -106,6 +124,26 @@ renderEdgeMappingEdgeUpsertQuery ::
   -> GraphQLMutation MegagraphSchema
 renderEdgeMappingEdgeUpsertQuery edgeMappingEdges = upsertOperation (SProxy :: SProxy "edgeMappingEdges") edgeMappingEdges
 
+renderPathEquationUpsertQuery ::
+  forall pathEquationRowL.
+  RowToList PathEquationRow pathEquationRowL
+  => Keys pathEquationRowL
+  => RowListEncodeJSON PathEquationRow pathEquationRowL
+  => PathEquation
+  -> GraphQLMutation MegagraphSchema
+renderPathEquationUpsertQuery pathEquation =
+  upsertOperation (SProxy :: SProxy "pathEquations") $ pathEquationToRows pathEquation
+
+pathEquationToRows :: PathEquation -> Array (Record PathEquationRow)
+pathEquationToRows pathEquation =
+  (pathEquation.pathA <> pathEquation.pathB)
+  <#> \edgeId -> { graphId: pathEquation.graphId
+                 , pathEquationId: pathEquation.id
+                 , edgeId: edgeId
+                 , deleted: pathEquation.deleted
+                 , id: UUID.toString pathEquation.id <> "_" <> UUID.toString edgeId
+                 }
+
 
 ------
 -- Queries
@@ -145,6 +183,13 @@ graphFetchQuery graphId presentGraphIds =
       \    text\
       \    isValid\
       \    deleted\
+      \  }\
+      \  pathEquations {\
+      \    pathEquationId\
+      \    graphId\
+      \    edgeId\
+      \    deleted\
+      \    id\
       \  }\
       \}\
       \mappings (where: {_or: [\
@@ -187,6 +232,7 @@ type GraphFetchResponse
       , title :: String
       , nodes :: Array (Record NodeRow)
       , edges :: Array (Record EdgeRow)
+      , pathEquations :: Array (Record PathEquationRow)
       }
     , mappings :: Array
       { id :: MappingId
@@ -225,11 +271,27 @@ parseGraphFetchResponse response =
       Just graphData ->
         let
           nodes = Map.fromFoldable (map (\row -> Tuple row.id row) graphData.nodes)
+          graph' = emptyGraph graphData.id
+                   # _nodes .~ nodes
+                   # _title <<< _text .~ graphData.title
+                   # batchInsertEdges graphData.edges
+          pathEquationEdgeIdSets = graphData.pathEquations
+                                   # Array.sortBy (comparing _.pathEquationId)
+                                   # Array.groupBy (\a b -> a.pathEquationId == b.pathEquationId)
+          pathEquations = pathEquationEdgeIdSets
+                          <#> (\pathEquationRows ->
+                                  let
+                                    pathEquationId = head pathEquationRows # _.pathEquationId
+                                    pathEquationEdgeIds = (toArray pathEquationRows) <#> _.edgeId
+                                    graphIdEdgeIdSet = Set.fromFoldable $ ((Tuple graph'.id) <$> pathEquationEdgeIds)
+                                  in
+                                    edgeSetToPathEquation graph' pathEquationId graphIdEdgeIdSet
+                                    <#> _{deleted = head pathEquationRows # _.deleted}
+                                    <#> \pathEquation -> Tuple pathEquationId pathEquation)
+                          # Array.catMaybes
+                          # Map.fromFoldable
         in
-          pure $ emptyGraph graphData.id
-               # _nodes .~ nodes
-               # _title <<< _text .~ graphData.title
-               # batchInsertEdges graphData.edges
+          pure $ graph' {pathEquations = pathEquations}
     let
       rawMappings = graphFetchResponse.mappings
       mappings = rawMappings <#> \rawMapping ->

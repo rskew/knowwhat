@@ -47,6 +47,13 @@ CREATE TABLE public.nodes (
     "isValid" boolean NOT NULL,
     deleted boolean NOT NULL
 );
+CREATE TABLE public."pathEquations" (
+    "pathEquationId" uuid NOT NULL,
+    "graphId" uuid NOT NULL,
+    deleted boolean NOT NULL,
+    id text NOT NULL,
+    "edgeId" uuid NOT NULL
+);
 ALTER TABLE ONLY public."edgeMappingEdges"
     ADD CONSTRAINT "edgeMappingEdges_pkey" PRIMARY KEY (id);
 ALTER TABLE ONLY public.edges
@@ -61,6 +68,8 @@ ALTER TABLE ONLY public."nodeMappingEdges"
     ADD CONSTRAINT "nodeMappingEdges_pkey" PRIMARY KEY (id);
 ALTER TABLE ONLY public.nodes
     ADD CONSTRAINT nodes_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public."pathEquations"
+    ADD CONSTRAINT "pathEquations_pkey" PRIMARY KEY (id);
 ALTER TABLE ONLY public."edgeMappingEdges"
     ADD CONSTRAINT "edgeMappingEdges_mappingId_fkey" FOREIGN KEY ("mappingId") REFERENCES public.mappings(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 ALTER TABLE ONLY public."edgeMappingEdges"
@@ -87,3 +96,7 @@ ALTER TABLE ONLY public.nodes
     ADD CONSTRAINT "nodes_graphId_fkey" FOREIGN KEY ("graphId") REFERENCES public.graphs(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 ALTER TABLE ONLY public.nodes
     ADD CONSTRAINT nodes_subgraph_fkey FOREIGN KEY (subgraph) REFERENCES public.graphs(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE ONLY public."pathEquations"
+    ADD CONSTRAINT "pathEquations_edgeId_fkey" FOREIGN KEY ("edgeId") REFERENCES public.edges(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE ONLY public."pathEquations"
+    ADD CONSTRAINT "pathEquations_graphId_fkey" FOREIGN KEY ("graphId") REFERENCES public.graphs(id) ON UPDATE RESTRICT ON DELETE RESTRICT;

@@ -2,7 +2,7 @@ module GraphComponent.HandleAction where
 
 import Prelude
 
-import AppState (Action(..), AppState, EdgeSourceElement(..), HistoryUpdate(..), HoveredElementId(..), Message, Query(..), Slots, TextFieldElement(..), _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _edgeTextField, _graphHistory, _history, _hoveredElements, _keyHoldState, _liveMegagraph, _mappingHistory, _megagraph, _megagraphHistory, _nodeTextField, _origin, _pane, _panes, _spaceDown, _titleTextField, _undone, _zoom, applyMegagraphStateUpdates, lookupMapping, updateHistory, updateUndone)
+import AppState (Action(..), AppState, EdgeSourceElement(..), HistoryUpdate(..), HoveredElementId(..), Message, Query(..), Slots, TextFieldElement(..), _controlDown, _drawingEdgePosition, _drawingEdgeTargetGraph, _drawingEdges, _edgeTextField, _graphHistory, _history, _hoveredElements, _keyHoldState, _liveMegagraph, _mappingHistory, _megagraph, _megagraphHistory, _nodeTextField, _origin, _pane, _panes, _selectedEdges, _spaceDown, _titleTextField, _undone, _zoom, applyMegagraphStateUpdates, lookupMapping, updateHistory, updateUndone)
 import Config as Config
 import ContentEditable.SVGComponent as SVGContentEditable
 import Control.Alt ((<|>))
@@ -19,7 +19,7 @@ import Data.Maybe (Maybe(..), isJust)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Traversable (for_)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.UUID (genUUID)
 import Data.UUID as UUID
 import Effect (Effect)
@@ -35,7 +35,7 @@ import Halogen.Query.EventSource as ES
 import LiveMegagraph (MegagraphMutation(..), invertMegagraphMutation)
 import LiveMegagraph as LiveMegagraph
 import Math as Math
-import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), MappingId, _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MappingId, MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, edgeSetToPathEquation, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates)
 import UI.Constants (pendingIndicatorHeightPx, selfEdgeInitialAngle, selfEdgeInitialRadius, zoomScaling)
 import UI.Panes (arrangePanes, paneContainingPoint, rescaleWindow, zoomAtPoint)
@@ -812,10 +812,13 @@ handleAction = case _ of
       Just {head, tail} -> redoOp head (MappingComponent mappingId)
 
   RemovePane graphId -> do
+    -- Remove graph and any mappings incident on graph
     H.modify_ $ _megagraph %~
       (_graphs %~ Map.delete graphId)
       >>>
       (_mappings %~ Map.filter (not <<< mappingTouchesGraph))
+    -- Remove graph and mappings in 'LiveMegagraph' which handles the state replication
+    -- with the backend
     void $ H.query _liveMegagraph unit $ H.tell $ LiveMegagraph.Drop (GraphComponent graphId)
     state <- H.get
     for_ state.megagraph.mappings \mapping ->
@@ -828,6 +831,19 @@ handleAction = case _ of
     state' <- H.get
     for_ (state'.megagraphHistory.mappingHistory # Map.keys) (\mappingId ->
       H.modify_ $ _megagraphHistory <<< _mappingHistory <<< at mappingId .~ Nothing)
+    -- Remove hovered elements from graph being removed
+    for_ state'.hoveredElements \hoveredElementId -> case hoveredElementId of
+      NodeHaloId graphId' _ ->
+        if graphId' == graphId then handleAction (UnHover hoveredElementId) else pure unit
+      NodeBorderId graphId' _ ->
+        if graphId' == graphId then handleAction (UnHover hoveredElementId) else pure unit
+      EdgeHaloId megagraphComponent _ ->
+        case megagraphComponent of
+          GraphComponent graphId' ->
+            if graphId' == graphId then handleAction (UnHover hoveredElementId) else pure unit
+          _ -> pure unit
+      EdgeBorderId megagraphComponent _ ->
+        pure unit
     H.modify_ arrangePanes
       where
         mappingTouchesGraph mapping =
@@ -962,7 +978,7 @@ loadGraph graphId = void $ H.query _liveMegagraph unit $ H.tell
 
 loadGraphWithTitle :: String -> H.HalogenM AppState Action Slots Message Aff Unit
 loadGraphWithTitle title = void $ H.query _liveMegagraph unit $ H.tell
-                    $ LiveMegagraph.LoadGraphWithTitle title {onFail: ConsoleLog, onSuccess: DoNothing}
+                           $ LiveMegagraph.LoadGraphWithTitle title {onFail: ConsoleLog, onSuccess: DoNothing}
 
 
 ------
@@ -970,173 +986,229 @@ loadGraphWithTitle title = void $ H.query _liveMegagraph unit $ H.tell
 
 handleKeyup :: KE.KeyboardEvent -> H.HalogenM AppState Action Slots Message Aff Unit
 handleKeyup keyboardEvent =
-      case KE.key keyboardEvent of
-        "Control" -> do
-          state <- H.get
-          H.modify_ $ _keyHoldState <<< _controlDown .~ false
+  case KE.key keyboardEvent of
+    "Control" -> do
+      state <- H.get
+      H.modify_ $ _keyHoldState <<< _controlDown .~ false
 
-        " " -> do
-          state <- H.get
-          H.modify_ $ _keyHoldState <<< _spaceDown .~ false
+    " " -> do
+      state <- H.get
+      H.modify_ $ _keyHoldState <<< _spaceDown .~ false
 
-        _ -> pure unit
+    _ -> pure unit
 
 handleKeypress :: KE.KeyboardEvent -> H.HalogenM AppState Action Slots Message Aff Unit
 handleKeypress keyboardEvent = do
-      H.liftEffect $ Console.log $ "Keypress: " <> show (KE.key keyboardEvent)
-      case KE.key keyboardEvent of
-        "Control" -> do
+  H.liftEffect $ Console.log $ "Keypress: " <> show (KE.key keyboardEvent)
+  case KE.key keyboardEvent of
+    "Control" -> do
+      H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+      H.modify_ $ _keyHoldState <<< _controlDown .~ true
+      state <- H.get
+      if state.keyHoldState.spaceDown
+      then handleAction BlurFocusedTextField
+      else pure unit
+
+    " " -> do
+      H.modify_ $ _keyHoldState <<< _spaceDown .~ true
+      state <- H.get
+      if state.keyHoldState.controlDown
+      then handleAction BlurFocusedTextField
+      else pure unit
+
+    -- Undo
+    "z" -> do
+      state <- H.get
+      if isJust state.textFocused || not state.keyHoldState.controlDown
+      then pure unit
+      else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        case state.focusedPane of
+          Nothing -> pure unit
+          Just megagraphElement -> handleAction $ Undo megagraphElement
+
+    -- Redo
+    "y" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown then pure unit else do
+        H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
+        case state.focusedPane of
+          Nothing -> pure unit
+          Just megagraphElement -> handleAction $ Redo megagraphElement
+
+    "l" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown then pure unit else do
+        if not state.keyHoldState.spaceDown
+        then do
+          -- Load saved graph from local JSON file
           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-          H.modify_ $ _keyHoldState <<< _controlDown .~ true
-          state <- H.get
-          if state.keyHoldState.spaceDown
-          then handleAction BlurFocusedTextField
-          else pure unit
+          H.liftEffect loadFile
+        -- Link focused node to Subgraph with same title as node text.
+        else do
+          H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          case state.focus of
+            Just (NodeElement graphId nodeId) -> do
+              handleAction $ UpdateNodeSubgraph graphId nodeId
+            _ -> pure unit
 
-        " " -> do
-          H.modify_ $ _keyHoldState <<< _spaceDown .~ true
-          state <- H.get
-          if state.keyHoldState.controlDown
-          then handleAction BlurFocusedTextField
-          else pure unit
+    -- {ctrl} Save the current graph to a local file
+    -- {ctrl+space} Connect the focused node to an existing graph which has
+    --              the node text as its title.
+    "s" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown
+      then pure unit
+      else
+         if not state.keyHoldState.spaceDown
+         -- Save current graph to local JSON file
+         then do
+           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+           H.liftEffect $ Console.log "Saving current graphs to file"
+           handleAction $ SaveLocalFile
+         -- Select the current focused edge for the selected edge set
+         else do
+           H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+           case state.focus of
+             Just (EdgeElement graphId edgeId) ->
+               if Set.member (Tuple graphId edgeId) state.selectedEdges
+               then
+                 H.modify_ $ _selectedEdges %~ Set.delete (Tuple graphId edgeId)
+               else
+                 H.modify_ $ _selectedEdges %~ Set.insert (Tuple graphId edgeId)
+             _ -> pure unit
 
-        -- Undo
-        "z" -> do
-          state <- H.get
-          if isJust state.textFocused || not state.keyHoldState.controlDown
-          then pure unit
-          else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            case state.focusedPane of
+    "o" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        if not state.keyHoldState.spaceDown
+        then do
+          -- Return to graph origin and reset zoom
+          handleAction CenterGraphOriginAndZoom
+        else
+          -- Open subgraph in new pane
+          case state.focus of
+            Just (NodeElement graphId nodeId) ->
+              case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
+                Nothing -> pure unit
+                Just subgraphId -> loadGraph subgraphId
+            _ -> pure unit
+
+    -- Delete node/edge currently in focus
+    "Delete" -> do
+      state <- H.get
+      case state.focusedPane of
+        Nothing -> pure unit
+        Just graphId -> handleAction DeleteFocus
+
+    -- Unfocus
+    "Escape" -> do
+      state <- H.get
+      for_ (Map.keys state.megagraph.graphs) (\graphId -> do
+        handleAction $ UpdateFocus Nothing
+        handleAction $ UpdateContentEditableText graphId)
+      H.modify_ $ _selectedEdges .~ Set.empty
+
+    -- Close pane
+    "c" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
+        unit <$ runMaybeT do
+          lift $ H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+          focusedElement <- MaybeT $ pure $ state.focusedPane
+          case focusedElement of
+            GraphComponent graphId -> lift $ handleAction $ RemovePane graphId
+            _ -> pure unit
+
+    -- new Graph
+    "g" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        newGraphId <- H.liftEffect genUUID
+        let megagraphMutation = StateUpdate [CreateGraph newGraphId (UUID.toString newGraphId)]
+        applyMegagraphMutation_ megagraphMutation
+        H.modify_ arrangePanes
+
+    -- jump Down into the subgraph of the focused node
+    "d" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        case state.focus of
+          Just (NodeElement graphId nodeId) ->
+            case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
               Nothing -> pure unit
-              Just megagraphElement -> handleAction $ Undo megagraphElement
+              Just subgraphId -> do
+                loadGraph subgraphId
+                handleAction $ RemovePane graphId
+          _ -> pure unit
 
-        -- Redo
-        "y" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown then pure unit else do
-            H.liftEffect $ WE.preventDefault  $ KE.toEvent keyboardEvent
-            case state.focusedPane of
+    -- Jump Up to the graphs that have nodes that point to the current graph
+    -- as a subgraph.
+    "u" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        case state.focusedPane of
+          Just (GraphComponent graphId) -> do
+            maybeNodesWithSubgraph <- H.query _liveMegagraph unit $ H.request
+                                      $ LiveMegagraph.NodesWithSubgraph graphId {onFail: ConsoleLog, onSuccess: DoNothing}
+            case maybeNodesWithSubgraph of
               Nothing -> pure unit
-              Just megagraphElement -> handleAction $ Redo megagraphElement
+              Just nodesWithSubgraph -> do
+                for_ nodesWithSubgraph \node -> loadGraph node.graphId
+                handleAction $ RemovePane graphId
+          _ -> pure unit
 
-        "l" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            -- Load saved graph from local JSON file
-            H.liftEffect loadFile
+    -- load Home graph
+    "h" -> do
+      state <- H.get
+      if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        loadGraphWithTitle Config.homeGraphTitle
 
-        -- {ctrl} Save the current graph to a local file
-        -- {ctrl+space} Connect the focused node to an existing graph which has
-        --              the node text as its title.
-        "s" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown
-          then pure unit
-          else
-             if not state.keyHoldState.spaceDown
-             -- Save current graph to local JSON file
-             then do
-               H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-               H.liftEffect $ Console.log "Saving current graphs to file"
-               handleAction $ SaveLocalFile
-             -- Connect focused node to Subgraph with same title as node text.
-             else do
-               H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-               case state.focus of
-                 Just (NodeElement graphId nodeId) -> do
-                   handleAction $ UpdateNodeSubgraph graphId nodeId
-                 _ -> pure unit
-
-        "o" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            if not state.keyHoldState.spaceDown
-            then do
-              -- Return to graph origin and reset zoom
-              handleAction CenterGraphOriginAndZoom
-            else
-              -- Open subgraph in new pane
-              case state.focus of
-                Just (NodeElement graphId nodeId) ->
-                  case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
-                    Nothing -> pure unit
-                    Just subgraphId -> loadGraph subgraphId
-                _ -> pure unit
-
-        -- Delete node/edge currently in focus
-        "Delete" -> do
-          state <- H.get
-          case state.focusedPane of
-            Nothing -> pure unit
-            Just graphId -> handleAction DeleteFocus
-
-        -- Unfocus
-        "Escape" -> do
-          state <- H.get
-          for_ (Map.keys state.megagraph.graphs) (\graphId -> do
-            handleAction $ UpdateFocus Nothing
-            handleAction $ UpdateContentEditableText graphId)
-
-        -- Close pane
-        "c" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else
-            unit <$ runMaybeT do
-              lift $ H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-              focusedElement <- MaybeT $ pure $ state.focusedPane
-              case focusedElement of
-                GraphComponent graphId -> lift $ handleAction $ RemovePane graphId
-                _ -> pure unit
-
-        -- new Graph
-        "g" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            newGraphId <- H.liftEffect genUUID
-            let megagraphMutation = StateUpdate [CreateGraph newGraphId (UUID.toString newGraphId)]
-            applyMegagraphMutation_ megagraphMutation
-            H.modify_ arrangePanes
-
-        -- jump Down into the subgraph of the focused node
-        "d" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            case state.focus of
-              Just (NodeElement graphId nodeId) ->
-                case state.megagraph ^? _graph graphId <<< _node nodeId <<< _subgraph <<< traversed of
+    -- create path Equation
+    "e" -> do
+      state <- H.get
+      if not (state.keyHoldState.controlDown && state.keyHoldState.spaceDown) then pure unit else do
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+        -- Check that the selectedEdges set forms a valid path equation
+        case Set.findMin state.selectedEdges <#> fst
+             >>= flip Map.lookup state.megagraph.graphs
+        of
+          Nothing -> pure unit
+          Just graph -> do
+            case graph.pathEquations
+                 # Map.filter (\pathEquation' ->
+                                  not pathEquation'.deleted
+                                  && Set.fromFoldable (pathEquation'.pathA <> pathEquation'.pathB) == Set.map snd state.selectedEdges)
+                 # Map.values >>> List.head
+            of
+              Just selectedEquation ->
+                let
+                  op = StateUpdate [UpdatePathEquation selectedEquation (selectedEquation {deleted = not selectedEquation.deleted})]
+                in do
+                  applyMegagraphMutation_ op
+                  H.modify_ $ updateHistory (Insert op) (GraphComponent graph.id)
+                  H.modify_ $ _selectedEdges .~ Set.empty
+              Nothing -> do
+                newId <- H.liftEffect $ UUID.genUUID
+                case edgeSetToPathEquation graph newId state.selectedEdges of
                   Nothing -> pure unit
-                  Just subgraphId -> do
-                    loadGraph subgraphId
-                    handleAction $ RemovePane graphId
-              _ -> pure unit
+                  Just newPathEquation ->
+                    let
+                      op = StateUpdate [UpdatePathEquation (newPathEquation {deleted = true}) newPathEquation]
+                    in do
+                      applyMegagraphMutation_ op
+                      H.modify_ $ updateHistory (Insert op) (GraphComponent graph.id)
+                      H.modify_ $ _selectedEdges .~ Set.empty
 
-        -- Jump Up to the graphs that have nodes that point to the current graph
-        -- as a subgraph.
-        "u" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            case state.focusedPane of
-              Just (GraphComponent graphId) -> do
-                maybeNodesWithSubgraph <- H.query _liveMegagraph unit $ H.request
-                                          $ LiveMegagraph.NodesWithSubgraph graphId {onFail: ConsoleLog, onSuccess: DoNothing}
-                case maybeNodesWithSubgraph of
-                  Nothing -> pure unit
-                  Just nodesWithSubgraph -> do
-                    for_ nodesWithSubgraph \node -> loadGraph node.graphId
-                    handleAction $ RemovePane graphId
-              _ -> pure unit
+    -- don't refresh page if space is down (common mistake to hit 'r' and cause refresh)
+    "r" -> do
+      state <- H.get
+      if not (state.keyHoldState.controlDown && state.keyHoldState.spaceDown) then pure unit else
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
 
-        -- load home graph
-        "h" -> do
-          state <- H.get
-          if not state.keyHoldState.controlDown || not state.keyHoldState.spaceDown then pure unit else do
-            H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
-            loadGraphWithTitle Config.homeGraphTitle
-
-        _ -> pure unit
+    _ -> pure unit
