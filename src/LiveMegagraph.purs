@@ -14,7 +14,7 @@ import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.Either (Either(..), either)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Lens', (.~), (%~), (?~))
+import Data.Lens (Lens', (.~), (%~), (?~), (^?))
 import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.List.Types (toList)
@@ -33,13 +33,14 @@ import Effect.Console as Console
 import Foreign (Foreign, F, MultipleErrors, readString, renderForeignError, typeOf, unsafeFromForeign)
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (decode, decodeJSON, genericEncode, genericDecode, defaultOptions, encodeJSON)
+import FunctorialDataMigration.Core.SignatureMapping (mappingIsWellFormed)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
 import Halogen.Query.EventSource as ES
 import HasuraQuery (GraphQLQuery, GraphQLWebsocketResponse, renderMutation, renderQuery)
 import Interpreter (interpretMegagraphStateUpdate, megagraphUpdateToQuery)
-import Megagraph (GraphId, Megagraph, Node, NodeId, _graph, _graphs, _isValid, _mappings, _node, _title, emptyMegagraph)
+import Megagraph (GraphId, Megagraph, Node, NodeId, _graph, _graphs, _isValid, _mapping, _mappings, _node, _title, emptyMegagraph, mappingToSignatureMapping)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeGraphAsMegagraphStateUpdates, encodeMappingAsMegagraphStateUpdates, invertMegagraphStateUpdates)
 import Query (MegagraphSchema, graphFetchQuery, graphIdWithTitleQuery, nodesWithSubgraphQuery, parseGraphFetchResponse, parseGraphIdWithTitleResponse, parseGraphUpsertResponse, parseNodeUpsertResponse, parseNodesWithSubgraphResponse)
 import Web.Event.Event as EE
@@ -189,7 +190,7 @@ handleAction = case _ of
   InterpretStateUpdates megagraphStateUpdates -> do
     for_ megagraphStateUpdates \op ->
       H.modify_ $ _megagraph %~ interpretMegagraphStateUpdate op
-    -- tell parent
+    -- Tell parent
     state <- H.get
     H.raise $ MegagraphUpdated state.megagraph
 
@@ -361,6 +362,17 @@ handleQuery = case _ of
             encodeMappingAsMegagraphStateUpdates mapping
         in do
           handleAction $ InterpretStateUpdates $ graphOp <> mappingUpdates
+          -- Check validity of mappings
+          state' <- H.get
+          for_ (state'.megagraph.mappings) \mapping ->
+            case state'.megagraph ^? _graph mapping.sourceGraph, state'.megagraph ^? _graph mapping.targetGraph of
+              Just sourceGraph, Just targetGraph -> do
+                let mappingIsValid = mappingIsWellFormed $ mappingToSignatureMapping mapping sourceGraph targetGraph
+                H.modify_ $ _megagraph <<< _mapping mapping.id <<< _isValid .~ mappingIsValid
+              _, _ ->
+                pure unit
+          state'' <- H.get
+          H.raise $ MegagraphUpdated state''.megagraph
           handleAction $ RaiseParentAction onSuccess
 
   LoadGraphWithTitle title {onFail, onSuccess} a -> Just a <$ do

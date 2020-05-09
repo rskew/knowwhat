@@ -16,14 +16,17 @@ import Effect.Aff (launchAff_)
 import Effect.Class (liftEffect)
 import Foreign (renderForeignError)
 import Foreign.Generic (encodeJSON, decodeJSON)
+import FunctorialDataMigration.Core.Examples as FDM
 import Gen (TestMegagraph(..), TestMegagraphWithOp(..))
 import Interpreter (interpretMegagraphStateUpdate)
-import Megagraph (edgeArray, emptyMegagraph, _graph, _node, _edge)
+import Megagraph (Graph, Mapping, _edge, _graph, _node, edgeArray, emptyGraph, emptyMapping, emptyMegagraph, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPathEquation, insertEdge, insertNode, mappingToSignatureMapping, updateEdgeMappingEdge, updateNodeMappingEdge, updatePathEquation)
 import MegagraphStateUpdate (MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates, invertMegagraphStateUpdates)
+import Test.Assert (assert)
 import Test.QuickCheck (Result(..), quickCheck', (===), (<?>))
-import Test.Spec (it, describe)
+import Test.Spec (describe, it)
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (runSpec)
+import Unsafe.Coerce (unsafeCoerce)
 
 prop_RemoveInsertNode :: TestMegagraph -> Result
 prop_RemoveInsertNode (TestMegagraph megagraph) =
@@ -101,6 +104,80 @@ prop_EncodeDecode (TestMegagraph megagraph) =
 n :: Int
 n = 100
 
+freeSquare :: Graph
+freeSquare =
+  let
+    freeSquareId = unsafeCoerce "freeSquare"
+    nodeA = freshNode freeSquareId $ unsafeCoerce "a"
+    nodeB = freshNode freeSquareId $ unsafeCoerce "b"
+    nodeC = freshNode freeSquareId $ unsafeCoerce "c"
+    nodeD = freshNode freeSquareId $ unsafeCoerce "d"
+    edgeAB = freshEdge {id: unsafeCoerce "ab", graphId: freeSquareId, source: unsafeCoerce "a", target: unsafeCoerce "b"}
+    edgeAC = freshEdge {id: unsafeCoerce "ac", graphId: freeSquareId, source: unsafeCoerce "a", target: unsafeCoerce "c"}
+    edgeBD = freshEdge {id: unsafeCoerce "bd", graphId: freeSquareId, source: unsafeCoerce "b", target: unsafeCoerce "d"}
+    edgeCD = freshEdge {id: unsafeCoerce "cd", graphId: freeSquareId, source: unsafeCoerce "c", target: unsafeCoerce "d"}
+  in
+    emptyGraph freeSquareId
+    # insertNode nodeA
+    # insertNode nodeB
+    # insertNode nodeC
+    # insertNode nodeD
+    # insertEdge edgeAB
+    # insertEdge edgeAC
+    # insertEdge edgeBD
+    # insertEdge edgeCD
+
+commutativeSquare :: Graph
+commutativeSquare =
+  let
+    commSquareId = unsafeCoerce "commSquare"
+    nodeA' = freshNode commSquareId $ unsafeCoerce "a'"
+    nodeB' = freshNode commSquareId $ unsafeCoerce "b'"
+    nodeC' = freshNode commSquareId $ unsafeCoerce "c'"
+    nodeD' = freshNode commSquareId $ unsafeCoerce "d'"
+    edgeA'B' = freshEdge {id: unsafeCoerce "a'b'", graphId: commSquareId, source: unsafeCoerce "a'", target: unsafeCoerce "b'"}
+    edgeA'C' = freshEdge {id: unsafeCoerce "a'c'", graphId: commSquareId, source: unsafeCoerce "a'", target: unsafeCoerce "c'"}
+    edgeB'D' = freshEdge {id: unsafeCoerce "b'd'", graphId: commSquareId, source: unsafeCoerce "b'", target: unsafeCoerce "d'"}
+    edgeC'D' = freshEdge {id: unsafeCoerce "c'd'", graphId: commSquareId, source: unsafeCoerce "c'", target: unsafeCoerce "d'"}
+    equation = freshPathEquation (unsafeCoerce "it commutes!") commSquareId
+               # _{ pathA = [unsafeCoerce "a'b'", unsafeCoerce "b'd'"]
+                  , pathB = [unsafeCoerce "a'c'", unsafeCoerce "c'd'"]
+                  }
+  in
+    emptyGraph commSquareId
+    # insertNode nodeA'
+    # insertNode nodeB'
+    # insertNode nodeC'
+    # insertNode nodeD'
+    # insertEdge edgeA'B'
+    # insertEdge edgeA'C'
+    # insertEdge edgeB'D'
+    # insertEdge edgeC'D'
+    # updatePathEquation equation
+
+commToFreeSquareMapping :: Mapping
+commToFreeSquareMapping =
+  let
+    mappingId = unsafeCoerce "mapping"
+    mappingEdgeA'A = freshNodeMappingEdge (unsafeCoerce "a'a") mappingId (unsafeCoerce "a'") (unsafeCoerce "a")
+    mappingEdgeB'B = freshNodeMappingEdge (unsafeCoerce "b'b") mappingId (unsafeCoerce "b'") (unsafeCoerce "b")
+    mappingEdgeC'C = freshNodeMappingEdge (unsafeCoerce "c'c") mappingId (unsafeCoerce "c'") (unsafeCoerce "c")
+    mappingEdgeD'D = freshNodeMappingEdge (unsafeCoerce "d'd") mappingId (unsafeCoerce "d'") (unsafeCoerce "d")
+    mappingEdgeA'B'AB = freshEdgeMappingEdge (unsafeCoerce "a'b'ab") mappingId (unsafeCoerce "a'b'") (unsafeCoerce "ab")
+    mappingEdgeA'C'AC = freshEdgeMappingEdge (unsafeCoerce "a'c'ac") mappingId (unsafeCoerce "a'c'") (unsafeCoerce "ac")
+    mappingEdgeB'D'BD = freshEdgeMappingEdge (unsafeCoerce "b'd'bd") mappingId (unsafeCoerce "b'd'") (unsafeCoerce "bd")
+    mappingEdgeC'D'CD = freshEdgeMappingEdge (unsafeCoerce "c'd'cd") mappingId (unsafeCoerce "c'd'") (unsafeCoerce "cd")
+  in
+    emptyMapping mappingId (unsafeCoerce "commSquare") (unsafeCoerce "freeSquare")
+    # updateNodeMappingEdge mappingEdgeA'A
+    # updateNodeMappingEdge mappingEdgeB'B
+    # updateNodeMappingEdge mappingEdgeC'C
+    # updateNodeMappingEdge mappingEdgeD'D
+    # updateEdgeMappingEdge mappingEdgeA'B'AB
+    # updateEdgeMappingEdge mappingEdgeA'C'AC
+    # updateEdgeMappingEdge mappingEdgeB'D'BD
+    # updateEdgeMappingEdge mappingEdgeC'D'CD
+
 main :: Effect Unit
 main =
   launchAff_ do
@@ -116,3 +193,6 @@ main =
           liftEffect $ quickCheck' n prop_MegagraphOperationsMaintainEdgeValidity
         it "Invariant to encoding then decoding megagraph as MegagraphUpdate JSON" do
           liftEffect $ quickCheck' n prop_EncodeDecode
+      describe "Mapping validation" do
+        it "Commutative Square to FreeSquare Mapping is correctly converted into a SignatureMapping" do
+          liftEffect $ assert $ mappingToSignatureMapping commToFreeSquareMapping commutativeSquare freeSquare == FDM.commToFreeMapping

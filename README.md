@@ -18,12 +18,14 @@ The interface is under development. The best way to find out what commands are s
 
 ## Development
 
-For development, bring up the backend with `docker-compose`. In stead of the nginx fileserver container with the built-in version of the frontend, run a local devserver for your modified frontend with [parcel](https://parceljs.org/).
+For development, bring up the backend with `docker-compose`. Run a local devserver for your modified frontend with [parcel](https://parceljs.org/).
 
 We use [spago](https://github.com/spacchetti/spago) to manage our Purescript dependencies.
 While this is installed as a `dev-dependency` in `package.json` you may want to install it directly to make it easier to manage these dependencies directly.
 
-After running `spago test` to compile the purescript to javascript, run `parcel assets/index.html --no-hmr` to build the front-end and run a dev server you can point your browser at. 
+After running `spago test` to compile the purescript to javascript, run `parcel assets/index.html` to build the front-end and run a dev server you can point your browser at.
+
+Parcel's hot-loading doesn't gel with the Halogen app, so you'll have to manually reload the browser tab after changing the code.
 
 
 ## License

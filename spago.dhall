@@ -31,6 +31,7 @@ You can edit this file as you like.
     , "uuid"
     , "web-socket"
     , "web-uievents"
+    , "functorial-data-migration-core"
     ]
 , packages =
     ./packages.dhall

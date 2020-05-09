@@ -18,7 +18,7 @@ services:
       - ${PWD}/deployment/db_data:/var/lib/postgresql/data
 
   graphql-engine:
-    image: hasura/graphql-engine:v1.2.0.cli-migrations
+    image: hasura/graphql-engine:v1.2.1.cli-migrations
     ports:
       - "8086:8080"
     depends_on:

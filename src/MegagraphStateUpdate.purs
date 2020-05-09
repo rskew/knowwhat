@@ -18,6 +18,7 @@ data MegagraphStateUpdate
   | UpdateEdgeMappingEdges (Array EdgeMappingEdge) (Array EdgeMappingEdge)
   | CreateGraph GraphId String
   | CreateMapping MappingId GraphId GraphId String
+  | UpdateMappingValidity MappingId Boolean
   | UpdatePathEquation     PathEquation            PathEquation
   | MegagraphStateUpdateNoOp
 
@@ -50,6 +51,7 @@ megagraphStateUpdateElementIds = case _ of
   UpdateEdgeMappingEdges _ edgeMappingEdges -> _.id <$> edgeMappingEdges
   CreateGraph graphId _ -> [graphId]
   CreateMapping mappingId _ _ _ -> [mappingId]
+  UpdateMappingValidity mappingId _ -> [mappingId]
   UpdatePathEquation _ pathEquation -> [pathEquation.graphId]
   MegagraphStateUpdateNoOp -> []
 
@@ -69,6 +71,7 @@ invertMegagraphStateUpdate = case _ of
   UpdatePathEquation from to -> UpdatePathEquation to from
   CreateGraph _ _ -> MegagraphStateUpdateNoOp
   CreateMapping _ _ _ _ -> MegagraphStateUpdateNoOp
+  UpdateMappingValidity mappingId isValid -> UpdateMappingValidity mappingId (not isValid)
   MegagraphStateUpdateNoOp -> MegagraphStateUpdateNoOp
 
 invertMegagraphStateUpdates :: Array MegagraphStateUpdate -> Array MegagraphStateUpdate
@@ -92,6 +95,8 @@ instance showMegagraphStateUpdate :: Show MegagraphStateUpdate where
       "CreateGraph " <> show graphId <> " with title: " <> title
     CreateMapping mappingId from to title ->
       "CreateMapping " <> title <> " " <> show mappingId <> " from: " <> show from <> " to: " <> show to
+    UpdateMappingValidity mappingId isValid ->
+      "UpdateMappingValidity " <> show mappingId <> " " <> show isValid
     MegagraphStateUpdateNoOp -> "MegagraphStateUpdateNoOp"
 
 encodeNodesAsMegagraphStateUpdates :: GraphId -> Array Node -> Array MegagraphStateUpdate

@@ -277,6 +277,13 @@ foreignObject {
 .edgeBorder.invalid {
     stroke: var(--invalid-color);
     stroke-width: 25px;
+    opacity: 0.5;
+}
+
+.edgeBorder.invalid.focused {
+    stroke: var(--invalid-color);
+    stroke-width: 25px;
+    opacity: 0.5;
 }
 
 .edgeBorder.pending {

@@ -7,7 +7,7 @@ import Data.Foldable (foldl, foldr)
 import Data.Lens ((%~), (.~), (?~))
 import Data.Lens.At (at)
 import HasuraQuery (GraphQLMutation, emptyMutation)
-import Megagraph (Megagraph, _graph, _graphs, _mapping, _mappings, _text, _title, emptyGraph, emptyMapping, updateEdge, updateEdgeMappingEdge, updateNode, updateNodeMappingEdge, updatePathEquation, updateTitle)
+import Megagraph (Megagraph, _graph, _graphs, _isValid, _mapping, _mappings, _text, _title, emptyGraph, emptyMapping, updateEdge, updateEdgeMappingEdge, updateNode, updateNodeMappingEdge, updatePathEquation, updateTitle)
 import MegagraphStateUpdate (MegagraphStateUpdate(..))
 import Query (MegagraphSchema, renderEdgeMappingEdgeUpsertQuery, renderEdgeUpsertQuery, renderGraphUpsertQuery, renderMappingUpsertQuery, renderNodeMappingEdgeUpsertQuery, renderNodeUpsertQuery, renderPathEquationUpsertQuery)
 
@@ -31,6 +31,8 @@ interpretMegagraphStateUpdate = case _ of
       newMapping = emptyMapping mappingId from to # _title .~ title
     in
       _mappings <<< at mappingId ?~ newMapping
+  UpdateMappingValidity mappingId isValid ->
+    _mapping mappingId <<< _isValid .~ isValid
   MegagraphStateUpdateNoOp -> identity
 
 
@@ -49,6 +51,7 @@ megagraphOperationToGraphMutation =
     CreateGraph graphId title -> renderGraphUpsertQuery [{id: graphId, title: title}]
     CreateMapping mappingId from to title ->
       renderMappingUpsertQuery [{id: mappingId, sourceGraph: from, targetGraph: to, title: title}]
+    UpdateMappingValidity _ _ -> emptyMutation
     MegagraphStateUpdateNoOp -> emptyMutation
 
 megagraphUpdateToQuery :: Array MegagraphStateUpdate -> GraphQLMutation MegagraphSchema

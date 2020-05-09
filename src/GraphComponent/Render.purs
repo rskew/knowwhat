@@ -181,6 +181,7 @@ renderNodeMappingEdge state renderPane mapping nodeMappingEdge = do
         then Just "hovered"
         else Nothing
       , if focused then Just "focused" else Nothing
+      , if not mapping.isValid then Just "invalid" else Nothing
       ]
     targetHasSubgraph =
       isJust $ state.megagraph ^? _graph mapping.targetGraph <<< _node nodeMappingEdge.targetNode <<< _subgraph <<< traversed
@@ -249,6 +250,7 @@ renderEdgeMappingEdge state renderPane mapping edgeMappingEdge = do
         then Just "hovered"
         else Nothing
       , if focused then Just "focused" else Nothing
+      , if not mapping.isValid then Just "invalid" else Nothing
       ]
     markerRef = "url(#arrow-to-edge)"
     targetHasSubgraph = false

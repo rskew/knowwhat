@@ -7,6 +7,7 @@ module Megagraph where
 import Prelude
 
 import Data.Array as Array
+import Data.Array.NonEmpty (NonEmptyArray, head, length)
 import Data.Foldable (all, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
@@ -15,7 +16,7 @@ import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
@@ -24,8 +25,12 @@ import Data.UUID (UUID)
 import Data.UUID as UUID
 import Foreign.Class (class Encode, class Decode)
 import Foreign.Generic (genericEncode, genericDecode, defaultOptions)
+import FunctorialDataMigration.Core.Signature (Signature, sortPath)
+import FunctorialDataMigration.Core.Signature as FDM
+import FunctorialDataMigration.Core.SignatureMapping (SignatureMapping)
 import Math as Math
 import Record.Builder as Builder
+import StringRewriting.KnuthBendix (Equation(..))
 import Test.QuickCheck (class Arbitrary)
 import Web.HTML.HTMLElement as WHE
 
@@ -357,6 +362,7 @@ type Mapping
     , targetGraph :: GraphId
     , nodeMappingEdges :: Map EdgeId NodeMappingEdge
     , edgeMappingEdges :: Map EdgeId EdgeMappingEdge
+    , isValid :: Boolean
     }
 
 emptyMapping :: MappingId -> GraphId -> GraphId -> Mapping
@@ -367,6 +373,7 @@ emptyMapping id sourceId targetId
     , targetGraph : targetId
     , nodeMappingEdges : Map.empty
     , edgeMappingEdges : Map.empty
+    , isValid : true
     }
 
 -- | A megagraph is a collection of graphs and mappings between graphs
@@ -622,7 +629,7 @@ edgeSetIsValidPathEquation graph graphIdEdgeIdSet =
 edgeSetToPathEquation :: Graph -> PathEquationId -> Set (Tuple GraphId EdgeId) -> Maybe PathEquation
 edgeSetToPathEquation graph id graphIdEdgeIdSet =
   if not edgeSetIsValidPathEquation graph graphIdEdgeIdSet then Nothing else do
-    Tuple pathA pathB <- pathsFromEdgeSet edges
+    Tuple pathA pathB <- pathPairFromEdgeSet edges
     graphId <- _.graphId <$> Set.findMin edges
     pure $ (freshPathEquation id graphId) {pathA = _.id <$> pathA, pathB = _.id <$> pathB}
     where
@@ -642,13 +649,92 @@ edgeSetToPathEquation graph id graphIdEdgeIdSet =
               rest = pathFromSource firstEdge.target edgeSet
             in
               Array.cons firstEdge rest
-      pathsFromEdgeSet :: Set Edge -> Maybe (Tuple (Array Edge) (Array Edge))
-      pathsFromEdgeSet edgeSet = do
+      pathPairFromEdgeSet :: Set Edge -> Maybe (Tuple (Array Edge) (Array Edge))
+      pathPairFromEdgeSet edgeSet = do
         source <- sourceNodeId edgeSet
         let
           pathA = pathFromSource source edgeSet
           pathB = pathFromSource source (foldr Set.delete edgeSet pathA)
         pure $ Tuple pathA pathB
+
+
+------
+-- Conversion to Functorial Data Migration representations
+
+nodeToFDMNode :: Node -> FDM.Node
+nodeToFDMNode node = UUID.toString node.id
+
+edgeToFDMEdge :: Edge -> FDM.Edge
+edgeToFDMEdge edge = {source: UUID.toString edge.source, target: UUID.toString edge.target}
+
+pathEquationToFDMEquation :: Graph -> PathEquation -> Equation FDM.Edge
+pathEquationToFDMEquation graph pathEquation =
+  let
+    pathToFDMEdgeArray = Array.catMaybes <<< map (flip lookupEdgeById graph >>> map edgeToFDMEdge)
+  in
+    Equation (pathToFDMEdgeArray pathEquation.pathA) (pathToFDMEdgeArray pathEquation.pathB)
+
+graphToSignature :: Graph -> Signature
+graphToSignature graph
+  = { nodes: graph.nodes
+             # Map.filter (not <<< _.deleted)
+             <#> nodeToFDMNode
+             # Map.values # Set.fromFoldable
+    , edges: graph.edges
+             # Map.filter (not <<< _.deleted)
+             <#> edgeToFDMEdge
+             # Map.values # Set.fromFoldable
+    , pathEquations: graph.pathEquations
+                     # Map.filter (not <<< _.deleted)
+                     <#> pathEquationToFDMEquation graph
+                     # Map.values # Set.fromFoldable
+    }
+
+nodeMappingEdgeToFDMPair :: NodeMappingEdge -> Tuple FDM.Node FDM.Node
+nodeMappingEdgeToFDMPair nodeMappingEdge =
+  Tuple (UUID.toString nodeMappingEdge.sourceNode) (UUID.toString nodeMappingEdge.targetNode)
+
+edgeMappingEdgesWithCommonSourceToFDMPair :: Graph -> Graph -> NonEmptyArray EdgeMappingEdge -> Maybe (Tuple FDM.Edge FDM.Path)
+edgeMappingEdgesWithCommonSourceToFDMPair sourceGraph targetGraph edgeMappingEdgeGroup = do
+  sourceFDMEdge <- head edgeMappingEdgeGroup
+                   # _.sourceEdge
+                   # flip lookupEdgeById sourceGraph
+                   <#> edgeToFDMEdge
+  targetFDMPath <- edgeMappingEdgeGroup
+                   # Set.fromFoldable
+                   # Set.mapMaybe (_.targetEdge >>> flip lookupEdgeById targetGraph)
+                   # Set.map edgeToFDMEdge
+                   # sortPath
+  if Array.length targetFDMPath == length edgeMappingEdgeGroup
+  then
+    pure $ Tuple sourceFDMEdge targetFDMPath
+  else Nothing
+
+mappingToSignatureMapping :: Mapping -> Graph -> Graph -> SignatureMapping
+mappingToSignatureMapping mapping sourceGraph targetGraph =
+  let
+    nodeMappingFunction = mapping.nodeMappingEdges
+                          # Map.filter (not <<< _.deleted)
+                          # Map.filter (_.sourceNode >>> flip Map.lookup sourceGraph.nodes >>> map (not <<< _.deleted) >>> fromMaybe true)
+                          # Map.filter (_.targetNode >>> flip Map.lookup targetGraph.nodes >>> map (not <<< _.deleted) >>> fromMaybe true)
+                          <#> nodeMappingEdgeToFDMPair
+                          # Map.values # Set.fromFoldable
+    edgeMappingFunction = mapping.edgeMappingEdges
+                          # Map.filter (not <<< _.deleted)
+                          # Map.values # Array.fromFoldable
+                          # Array.filter (_.sourceEdge >>> flip Map.lookup sourceGraph.edges >>> map (not <<< _.deleted) >>> fromMaybe true)
+                          # Array.filter (_.targetEdge >>> flip Map.lookup targetGraph.edges >>> map (not <<< _.deleted) >>> fromMaybe true)
+                          # Array.sortBy (comparing _.sourceEdge)
+                          # Array.groupBy (\eA eB -> eA.sourceEdge == eB.sourceEdge)
+                          <#> edgeMappingEdgesWithCommonSourceToFDMPair sourceGraph targetGraph
+                          # Array.catMaybes
+                          # Set.fromFoldable
+  in
+    { source: graphToSignature sourceGraph
+    , target: graphToSignature targetGraph
+    , nodeFunction: nodeMappingFunction
+    , edgeFunction: edgeMappingFunction
+    }
 
 
 ------

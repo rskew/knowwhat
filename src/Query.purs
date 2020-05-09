@@ -18,6 +18,7 @@ import Foreign (F, Foreign, ForeignError(..), fail)
 import Foreign.Generic (decode)
 import HasuraQuery (class RowListEncodeJSON, GraphQLMutation, GraphQLQuery(..), upsertOperation)
 import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMappingEdgeRow, EdgeRow, Graph, GraphId, Mapping, MappingId, Node, NodeId, NodeMappingEdge, NodeMappingEdgeRow, NodeRow, PathEquation, PathEquationId, _nodes, _text, _title, batchInsertEdges, edgeSetToPathEquation, emptyGraph)
+import Record as Record
 import Record.Extra (class Keys)
 import Type.Prelude (class RowToList, RProxy(..), SProxy(..))
 
@@ -298,6 +299,7 @@ parseGraphFetchResponse response =
         rawMapping { nodeMappingEdges = elementArrayToMap rawMapping.nodeMappingEdges
                    , edgeMappingEdges = elementArrayToMap rawMapping.edgeMappingEdges
                    }
+                   # Record.insert (SProxy :: SProxy "isValid") true
     pure $ { graph : graph
            , mappings : mappings
            }

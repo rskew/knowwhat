@@ -15,7 +15,7 @@ import Data.Lens (traversed, (%~), (.~), (^..), (^?), (?~))
 import Data.Lens.At (at)
 import Data.List as List
 import Data.Map as Map
-import Data.Maybe (Maybe(..), isJust)
+import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Set as Set
 import Data.String (joinWith)
 import Data.Traversable (for_)
@@ -28,6 +28,7 @@ import Effect.Console as Console
 import Foreign (F, renderForeignError)
 import Foreign as Foreign
 import Foreign.Generic (encodeJSON, decodeJSON)
+import FunctorialDataMigration.Core.SignatureMapping (mappingIsWellFormed)
 import GraphComponent.Utils (mouseEventPosition, updatedNodes)
 import Halogen as H
 import Halogen.Component.Utils.Drag as Drag
@@ -35,11 +36,10 @@ import Halogen.Query.EventSource as ES
 import LiveMegagraph (MegagraphMutation(..), invertMegagraphMutation)
 import LiveMegagraph as LiveMegagraph
 import Math as Math
-import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MappingId, MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, edgeSetToPathEquation, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
+import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MappingId, MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _pathEquations, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, edgeSetToPathEquation, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, mappingToSignatureMapping, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates)
 import UI.Constants (pendingIndicatorHeightPx, selfEdgeInitialAngle, selfEdgeInitialRadius, zoomScaling)
 import UI.Panes (arrangePanes, paneContainingPoint, rescaleWindow, zoomAtPoint)
-import Utils (tupleApply)
 import Web.Event.Event as WE
 import Web.Event.EventTarget as ET
 import Web.File.File as File
@@ -580,6 +580,11 @@ handleAction = case _ of
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UpdateFocus $ Just $ NodeElement pane.graphId newNodeId
+    -- Update validity of mappings
+    let mappingsTouchingGraph = state.megagraph.mappings
+                                # Map.filter (\mapping -> mapping.sourceGraph == pane.graphId
+                                                       || mapping.targetGraph == pane.graphId)
+    for_ (mappingsTouchingGraph # Map.values) (handleAction <<< CheckMappingValidity <<< _.id)
 
   AppDeleteNode node -> do
     state <- H.get
@@ -591,13 +596,6 @@ handleAction = case _ of
             edgeArray graph
             # Array.filter (\edge ->
                              edge.source == node.id || edge.target == node.id)
-          --nodeMappingEdgesTouchingNode =
-          --  state.megagraph.mappings
-          --  # Map.values # Array.fromFoldable
-          --  # Array.concatMap (\mapping -> mapping.nodeMappingEdges
-          --                                 # Map.values # Array.fromFoldable)
-          --  # Array.filter (\edge ->
-          --                   edge.sourceNode == node.id || edge.targetNode == node.id)
           focus = case Array.head edgesTouchingNode of
             Just edge ->
               case edge.source == node.id, edge.target == node.id of
@@ -606,8 +604,6 @@ handleAction = case _ of
                 _, _ -> Nothing
             Nothing -> Nothing
         in do
-          --for_ edgesTouchingNode $ handleAction <<< AppDeleteEdge
-          --for_ nodeMappingEdgesTouchingNode $ handleAction <<< AppDeleteNodeMappingEdge
           let
             op = StateUpdate $ [ UpdateNodes [node] [node {deleted = true}]
                                , UpdateEdges edgesTouchingNode (edgesTouchingNode <#> _{deleted = true})
@@ -615,11 +611,14 @@ handleAction = case _ of
             target = GraphComponent node.graphId
           applyMegagraphMutation_ op
           H.modify_ $ updateHistory (Insert op) target
-          --handleAction $ UnHover $ NodeBorderId node.graphId node.id
-          --handleAction $ UnHover $ NodeHaloId node.graphId node.id
           -- UnHover everything
           H.modify_ $ _hoveredElements .~ Set.empty
           handleAction $ UpdateFocus focus
+          -- Update validity of mappings
+          let mappingsTouchingGraph = state.megagraph.mappings
+                                      # Map.filter (\mapping -> mapping.sourceGraph == node.graphId
+                                                             || mapping.targetGraph == node.graphId)
+          for_ (mappingsTouchingGraph # Map.values) (handleAction <<< CheckMappingValidity <<< _.id)
 
   AppCreateEdge edgeMetadata ->
     let
@@ -633,6 +632,12 @@ handleAction = case _ of
       applyMegagraphMutation_ op
       H.modify_ $ updateHistory (Insert op) target
       handleAction $ UpdateFocus $ Just $ EdgeElement edgeMetadata.graphId edgeMetadata.id
+      -- Update validity of mappings
+      state <- H.get
+      let mappingsTouchingGraph = state.megagraph.mappings
+                                  # Map.filter (\mapping -> mapping.sourceGraph == edgeMetadata.graphId
+                                                         || mapping.targetGraph == edgeMetadata.graphId)
+      for_ (mappingsTouchingGraph # Map.values) (handleAction <<< CheckMappingValidity <<< _.id)
 
   AppDeleteEdge edge -> do
     state <- H.get
@@ -644,14 +649,24 @@ handleAction = case _ of
                                        # Map.values # Array.fromFoldable)
         # Array.filter (\edge' ->
                          edge'.sourceEdge == edge.id || edge'.targetEdge == edge.id)
-      op = StateUpdate [UpdateEdges [edge] [edge {deleted = true}]]
+      equationsUsingEdge =
+        (state.megagraph ^? _graph edge.graphId <<< _pathEquations)
+        # fromMaybe Map.empty
+        # Map.filter (\eq -> Array.elem edge.id (eq.pathA <> eq.pathB))
+        # Map.values # Array.fromFoldable
+      op = StateUpdate $ [ UpdateEdges [edge] [edge {deleted = true}]
+                         ] <> (equationsUsingEdge <#> \eq -> UpdatePathEquation eq (eq {deleted = true}))
       target = GraphComponent edge.graphId
-    -- for_ edgeMappingEdgesTouchingEdge $ handleAction <<< AppDeleteEdgeMappingEdge
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UnHover $ EdgeBorderId (GraphComponent edge.graphId) edge.id
     handleAction $ UnHover $ EdgeHaloId (GraphComponent edge.graphId) edge.id
     handleAction $ UpdateFocus $ Just $ NodeElement edge.graphId edge.source
+    -- Update validity of mappings
+    let mappingsTouchingGraph = state.megagraph.mappings
+                                # Map.filter (\mapping -> mapping.sourceGraph == edge.graphId
+                                                       || mapping.targetGraph == edge.graphId)
+    for_ (mappingsTouchingGraph # Map.values) (handleAction <<< CheckMappingValidity <<< _.id)
 
   AppCreateNodeMappingEdge edgeId sourceNodeId sourceGraphId targetNodeId targetGraphId -> do
     state <- H.get
@@ -663,6 +678,7 @@ handleAction = case _ of
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UpdateFocusPane target
+    handleAction $ CheckMappingValidity mappingId
 
   AppDeleteNodeMappingEdge nodeMappingEdge ->
     let
@@ -673,6 +689,7 @@ handleAction = case _ of
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UnHover $ EdgeBorderId target nodeMappingEdge.id
     handleAction $ UpdateFocusPane target
+    handleAction $ CheckMappingValidity nodeMappingEdge.mappingId
 
   AppCreateEdgeMappingEdge edgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId -> do
     state <- H.get
@@ -684,6 +701,7 @@ handleAction = case _ of
     applyMegagraphMutation_ op
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UpdateFocusPane target
+    handleAction $ CheckMappingValidity mappingId
 
   AppDeleteEdgeMappingEdge edgeMappingEdge ->
     let
@@ -694,6 +712,21 @@ handleAction = case _ of
     H.modify_ $ updateHistory (Insert op) target
     handleAction $ UnHover $ EdgeBorderId (MappingComponent edgeMappingEdge.mappingId) edgeMappingEdge.id
     handleAction $ UpdateFocusPane target
+    handleAction $ CheckMappingValidity edgeMappingEdge.mappingId
+
+  CheckMappingValidity mappingId -> do
+    state <- H.get
+    case state.megagraph ^? _mapping mappingId of
+      Nothing -> pure unit
+      Just mapping ->
+        case state.megagraph ^? _graph mapping.sourceGraph, state.megagraph ^? _graph mapping.targetGraph of
+          Just sourceGraph, Just targetGraph -> do
+            let mappingIsValid = mappingIsWellFormed (mappingToSignatureMapping mapping sourceGraph targetGraph)
+            applyMegagraphMutation_ $ StateUpdate [UpdateMappingValidity mapping.id mappingIsValid]
+            H.liftEffect $ Console.log $ "Updating mapping validity to: " <> show mappingIsValid
+            H.liftEffect $ Console.log $ show $ mappingToSignatureMapping mapping sourceGraph targetGraph
+            H.liftEffect $ Console.log $ show $ mapping.edgeMappingEdges
+          _, _ -> pure unit
 
   UpdateNodeSubgraph graphId nodeId -> do
     state <- H.get
@@ -928,7 +961,7 @@ applyReceivedMegagraphUpdate :: Array MegagraphStateUpdate -> H.HalogenM AppStat
 applyReceivedMegagraphUpdate op = do
   state <- H.get
   H.modify_ $ applyMegagraphStateUpdates op
-  for_ (updatedNodes op) (handleAction <<< tupleApply UpdateNodeContentEditableText)
+  for_ (updatedNodes op) (\(Tuple graphId nodeId) -> handleAction $ UpdateNodeContentEditableText graphId nodeId)
   H.modify_ arrangePanes
 
 undoOp :: MegagraphMutation -> MegagraphComponent -> H.HalogenM AppState Action Slots Message Aff Unit
@@ -1207,6 +1240,12 @@ handleKeypress keyboardEvent = do
 
     -- don't refresh page if space is down (common mistake to hit 'r' and cause refresh)
     "r" -> do
+      state <- H.get
+      if not (state.keyHoldState.controlDown && state.keyHoldState.spaceDown) then pure unit else
+        H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent
+
+    -- don't open a new window if space is down (common mistake to hit 'n' and cause refresh)
+    "n" -> do
       state <- H.get
       if not (state.keyHoldState.controlDown && state.keyHoldState.spaceDown) then pure unit else
         H.liftEffect $ WE.preventDefault $ KE.toEvent keyboardEvent

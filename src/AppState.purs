@@ -80,6 +80,7 @@ data Action
   | AppDeleteNodeMappingEdge NodeMappingEdge
   | AppCreateEdgeMappingEdge EdgeId EdgeId GraphId EdgeId GraphId
   | AppDeleteEdgeMappingEdge EdgeMappingEdge
+  | CheckMappingValidity MappingId
   | UpdateNodeSubgraph GraphId NodeId
   | UpdateFocus (Maybe MegagraphElement)
   | UpdateFocusPane MegagraphComponent

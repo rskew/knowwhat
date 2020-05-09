@@ -167,6 +167,42 @@ let additions =
       , version =
           "e5d74beef8b33aad9f9b0824950152c46ac2c7f1"
       }
+  , functorial-data-migration-core =
+      { dependencies =
+          [ "arrays"
+          , "assert"
+          , "console"
+          , "effect"
+          , "ordered-collections"
+          , "psci-support"
+          , "tuples"
+          , "uuid"
+          , "spec"
+          , "string-rewriting"
+          ]
+      , repo =
+          "https://github.com/rskew/purescript-functorial-data-migration-core.git"
+      , version =
+          "0.0.2"
+      }
+  , string-rewriting =
+      { dependencies =
+          [ "effect"
+          , "console"
+          , "psci-support"
+          , "maybe"
+          , "lists"
+          , "arrays"
+          , "assert"
+          , "exceptions"
+          , "strings"
+          , "ordered-collections"
+          ]
+      , repo =
+          "https://github.com/rskew/purescript-string-rewriting.git"
+      , version =
+          "0.0.1"
+      }
   }
 
 in  upstream // overrides // additions
