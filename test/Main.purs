@@ -19,7 +19,7 @@ import Foreign.Generic (encodeJSON, decodeJSON)
 import FunctorialDataMigration.Core.Examples as FDM
 import Gen (TestMegagraph(..), TestMegagraphWithOp(..))
 import Interpreter (interpretMegagraphStateUpdate)
-import Megagraph (Graph, Mapping, _edge, _graph, _node, edgeArray, emptyGraph, emptyMapping, emptyMegagraph, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPathEquation, insertEdge, insertNode, mappingToSignatureMapping, updateEdgeMappingEdge, updateNodeMappingEdge, updatePathEquation)
+import Megagraph (Graph, Mapping, _edge, _graph, _node, edgeArray, emptyGraph, emptyMapping, emptyMegagraph, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPathEquation, insertEdge, insertNode, mappingToSignatureMapping, removeDeleted, updateEdgeMappingEdge, updateNodeMappingEdge, updatePathEquation)
 import MegagraphStateUpdate (MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates, invertMegagraphStateUpdates)
 import Test.Assert (assert)
 import Test.QuickCheck (Result(..), quickCheck', (===), (<?>))
@@ -48,7 +48,7 @@ prop_MegagraphOperationsUndoable (TestMegagraphWithOp megagraph op) =
     doneMegagraph = foldl (flip interpretMegagraphStateUpdate) megagraph op
     undoneMegagraph = foldl (flip interpretMegagraphStateUpdate) doneMegagraph (invertMegagraphStateUpdates op)
   in
-    megagraph === undoneMegagraph
+    removeDeleted megagraph === removeDeleted undoneMegagraph
 
 prop_MegagraphOperationsMaintainEdgeValidity :: TestMegagraphWithOp -> Result
 prop_MegagraphOperationsMaintainEdgeValidity (TestMegagraphWithOp megagraph op) =

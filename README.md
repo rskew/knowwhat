@@ -25,7 +25,7 @@ While this is installed as a `dev-dependency` in `package.json` you may want to 
 
 After running `spago test` to compile the purescript to javascript, run `parcel assets/index.html` to build the front-end and run a dev server you can point your browser at.
 
-Parcel's hot-loading doesn't gel with the Halogen app, so you'll have to manually reload the browser tab after changing the code.
+Parcel's hot-loading doesn't gel with the Halogen app, so you'll have to manually reload the browser page after changing the code.
 
 
 ## License

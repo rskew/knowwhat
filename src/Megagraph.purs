@@ -763,3 +763,15 @@ edgeArray graph =
 lookupEdgeById :: EdgeId -> Graph -> Maybe Edge
 lookupEdgeById edgeId graph = do
   Map.lookup edgeId graph.edges
+
+removeDeleted :: Megagraph -> Megagraph
+removeDeleted =
+  (_graphs %~ map (_nodes %~ Map.filter (not <<< _.deleted)))
+  >>>
+  (_graphs %~ map (_edges %~ Map.filter (not <<< _.deleted)))
+  >>>
+  (_graphs %~ map (_pathEquations %~ Map.filter (not <<< _.deleted)))
+  >>>
+  (_mappings %~ map (_nodeMappingEdges %~ Map.filter (not <<< _.deleted)))
+  >>>
+  (_mappings %~ map (_edgeMappingEdges %~ Map.filter (not <<< _.deleted)))

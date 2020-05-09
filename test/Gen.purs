@@ -292,9 +292,11 @@ megagraphOperationGen megagraph =
     graphOpGen = runMaybeT do
       graph <- MaybeT $ traverse elements (nonEmptyValues megagraph.graphs)
       MaybeT $ graphOperationGen graph
-    -- TODO equationOperation
+    equationOpGen = runMaybeT do
+      graph <- MaybeT $ traverse elements (nonEmptyValues megagraph.graphs)
+      MaybeT $ equationOperationGen graph
   in
-    oneOf $ mappingOpGen :| [graphOpGen]
+    oneOf $ mappingOpGen :| [graphOpGen, equationOpGen]
 
 data TestMegagraphWithOp = TestMegagraphWithOp Megagraph (Array MegagraphStateUpdate)
 
