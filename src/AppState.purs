@@ -24,15 +24,15 @@ import Halogen.Component.Utils.Drag as Drag
 import Interpreter (interpretMegagraphStateUpdate)
 import LiveMegagraph (MegagraphMutation)
 import LiveMegagraph as LiveMegagraph
-import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, GraphEdgeSpacePoint2D, GraphId, GraphSpacePoint2D(..), Mapping, MappingId, Megagraph, MegagraphElement, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D, PageSpacePoint2D, Point2D, GraphView, emptyMegagraph)
+import Megagraph (Edge, EdgeId, EdgeMappingEdge, EdgeMetadata, GraphEdgeSpacePoint2D, GraphId, GraphSpacePoint2D(..), GraphView, Mapping, MappingId, Megagraph, MegagraphElement, Node, NodeId, NodeMappingEdge, PageEdgeSpacePoint2D, PageSpacePoint2D, Point2D, emptyMegagraph)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate)
 import Web.Event.Event as WE
 import Web.File.FileReader as FileReader
 import Web.HTML.HTMLElement as WHE
+import Web.Socket.WebSocket as WS
 import Web.UIEvent.KeyboardEvent as KE
 import Web.UIEvent.MouseEvent as ME
 import Web.UIEvent.WheelEvent as WhE
-import Web.Socket.WebSocket as WS
 
 appStateVersion :: String
 appStateVersion = "0.0.0.0.0.0.0.1"

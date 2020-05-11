@@ -10,7 +10,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Minor modifications by Rowan Skewes 2019
+Minor modifications by Rowan Skewes 2019, 2020
 -}
 
 module Halogen.Component.Utils.Drag
@@ -49,7 +49,7 @@ type DragData =
 
 data DragEvent
   = Move MouseEvent DragData
-  | Done MouseEvent
+  | Done MouseEvent DragData
 
 type PageCoord =
   { pageX ∷ Number
@@ -91,7 +91,7 @@ dragEventSource mouseEvent callback = ES.effectEventSource \emitter → do
 
   mouseUp <- eventListener \ev → do
     join $ Ref.read remover
-    ES.emit emitter $ callback $ Done (unsafeEventToMouseEvent ev)
+    ES.emit emitter $ callback $ Done (unsafeEventToMouseEvent ev) $ dragData ev
 
   let
     removeListeners ∷ Effect Unit

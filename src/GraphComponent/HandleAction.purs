@@ -38,7 +38,7 @@ import LiveMegagraph as LiveMegagraph
 import Math as Math
 import Megagraph (GraphEdgeSpacePoint2D(..), GraphId, GraphSpacePoint2D(..), MappingId, MegagraphElement(..), PageEdgeSpacePoint2D(..), PageSpacePoint2D(..), _edge, _edgeMappingEdge, _graph, _graphs, _isValid, _mapping, _mappings, _node, _nodeMappingEdge, _pathEquations, _position, _subgraph, _text, _title, edgeArray, edgeMidpoint, edgeSetToPathEquation, freshEdge, freshEdgeMappingEdge, freshNode, freshNodeMappingEdge, freshPane, graphEdgeSpaceToGraphSpace, graphSpaceToGraphEdgeSpace, graphSpaceToPageSpace, lookupEdgeById, mappingEdgeMidpoint, mappingToSignatureMapping, nodePosition, pageEdgeSpaceToPageSpace, pageSpaceToGraphSpace, pageSpaceToPageEdgeSpace)
 import MegagraphStateUpdate (MegagraphComponent(..), MegagraphStateUpdate(..), encodeMegagraphAsMegagraphStateUpdates)
-import UI.Constants (pendingIndicatorHeightPx, selfEdgeInitialAngle, selfEdgeInitialRadius, zoomScaling)
+import UI.Constants (minDrawingEdgeLengthForSelfEdge, pendingIndicatorHeightPx, selfEdgeInitialAngle, selfEdgeInitialRadius, zoomScaling)
 import UI.Panes (arrangePanes, paneContainingPoint, rescaleWindow, zoomAtPoint)
 import Web.Event.Event as WE
 import Web.Event.EventTarget as ET
@@ -283,7 +283,7 @@ handleAction = case _ of
           }
     H.modify_ $ _pane graphId <<< _origin .~ newGraphOrigin
 
-  BackgroundDragMove (Drag.Done _) _ _ subscriptionId ->
+  BackgroundDragMove (Drag.Done _ _) _ _ subscriptionId ->
     H.unsubscribe subscriptionId
 
   NodeDragStart graphId nodeId initialNodePos mouseEvent -> do
@@ -314,7 +314,7 @@ handleAction = case _ of
             in do
               applyMegagraphMutation_ op
 
-  NodeDragMove (Drag.Done _) graphId nodeId (GraphSpacePoint2D initialNodePos) subscriptionId -> do
+  NodeDragMove (Drag.Done _ _) graphId nodeId (GraphSpacePoint2D initialNodePos) subscriptionId -> do
     H.unsubscribe subscriptionId
     state <- H.get
     case state.megagraph ^? _graph graphId <<< _node nodeId of
@@ -362,7 +362,7 @@ handleAction = case _ of
       Nothing -> pure unit
       Just op -> applyMegagraphMutation_ op
 
-  NodeMappingEdgeDragMove (Drag.Done _) mapping nodeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
+  NodeMappingEdgeDragMove (Drag.Done _ _) mapping nodeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
     state <- H.get
     case state.megagraph ^? _mapping mapping.id <<< _nodeMappingEdge nodeMappingEdgeId of
@@ -420,7 +420,7 @@ handleAction = case _ of
       Nothing -> pure unit
       Just op -> applyMegagraphMutation_ op
 
-  EdgeMappingEdgeDragMove (Drag.Done _) mapping edgeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
+  EdgeMappingEdgeDragMove (Drag.Done _ _) mapping edgeMappingEdgeId (PageEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
     state <- H.get
     case state.megagraph ^? _mapping mapping.id <<< _edgeMappingEdge edgeMappingEdgeId of
@@ -467,7 +467,7 @@ handleAction = case _ of
       Nothing -> pure unit
       Just thingsToDo -> thingsToDo
 
-  EdgeDragMove (Drag.Done _) graphId edgeId (GraphEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
+  EdgeDragMove (Drag.Done _ _) graphId edgeId (GraphEdgeSpacePoint2D initialMidpoint) subscriptionId -> do
     H.unsubscribe subscriptionId
     state <- H.get
     case state.megagraph ^? _graph graphId <<< _edge edgeId of
@@ -537,34 +537,45 @@ handleAction = case _ of
   --   is dropped within the halo of a node from a different graph,
   -- - a new edgeMappingEdge if the source is an edge and the drawn edge
   --   is dropped within the halo of an edge from a different graph
-  EdgeDrawMove (Drag.Done _) graphId drawingEdgeId subscriptionId -> do
+  EdgeDrawMove (Drag.Done _ dragData) graphId drawingEdgeId subscriptionId -> do
     state <- H.get
     newEdgeId <- H.liftEffect UUID.genUUID
-    let
-      createEdgeBetweenNodes sourceNodeId sourceGraphId targetNodeId targetGraphId =
-        if sourceGraphId == targetGraphId
-        then handleAction $ AppCreateEdge {id: newEdgeId, graphId : sourceGraphId, source: sourceNodeId, target: targetNodeId}
-        else
-          handleAction $ AppCreateNodeMappingEdge newEdgeId sourceNodeId sourceGraphId targetNodeId targetGraphId
-      createEdgeBetweenEdges sourceEdgeId sourceGraphId targetEdgeId targetGraphId =
-        if sourceGraphId == targetGraphId
-        then pure unit
-        else
-          handleAction $ AppCreateEdgeMappingEdge newEdgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId
     case Map.lookup drawingEdgeId state.drawingEdges of
       Nothing -> pure unit
       Just drawingEdge ->
-        for_ state.hoveredElements \hoveredElementId ->
-          case drawingEdge.source, hoveredElementId of
-            NodeSource sourceNodeId, NodeHaloId targetGraphId targetNodeId ->
-              createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
-            NodeSource sourceNodeId, NodeBorderId targetGraphId targetNodeId ->
-              createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
-            EdgeSource sourceEdgeId, EdgeHaloId (GraphComponent targetGraphId) targetEdgeId ->
-              createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
-            EdgeSource sourceEdgeId, EdgeBorderId (GraphComponent targetGraphId) targetEdgeId ->
-              createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
-            _, _ -> pure unit
+        let
+          createEdgeBetweenNodes sourceNodeId sourceGraphId targetNodeId targetGraphId =
+            if sourceGraphId /= targetGraphId
+            then
+              handleAction $ AppCreateNodeMappingEdge newEdgeId sourceNodeId sourceGraphId targetNodeId targetGraphId
+            else
+              -- For self-edges, require the mouse has dragged at least a little bit
+              -- to avoid creating edges on click.
+              let
+                drawingEdgeLength = Math.sqrt (dragData.offsetX * dragData.offsetX + dragData.offsetY * dragData.offsetY)
+              in
+                if sourceNodeId == targetNodeId && drawingEdgeLength < minDrawingEdgeLengthForSelfEdge
+                then
+                  pure unit
+                else
+                  handleAction $ AppCreateEdge {id: newEdgeId, graphId : sourceGraphId, source: sourceNodeId, target: targetNodeId}
+          createEdgeBetweenEdges sourceEdgeId sourceGraphId targetEdgeId targetGraphId =
+            if sourceGraphId == targetGraphId
+            then pure unit
+            else
+              handleAction $ AppCreateEdgeMappingEdge newEdgeId sourceEdgeId sourceGraphId targetEdgeId targetGraphId
+        in
+          for_ state.hoveredElements \hoveredElementId ->
+            case drawingEdge.source, hoveredElementId of
+              NodeSource sourceNodeId, NodeHaloId targetGraphId targetNodeId ->
+                createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
+              NodeSource sourceNodeId, NodeBorderId targetGraphId targetNodeId ->
+                createEdgeBetweenNodes sourceNodeId drawingEdge.sourceGraph targetNodeId targetGraphId
+              EdgeSource sourceEdgeId, EdgeHaloId (GraphComponent targetGraphId) targetEdgeId ->
+                createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
+              EdgeSource sourceEdgeId, EdgeBorderId (GraphComponent targetGraphId) targetEdgeId ->
+                createEdgeBetweenEdges sourceEdgeId drawingEdge.sourceGraph targetEdgeId targetGraphId
+              _, _ -> pure unit
     -- Remove the drawing edge
     H.modify_ $ _{ drawingEdges = Map.delete drawingEdgeId state.drawingEdges }
     H.unsubscribe subscriptionId

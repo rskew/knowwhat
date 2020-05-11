@@ -64,3 +64,6 @@ selfEdgeInitialAngle = - Math.pi / 4.0
 
 selfEdgeInitialRadius :: Number
 selfEdgeInitialRadius = 120.0
+
+minDrawingEdgeLengthForSelfEdge :: Number
+minDrawingEdgeLengthForSelfEdge = 10.0
