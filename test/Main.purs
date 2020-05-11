@@ -112,6 +112,8 @@ freeSquare =
     nodeB = freshNode freeSquareId $ unsafeCoerce "b"
     nodeC = freshNode freeSquareId $ unsafeCoerce "c"
     nodeD = freshNode freeSquareId $ unsafeCoerce "d"
+    nodeDeleted = freshNode freeSquareId (unsafeCoerce "deleted")
+                  # _{deleted = true}
     edgeAB = freshEdge {id: unsafeCoerce "ab", graphId: freeSquareId, source: unsafeCoerce "a", target: unsafeCoerce "b"}
     edgeAC = freshEdge {id: unsafeCoerce "ac", graphId: freeSquareId, source: unsafeCoerce "a", target: unsafeCoerce "c"}
     edgeBD = freshEdge {id: unsafeCoerce "bd", graphId: freeSquareId, source: unsafeCoerce "b", target: unsafeCoerce "d"}
@@ -122,6 +124,7 @@ freeSquare =
     # insertNode nodeB
     # insertNode nodeC
     # insertNode nodeD
+    # insertNode nodeDeleted
     # insertEdge edgeAB
     # insertEdge edgeAC
     # insertEdge edgeBD
@@ -135,6 +138,8 @@ commutativeSquare =
     nodeB' = freshNode commSquareId $ unsafeCoerce "b'"
     nodeC' = freshNode commSquareId $ unsafeCoerce "c'"
     nodeD' = freshNode commSquareId $ unsafeCoerce "d'"
+    nodeDeleted' = freshNode commSquareId (unsafeCoerce "deleted'")
+                   # _{deleted = true}
     edgeA'B' = freshEdge {id: unsafeCoerce "a'b'", graphId: commSquareId, source: unsafeCoerce "a'", target: unsafeCoerce "b'"}
     edgeA'C' = freshEdge {id: unsafeCoerce "a'c'", graphId: commSquareId, source: unsafeCoerce "a'", target: unsafeCoerce "c'"}
     edgeB'D' = freshEdge {id: unsafeCoerce "b'd'", graphId: commSquareId, source: unsafeCoerce "b'", target: unsafeCoerce "d'"}
@@ -149,6 +154,7 @@ commutativeSquare =
     # insertNode nodeB'
     # insertNode nodeC'
     # insertNode nodeD'
+    # insertNode nodeDeleted'
     # insertEdge edgeA'B'
     # insertEdge edgeA'C'
     # insertEdge edgeB'D'

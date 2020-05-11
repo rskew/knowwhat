@@ -16,7 +16,7 @@ import Data.Lens.At (at)
 import Data.Lens.Record (prop)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Symbol (SProxy(..))
@@ -711,19 +711,16 @@ edgeMappingEdgesWithCommonSourceToFDMPair sourceGraph targetGraph edgeMappingEdg
   else Nothing
 
 mappingToSignatureMapping :: Mapping -> Graph -> Graph -> SignatureMapping
-mappingToSignatureMapping mapping sourceGraph targetGraph =
+mappingToSignatureMapping mapping' sourceGraph' targetGraph' =
   let
+    mapping = removeDeletedFromMapping mapping'
+    sourceGraph = removeDeletedFromGraph sourceGraph'
+    targetGraph = removeDeletedFromGraph targetGraph'
     nodeMappingFunction = mapping.nodeMappingEdges
-                          # Map.filter (not <<< _.deleted)
-                          # Map.filter (_.sourceNode >>> flip Map.lookup sourceGraph.nodes >>> map (not <<< _.deleted) >>> fromMaybe true)
-                          # Map.filter (_.targetNode >>> flip Map.lookup targetGraph.nodes >>> map (not <<< _.deleted) >>> fromMaybe true)
                           <#> nodeMappingEdgeToFDMPair
                           # Map.values # Set.fromFoldable
     edgeMappingFunction = mapping.edgeMappingEdges
-                          # Map.filter (not <<< _.deleted)
                           # Map.values # Array.fromFoldable
-                          # Array.filter (_.sourceEdge >>> flip Map.lookup sourceGraph.edges >>> map (not <<< _.deleted) >>> fromMaybe true)
-                          # Array.filter (_.targetEdge >>> flip Map.lookup targetGraph.edges >>> map (not <<< _.deleted) >>> fromMaybe true)
                           # Array.sortBy (comparing _.sourceEdge)
                           # Array.groupBy (\eA eB -> eA.sourceEdge == eB.sourceEdge)
                           <#> edgeMappingEdgesWithCommonSourceToFDMPair sourceGraph targetGraph
@@ -764,14 +761,22 @@ lookupEdgeById :: EdgeId -> Graph -> Maybe Edge
 lookupEdgeById edgeId graph = do
   Map.lookup edgeId graph.edges
 
+removeDeletedFromGraph :: Graph -> Graph
+removeDeletedFromGraph =
+  (_nodes %~ Map.filter (not <<< _.deleted))
+  >>>
+  (_edges %~ Map.filter (not <<< _.deleted))
+  >>>
+  (_pathEquations %~ Map.filter (not <<< _.deleted))
+
+removeDeletedFromMapping :: Mapping -> Mapping
+removeDeletedFromMapping =
+  (_nodeMappingEdges %~ Map.filter (not <<< _.deleted))
+  >>>
+  (_edgeMappingEdges %~ Map.filter (not <<< _.deleted))
+
 removeDeleted :: Megagraph -> Megagraph
 removeDeleted =
-  (_graphs %~ map (_nodes %~ Map.filter (not <<< _.deleted)))
+  (_graphs %~ map removeDeletedFromGraph)
   >>>
-  (_graphs %~ map (_edges %~ Map.filter (not <<< _.deleted)))
-  >>>
-  (_graphs %~ map (_pathEquations %~ Map.filter (not <<< _.deleted)))
-  >>>
-  (_mappings %~ map (_nodeMappingEdges %~ Map.filter (not <<< _.deleted)))
-  >>>
-  (_mappings %~ map (_edgeMappingEdges %~ Map.filter (not <<< _.deleted)))
+  (_mappings %~ map removeDeletedFromMapping)
