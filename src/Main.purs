@@ -11,15 +11,17 @@ import Halogen as H
 import Halogen.Aff as HA
 import Halogen.VDom.Driver (runUI)
 import Web.HTML (window)
-import Web.HTML.Window (innerWidth, innerHeight)
+import Web.HTML.Location as WHL
+import Web.HTML.Window (innerHeight, innerWidth, location)
 import Web.Socket.WebSocket as WS
 
 main :: Effect Unit
 main = do
-  connection <- WS.create Config.webSocketURL []
+  w <- H.liftEffect window
+  host <- H.liftEffect $ location w >>= WHL.hostname
+  connection <- WS.create (Config.webSocketURL host) []
   HA.runHalogenAff do
     body <- HA.awaitBody
-    w <- H.liftEffect window
     windowWidth <- H.liftEffect $ innerWidth w
     windowHeight <- H.liftEffect $ innerHeight w
     void $ runUI
